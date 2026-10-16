@@ -1,0 +1,430 @@
+import Foundation
+import Observation
+
+/// What closing a pane or tab ended up closing. Closing cascades upward:
+/// the last pane closes its tab, the last tab removes its tab group, and the
+/// last tab group closes the workspace's window (the workspace itself stays).
+public enum CloseResult: Equatable, Sendable {
+    /// Nothing matched the ID.
+    case notFound
+    /// A pane was removed; its tab remains.
+    case closedPane(PaneID, in: TabID)
+    /// A tab was removed; its tab group remains.
+    case closedTab(TabID, in: TabGroupID)
+    /// The tab group's last tab was closed, so the group was removed too.
+    case closedTabGroup(TabGroupID, in: WorkspaceID)
+    /// The workspace's last tab group was removed. The workspace stays in
+    /// the model with `window.isOpen == false`; its window should close.
+    case closedWindow(WorkspaceID)
+}
+
+/// The single owner of Armadale's state. Every mutation goes through an
+/// intent method here, which keeps all windows consistent and increments
+/// ``changeCount``; the app observes `changeCount` to schedule persistence.
+@MainActor
+@Observable
+public final class AppModel {
+    public private(set) var workspaces: [Workspace]
+    public private(set) var sessions: [Session]
+    public private(set) var hosts: [Host]
+    public private(set) var profiles: [Profile]
+
+    /// Incremented by every intent that changes persisted state.
+    public private(set) var changeCount = 0
+
+    /// Working directory for sessions created without an explicit one.
+    @ObservationIgnored public var defaultWorkingDirectory: String
+    /// Profile used when an intent does not name one.
+    @ObservationIgnored public var defaultProfileID: ProfileID = Profile.shell.id
+
+    /// Creates a model from persisted state. Built-in profiles missing from
+    /// `state` are added back so they can always be resolved.
+    public init(state: PersistedState = .empty, defaultWorkingDirectory: String = NSHomeDirectory()) {
+        self.workspaces = state.workspaces
+        self.sessions = state.sessions
+        self.hosts = state.hosts
+        var profiles = state.profiles
+        for builtIn in Profile.builtIns where !profiles.contains(where: { $0.id == builtIn.id }) {
+            profiles.append(builtIn)
+        }
+        self.profiles = profiles
+        self.defaultWorkingDirectory = defaultWorkingDirectory
+    }
+
+    /// A snapshot suitable for ``StateStore``.
+    public var persistedState: PersistedState {
+        PersistedState(workspaces: workspaces, sessions: sessions, hosts: hosts, profiles: profiles)
+    }
+
+    // MARK: Lookup
+
+    public func workspace(_ id: WorkspaceID) -> Workspace? {
+        workspaces.first { $0.id == id }
+    }
+
+    public func session(_ id: SessionID) -> Session? {
+        sessions.first { $0.id == id }
+    }
+
+    public func profile(_ id: ProfileID) -> Profile? {
+        profiles.first { $0.id == id }
+    }
+
+    /// The workspace and tab group containing `tab`.
+    public func location(of tab: TabID) -> (workspace: WorkspaceID, tabGroup: TabGroupID)? {
+        for workspace in workspaces {
+            for group in workspace.tabGroups where group.tabs.contains(where: { $0.id == tab }) {
+                return (workspace.id, group.id)
+            }
+        }
+        return nil
+    }
+
+    /// The tab containing `pane`.
+    public func tab(containing pane: PaneID) -> Tab? {
+        for workspace in workspaces {
+            for group in workspace.tabGroups {
+                if let tab = group.tabs.first(where: { $0.layout.contains(pane) }) { return tab }
+            }
+        }
+        return nil
+    }
+
+    /// The title shown for `tab`: its custom title, else the focused
+    /// session's title, else the focused session's profile name.
+    public func displayTitle(for tab: Tab) -> String {
+        if let custom = tab.customTitle, !custom.isEmpty { return custom }
+        guard let pane = tab.pane(tab.focusedPaneID), let session = session(pane.sessionID) else {
+            return "Tab"
+        }
+        if !session.title.isEmpty { return session.title }
+        return profile(session.profileID)?.name ?? "Shell"
+    }
+
+    // MARK: Workspaces
+
+    /// Creates a workspace with one tab group holding one tab, open in a window.
+    @discardableResult
+    public func newWorkspace(name: String? = nil, profile: ProfileID? = nil) -> WorkspaceID {
+        let tab = makeTab(profile: profile ?? defaultProfileID, location: .local, workingDirectory: nil)
+        let group = TabGroup(name: "Main", tabs: [tab])
+        let workspace = Workspace(
+            name: name ?? nextWorkspaceName(),
+            tabGroups: [group],
+            window: WindowState(isOpen: true))
+        workspaces.append(workspace)
+        didChange()
+        return workspace.id
+    }
+
+    /// Renames a workspace.
+    public func renameWorkspace(_ id: WorkspaceID, to name: String) {
+        mutateWorkspace(id) { $0.name = name }
+    }
+
+    /// Deletes a workspace and all its sessions.
+    public func deleteWorkspace(_ id: WorkspaceID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let sessionIDs = workspaces[index].tabGroups.flatMap(\.tabs).flatMap(\.panes).map(\.sessionID)
+        workspaces.remove(at: index)
+        removeSessions(Set(sessionIDs))
+        didChange()
+    }
+
+    /// Records window geometry and visibility for a workspace.
+    public func updateWindowState(_ state: WindowState, for id: WorkspaceID) {
+        mutateWorkspace(id) { $0.window = state }
+    }
+
+    /// Marks a workspace's window open. A workspace whose tab groups were all
+    /// closed gets a fresh "Main" group with one tab of the default profile.
+    public func reopenWorkspace(_ id: WorkspaceID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        if workspaces[index].tabGroups.isEmpty {
+            let tab = makeTab(profile: defaultProfileID, location: .local, workingDirectory: nil)
+            let group = TabGroup(name: "Main", tabs: [tab])
+            workspaces[index].tabGroups = [group]
+            workspaces[index].selectedTabGroupID = group.id
+        }
+        var window = workspaces[index].window ?? WindowState()
+        window.isOpen = true
+        workspaces[index].window = window
+        didChange()
+    }
+
+    // MARK: Tab groups
+
+    /// Adds a tab group with one tab to a workspace and selects it.
+    @discardableResult
+    public func newTabGroup(in workspaceID: WorkspaceID, name: String? = nil) -> TabGroupID? {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return nil }
+        let tab = makeTab(profile: defaultProfileID, location: .local, workingDirectory: nil)
+        let group = TabGroup(name: name ?? "Group \(workspaces[index].tabGroups.count + 1)", tabs: [tab])
+        workspaces[index].tabGroups.append(group)
+        workspaces[index].selectedTabGroupID = group.id
+        didChange()
+        return group.id
+    }
+
+    /// Renames a tab group.
+    public func renameTabGroup(_ id: TabGroupID, to name: String) {
+        mutateTabGroup(id) { $0.name = name }
+    }
+
+    /// Selects a tab group in its workspace.
+    public func select(tabGroup id: TabGroupID) {
+        guard let path = path(ofTabGroup: id) else { return }
+        workspaces[path.workspace].selectedTabGroupID = id
+        didChange()
+    }
+
+    // MARK: Tabs
+
+    /// Adds a tab to a tab group and selects it. `profile` defaults to
+    /// ``defaultProfileID``; `workingDirectory` to ``defaultWorkingDirectory``.
+    @discardableResult
+    public func newTab(
+        in tabGroupID: TabGroupID,
+        profile: ProfileID? = nil,
+        location: Location = .local,
+        workingDirectory: String? = nil
+    ) -> TabID? {
+        guard path(ofTabGroup: tabGroupID) != nil else { return nil }
+        let tab = makeTab(profile: profile ?? defaultProfileID, location: location, workingDirectory: workingDirectory)
+        mutateTabGroup(tabGroupID) { group in
+            group.tabs.append(tab)
+            group.selectedTabID = tab.id
+        }
+        return tab.id
+    }
+
+    /// Renames a tab; `nil` or empty restores the derived title.
+    public func renameTab(_ id: TabID, to title: String?) {
+        mutateTab(id) { $0.customTitle = (title?.isEmpty ?? true) ? nil : title }
+    }
+
+    /// Closes a tab and removes its sessions. If it was the group's last
+    /// tab the group is removed; if that was the workspace's last group the
+    /// workspace's window is marked closed. See ``CloseResult``.
+    @discardableResult
+    public func closeTab(_ id: TabID) -> CloseResult {
+        guard let path = path(ofTab: id) else { return .notFound }
+        let workspaceID = workspaces[path.workspace].id
+        let groupID = workspaces[path.workspace].tabGroups[path.tabGroup].id
+        let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs.remove(at: path.tab)
+        removeSessions(Set(tab.panes.map(\.sessionID)))
+        defer { didChange() }
+
+        guard workspaces[path.workspace].tabGroups[path.tabGroup].tabs.isEmpty else {
+            fixTabSelection(workspace: path.workspace, tabGroup: path.tabGroup, removedIndex: path.tab, removedID: id)
+            return .closedTab(id, in: groupID)
+        }
+
+        workspaces[path.workspace].tabGroups.remove(at: path.tabGroup)
+        let groups = workspaces[path.workspace].tabGroups
+        guard !groups.isEmpty else {
+            workspaces[path.workspace].selectedTabGroupID = nil
+            var window = workspaces[path.workspace].window ?? WindowState()
+            window.isOpen = false
+            workspaces[path.workspace].window = window
+            return .closedWindow(workspaceID)
+        }
+        if workspaces[path.workspace].selectedTabGroupID == groupID {
+            workspaces[path.workspace].selectedTabGroupID = groups[min(path.tabGroup, groups.count - 1)].id
+        }
+        return .closedTabGroup(groupID, in: workspaceID)
+    }
+
+    /// Moves a tab to position `index` of `tabGroup`, possibly across groups
+    /// and workspaces. `index` counts positions in the destination *after*
+    /// the tab has been removed from its source, and is clamped to the valid
+    /// range. The moved tab becomes selected in its new group. A source group
+    /// left empty by a move is kept (only closing removes groups).
+    public func moveTab(_ id: TabID, to tabGroupID: TabGroupID, index: Int) {
+        guard let source = path(ofTab: id), path(ofTabGroup: tabGroupID) != nil else { return }
+        let tab = workspaces[source.workspace].tabGroups[source.tabGroup].tabs.remove(at: source.tab)
+        if workspaces[source.workspace].tabGroups[source.tabGroup].id != tabGroupID {
+            fixTabSelection(workspace: source.workspace, tabGroup: source.tabGroup, removedIndex: source.tab, removedID: id)
+        }
+        // Re-resolve: indices are unchanged by a tab removal, but be explicit.
+        guard let target = path(ofTabGroup: tabGroupID) else { return }
+        var group = workspaces[target.workspace].tabGroups[target.tabGroup]
+        let clamped = min(max(index, 0), group.tabs.count)
+        group.tabs.insert(tab, at: clamped)
+        group.selectedTabID = id
+        workspaces[target.workspace].tabGroups[target.tabGroup] = group
+        didChange()
+    }
+
+    /// Selects a tab and its tab group.
+    public func select(tab id: TabID) {
+        guard let path = path(ofTab: id) else { return }
+        let groupID = workspaces[path.workspace].tabGroups[path.tabGroup].id
+        workspaces[path.workspace].tabGroups[path.tabGroup].selectedTabID = id
+        workspaces[path.workspace].selectedTabGroupID = groupID
+        didChange()
+    }
+
+    // MARK: Panes
+
+    /// Splits `pane`, creating a new pane and session that inherit the
+    /// original session's profile, location and working directory. The new
+    /// pane is placed after the original and focused. Returns its ID.
+    @discardableResult
+    public func splitPane(_ paneID: PaneID, axis: Axis) -> PaneID? {
+        guard let path = path(ofPane: paneID) else { return nil }
+        let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
+        guard let original = tab.pane(paneID), let session = session(original.sessionID) else { return nil }
+
+        let newSession = makeSession(
+            profile: session.profileID, location: session.location, workingDirectory: session.workingDirectory)
+        let newPane = Pane(sessionID: newSession.id)
+        sessions.append(newSession)
+        mutateTab(tab.id) { tab in
+            tab.layout = tab.layout.split(paneID, axis: axis, newPane: newPane.id)
+            tab.panes.append(newPane)
+            tab.focusedPaneID = newPane.id
+            tab.zoomedPaneID = nil
+        }
+        return newPane.id
+    }
+
+    /// Closes a pane and removes its session. Closing the last pane closes
+    /// the tab, which may cascade further; see ``CloseResult``. If the pane
+    /// was focused, focus moves to the nearest pane of its sibling branch.
+    @discardableResult
+    public func closePane(_ paneID: PaneID) -> CloseResult {
+        guard let path = path(ofPane: paneID) else { return .notFound }
+        let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
+        guard let remaining = tab.layout.remove(paneID) else {
+            return closeTab(tab.id)
+        }
+        let sessionID = tab.pane(paneID)?.sessionID
+        mutateTab(tab.id) { tab in
+            if tab.focusedPaneID == paneID {
+                tab.focusedPaneID = tab.layout.focusSuccessor(afterRemoving: paneID) ?? remaining.leaves()[0]
+            }
+            if tab.zoomedPaneID == paneID { tab.zoomedPaneID = nil }
+            tab.layout = remaining
+            tab.panes.removeAll { $0.id == paneID }
+        }
+        if let sessionID { removeSessions([sessionID]) }
+        return .closedPane(paneID, in: tab.id)
+    }
+
+    /// Focuses a pane and selects its tab and tab group.
+    public func focus(pane paneID: PaneID) {
+        guard let path = path(ofPane: paneID) else { return }
+        let groupID = workspaces[path.workspace].tabGroups[path.tabGroup].id
+        let tabID = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].id
+        workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].focusedPaneID = paneID
+        workspaces[path.workspace].tabGroups[path.tabGroup].selectedTabID = tabID
+        workspaces[path.workspace].selectedTabGroupID = groupID
+        didChange()
+    }
+
+    // MARK: Sessions
+
+    /// Records the program-set title of a session (OSC 0/2).
+    public func setTitle(_ title: String, for id: SessionID) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }), sessions[index].title != title else { return }
+        sessions[index].title = title
+        didChange()
+    }
+
+    // MARK: - Internals
+
+    private struct TabGroupPath { var workspace: Int; var tabGroup: Int }
+    private struct TabPath { var workspace: Int; var tabGroup: Int; var tab: Int }
+
+    private func didChange() {
+        changeCount &+= 1
+    }
+
+    private func path(ofTabGroup id: TabGroupID) -> TabGroupPath? {
+        for (w, workspace) in workspaces.enumerated() {
+            if let g = workspace.tabGroups.firstIndex(where: { $0.id == id }) {
+                return TabGroupPath(workspace: w, tabGroup: g)
+            }
+        }
+        return nil
+    }
+
+    private func path(ofTab id: TabID) -> TabPath? {
+        for (w, workspace) in workspaces.enumerated() {
+            for (g, group) in workspace.tabGroups.enumerated() {
+                if let t = group.tabs.firstIndex(where: { $0.id == id }) {
+                    return TabPath(workspace: w, tabGroup: g, tab: t)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func path(ofPane id: PaneID) -> TabPath? {
+        for (w, workspace) in workspaces.enumerated() {
+            for (g, group) in workspace.tabGroups.enumerated() {
+                if let t = group.tabs.firstIndex(where: { $0.layout.contains(id) }) {
+                    return TabPath(workspace: w, tabGroup: g, tab: t)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func mutateWorkspace(_ id: WorkspaceID, _ body: (inout Workspace) -> Void) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        body(&workspaces[index])
+        didChange()
+    }
+
+    private func mutateTabGroup(_ id: TabGroupID, _ body: (inout TabGroup) -> Void) {
+        guard let path = path(ofTabGroup: id) else { return }
+        body(&workspaces[path.workspace].tabGroups[path.tabGroup])
+        didChange()
+    }
+
+    private func mutateTab(_ id: TabID, _ body: (inout Tab) -> Void) {
+        guard let path = path(ofTab: id) else { return }
+        body(&workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab])
+        didChange()
+    }
+
+    private func fixTabSelection(workspace w: Int, tabGroup g: Int, removedIndex: Int, removedID: TabID) {
+        let group = workspaces[w].tabGroups[g]
+        guard group.selectedTabID == removedID || group.selectedTabID == nil else { return }
+        if group.tabs.isEmpty {
+            workspaces[w].tabGroups[g].selectedTabID = nil
+        } else {
+            workspaces[w].tabGroups[g].selectedTabID = group.tabs[min(removedIndex, group.tabs.count - 1)].id
+        }
+    }
+
+    private func removeSessions(_ ids: Set<SessionID>) {
+        sessions.removeAll { ids.contains($0.id) }
+    }
+
+    private func makeSession(profile profileID: ProfileID, location: Location, workingDirectory: String?) -> Session {
+        let resolved = self.profile(profileID) ?? Profile.shell
+        return Session(
+            location: location,
+            profileID: resolved.id,
+            launch: resolved.launchSpec,
+            workingDirectory: workingDirectory ?? defaultWorkingDirectory)
+    }
+
+    /// Creates a one-pane tab and registers its session.
+    private func makeTab(profile: ProfileID, location: Location, workingDirectory: String?) -> Tab {
+        let session = makeSession(profile: profile, location: location, workingDirectory: workingDirectory)
+        sessions.append(session)
+        return Tab(pane: Pane(sessionID: session.id))
+    }
+
+    private func nextWorkspaceName() -> String {
+        let names = Set(workspaces.map(\.name))
+        if !names.contains("Workspace") { return "Workspace" }
+        var n = 2
+        while names.contains("Workspace \(n)") { n += 1 }
+        return "Workspace \(n)"
+    }
+}
