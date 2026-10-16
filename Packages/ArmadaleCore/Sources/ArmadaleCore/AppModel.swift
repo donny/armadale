@@ -342,6 +342,22 @@ public final class AppModel {
         didChange()
     }
 
+    /// Records the session runtime version that created a session's daemon
+    /// (`Session.runtimeVersion`).
+    public func setRuntimeVersion(_ version: String?, for id: SessionID) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }),
+              sessions[index].runtimeVersion != version
+        else { return }
+        sessions[index].runtimeVersion = version
+        didChange()
+    }
+
+    /// Every session shown in `workspace`'s panes, in tab order.
+    public func sessionIDs(in workspace: WorkspaceID) -> [SessionID] {
+        guard let workspace = self.workspace(workspace) else { return [] }
+        return workspace.tabGroups.flatMap { $0.tabs.flatMap { $0.panes.map(\.sessionID) } }
+    }
+
     /// Replaces session `old` with `new` (a respawn): every pane bound to
     /// `old` is rebound to `new`, and `old` is retired. Does nothing if `old`
     /// is unknown or `new`'s ID is already in use.

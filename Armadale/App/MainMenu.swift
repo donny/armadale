@@ -54,6 +54,12 @@ enum MainMenu {
         view.addItem(withTitle: "Toggle Full Screen",
                      action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "\r")
 
+        // Workspace
+        let workspace = submenu("Workspace", in: main)
+        workspace.addItem(withTitle: "Respawn All Ended",
+                          action: #selector(ContentViewController.respawnAllEnded(_:)), keyEquivalent: "r")
+            .keyEquivalentModifierMask = [.command, .option]
+
         // Window
         let window = submenu("Window", in: main)
         window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

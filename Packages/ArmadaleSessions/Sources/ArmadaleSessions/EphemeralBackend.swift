@@ -2,9 +2,9 @@ import ArmadaleCore
 import Foundation
 
 /// Sessions as plain PTY processes with no daemon: they end when Armadale
-/// quits, and cannot be reattached afterwards. Used until the zmx backend
-/// exists, as the fallback for hosts that cannot take a zmx deployment, and
-/// in UI tests.
+/// quits, and cannot be reattached afterwards. The fallback when the session
+/// runtime cannot be installed or a host cannot take a zmx deployment, and
+/// selectable with `ARMADALE_BACKEND=ephemeral` for tests and debugging.
 public actor EphemeralBackend: PersistenceBackend {
     private let resolver: LaunchResolver
     private let options: PTYProcess.Options
@@ -58,6 +58,11 @@ public actor EphemeralBackend: PersistenceBackend {
 
     public func history(_ id: SessionID) async throws -> Data {
         throw BackendError.historyUnavailable(id)
+    }
+
+    /// The process is the session, so its exit always ends it.
+    public func resolveExit(of session: Session) async -> ExitResolution {
+        .ended
     }
 
     private func pruneExited() {

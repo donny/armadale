@@ -14,6 +14,8 @@ final class PaneView: NSView {
     let controller: SessionController
     /// Asked to close this pane (the placeholder's Close Pane button).
     var onClosePane: (() -> Void)?
+    /// The placeholder's Retry button on an unavailable session.
+    var onRetryPersistence: (() -> Void)?
     /// The name shown in the placeholder.
     var titleProvider: () -> String = { "Shell" }
 
@@ -80,7 +82,7 @@ final class PaneView: NSView {
         stateObservation = Task { [weak self] in
             let changes = Observations { PlaceholderState(state: controller.state, failure: controller.failure) }
             for await change in changes {
-                self?.update(isEnded: change.state.isEnded, failure: change.failure)
+                self?.update(state: change.state, failure: change.failure)
             }
         }
     }
@@ -90,18 +92,28 @@ final class PaneView: NSView {
         var failure: String?
     }
 
-    private func update(isEnded: Bool, failure: String?) {
-        guard isEnded else {
+    private func update(state: SessionState, failure: String?) {
+        let kind: SessionPlaceholderView.Kind
+        switch state {
+        case .ended: kind = .ended
+        case .disconnected: kind = .disconnected
+        case .unavailable: kind = .unavailable
+        case .detached, .attaching, .attached:
             placeholder?.removeFromSuperview()
             placeholder = nil
             return
         }
         let view = SessionPlaceholderView(
+            kind: kind,
             title: titleProvider(),
             failure: failure,
-            respawn: { [weak self] in
+            primary: { [weak self] in
                 guard let self else { return }
-                Task { await self.controller.respawn() }
+                switch kind {
+                case .ended: Task { await self.controller.respawn() }
+                case .disconnected: Task { await self.controller.reconnect() }
+                case .unavailable: self.onRetryPersistence?()
+                }
                 self.focusTerminal()
             },
             closePane: { [weak self] in self?.onClosePane?() })

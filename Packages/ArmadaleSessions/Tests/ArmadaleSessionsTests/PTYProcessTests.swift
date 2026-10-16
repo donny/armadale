@@ -188,6 +188,16 @@ struct PTYProcessTests {
     /// (i) No descriptor leaks across many spawn/exit cycles, nor when a
     /// running process is simply dropped.
     @Test func noFileDescriptorLeaks() async throws {
+        // The count is process-wide and other suites open pipes and PTYs
+        // concurrently, so compare once it settles: a leak (at least one
+        // descriptor per spawn here) never comes back down to the baseline.
+        func settles(to before: Int) async -> Bool {
+            for _ in 0..<250 {
+                if openFileDescriptorCount() <= before { return true }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            return false
+        }
         let before = openFileDescriptorCount()
         for _ in 0..<50 {
             let process = try PTYProcess.spawn(
@@ -195,7 +205,7 @@ struct PTYProcessTests {
             await OutputCollector(process.output).waitForEnd()
             #expect(await process.exitStatus == 0)
         }
-        #expect(openFileDescriptorCount() == before)
+        #expect(await settles(to: before), "\(openFileDescriptorCount()) open vs \(before) before 50 spawns")
 
         var pid: pid_t = 0
         do {
@@ -207,10 +217,11 @@ struct PTYProcessTests {
         // of SIGHUP and is reaped.
         var reaped = false
         for _ in 0..<200 where !reaped {
-            reaped = kill(pid, 0) != 0 && openFileDescriptorCount() == before
+            reaped = kill(pid, 0) != 0
             if !reaped { try await Task.sleep(for: .milliseconds(10)) }
         }
-        #expect(reaped, "dropped process \(pid) still alive or fds leaked (\(openFileDescriptorCount()) vs \(before))")
+        #expect(reaped, "dropped process \(pid) still alive or not reaped")
+        #expect(await settles(to: before), "fds leaked: \(openFileDescriptorCount()) vs \(before)")
     }
 
     @Test func missingProgramFailsToSpawn() {

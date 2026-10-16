@@ -208,18 +208,32 @@ detail: nothing in the UI, menus or settings says "zmx".
   `Vendor/zmx/` (git‑ignored). Pinned version: **0.8.1** (latest as of
   2026‑10‑15; macos-aarch64 SHA‑256
   `1d86b1c9fba47fa707a6f0e976b20510b07c1c26d0ed010b9414b2a2c5e6beef`).
-- An XcodeGen build phase `lipo`s the two macOS binaries into a universal
-  `Contents/Helpers/zmx`, which is code‑signed with the app's identity and
-  hardened runtime for notarization. The Linux binaries ship as data in
-  `Contents/Resources/remote/` for deployment to SSH hosts.
+- An XcodeGen build phase (`scripts/embed-zmx.sh`) `lipo`s the two macOS
+  binaries into a universal `Contents/Helpers/zmx`, which is code‑signed
+  with the app's identity, no entitlements, and the hardened runtime for
+  notarization. The Linux binaries ship as data in
+  `Contents/Resources/remote/` for deployment to SSH hosts. *Implementation
+  notes:* the phase runs with user-script sandboxing off for the app target
+  (`codesign` writes a temporary file next to the helper, and the phase runs
+  `fetch-zmx.sh` when `Vendor/zmx` does not verify against `zmx.lock`; a
+  modified or stale copy is re-fetched, and the build fails if no verified
+  copy can be had); its inputs and outputs
+  are still declared. Xcode itself turns `ENABLE_HARDENED_RUNTIME` off for
+  ad-hoc ("Sign to Run Locally") builds, so local builds of both helpers are
+  plain ad-hoc and Developer ID builds are hardened (zmx was verified to run
+  hardened: the integration tests pass against a hardened copy).
 - A second helper, `Contents/Helpers/ctty-exec`, is a ten-line trampoline
   built from source in this repo (see section 7). It is bundled and copied
   the same way as zmx.
-- At launch Armadale copies both helpers to
-  `~/Library/Application Support/Armadale/bin/<name>-<ver>` if missing and
-  always runs **those** copies. Daemons therefore never hold open a binary
-  inside an app bundle that may be replaced by an update. The daemon's
-  argv[0] is that path, so `pgrep -f` can identify Armadale's daemons.
+- At launch Armadale (`HelperInstaller`) copies both helpers to
+  `~/Library/Application Support/Armadale/bin/` as `zmx-<zmx version>` and
+  `ctty-exec-<app version>` if missing or different (SHA-256), through a
+  temporary file and an atomic rename, and always runs **those** copies.
+  Daemons therefore never hold open a binary inside an app bundle that may
+  be replaced by an update. The daemon's argv[0] is that path, so `pgrep -f`
+  can identify Armadale's daemons. Older `zmx-<ver>` copies are kept while a
+  session records that version (section 13); older `ctty-exec` copies are
+  removed, since nothing keeps running them.
 
 ### `PersistenceBackend` protocol
 
@@ -231,14 +245,22 @@ protocol PersistenceBackend: Sendable {
     func liveSessions() async throws -> Set<SessionID>
     func kill(_ id: SessionID) async throws
     func history(_ id: SessionID) async throws -> Data               // live sessions only
+    func resolveExit(of session: Session) async -> ExitResolution    // .ended | .detached
 }
 ```
+
+`resolveExit` was added in step 3: a zmx client exits the same way whether
+its session ended or only the client went away, so the backend decides from
+the session itself (`exists(id)`; listing errors count as `.detached`).
+`ProcessHandle.runtimeVersion` reports the zmx version a create used, which
+the app stores on the `Session`.
 
 `size` is the PTY's initial window size. It has to be set when the PTY is
 opened, otherwise the program's first output (a shell prompt, an agent's
 first screen) is laid out for the wrong width. Failures common to all
 backends are `BackendError` values (`notPersistent`, `noSuchSession`,
-`historyUnavailable`).
+`historyUnavailable`, and `runtimeFailure` for control commands that fail or
+time out and clients that cannot start).
 
 Implementations:
 
@@ -246,6 +268,10 @@ Implementations:
   PTY, with `chdir` to the working directory before exec so the daemon
   inherits it. Everything after the name is the argv, passed verbatim to
   `execvpe`. There is **no `--` separator**: zmx would try to execute `--`.
+  Because zmx uses the program path as argv[0], a login shell could not be
+  started as `-zsh`; the program is therefore `ctty-exec <program> <argv0>
+  <args…>` (the trampoline's `TIOCSCTTY` succeeds silently in the daemon's
+  child, which already owns its PTY).
 - `RemoteZmxBackend` — same commands wrapped in `ssh` (section 6).
 - `EphemeralBackend` — a plain PTY with no daemon. Used as a fallback when
   the remote host cannot take a zmx deployment, and in UI tests. Its
@@ -270,6 +296,23 @@ backend builds the two operations itself (all verified empirically):
   client finished connecting, such as the shell's initial prompt, is lost to
   it. The double attach makes creation deterministic and also keeps the
   `created` line out of the pane.
+- **Telling the cases apart** (step 3): the backend looks at a client's
+  first output without consuming it. `ESC[2J` first means attached to an
+  existing session, so `attach` returns at once rather than waiting to see
+  whether the client exits. `session "a-<id>" created` first means the
+  sentinel created the session, i.e. it did not exist: `attach` waits for
+  that client to die, kills the name defensively and throws `noSuchSession`.
+  Anything else, or nothing within 2 s, is
+  `runtimeFailure("Could not establish the session.")` and the pane shows
+  Disconnected with Reconnect, rather than a client that never shows
+  anything.
+  `create` drops its first client only after `created` **and** `ESC[2J`
+  plus 150 ms: the client prints `ESC[2J` *before* it sends its Init
+  message, and only Init marks the daemon as having had a client (read in
+  `main.zig`/`loop.zig`); a client dropped earlier would leave the next one
+  without a replay. A program that exits before the second attach surfaces
+  as `runtimeFailure("The session ended as soon as it started.")` with
+  whatever it printed.
 
 ### Client stream filtering
 
@@ -290,6 +333,14 @@ position, `ESC[0m`, OSC 7 (cwd) and OSC 2 (title). Alternate‑screen programs
 are replayed inside `?1049h`. Scrollback is capped at 10,000 lines by zmx and
 is not configurable.
 
+A session that is on the alternate screen when Armadale reattaches (vim,
+less, an agent's full-screen UI) is replayed as that screen only: zmx sends
+neither the primary screen nor its scrollback while the alternate screen is
+active. When the program then exits, the pane is back on a primary screen
+that holds nothing from before the reattach (the session itself still has
+it, and a later reattach shows it again). This is a limit of zmx 0.8.1's
+replay and is accepted.
+
 ### Session lifecycle
 
 ```
@@ -303,6 +354,29 @@ is not configurable.
 - **Attached**: the pane's PTY runs the zmx client. Output bytes go to the
   surface; input goes to the PTY; resizes go to the PTY via `TIOCSWINSZ`,
   which zmx forwards to the daemon.
+- **Client gone, session alive** (`resolveExit` → `.detached`): the
+  controller reattaches once by itself (surface reset first; the replay
+  restores it). If that fails, or the new client goes away again at once,
+  the pane shows **Disconnected** ("Armadale lost its connection to this
+  session. It may still be running.", **Reconnect** / **Close Pane**),
+  never *Session Ended*: the session is alive, and an ended pane's Respawn
+  would retire it. An attach that lasted 5 s restores the allowance. An
+  attach **or create** that fails for any reason other than the session
+  being gone (including a client that shows nothing recognisable within
+  2 s, such as a client/daemon mismatch, or a create whose second attach
+  times out on a loaded machine) also ends in Disconnected: after a failure
+  the controller asks `exists(id)`, and only a session confirmed gone is
+  shown as ended.
+- **Unavailable**: when the persistent runtime cannot be set up at launch,
+  Armadale falls back to plain PTY sessions for new panes only. Restored
+  sessions that the runtime created (`runtimeVersion` set) show
+  "Persistent sessions are unavailable" with **Retry**, which runs the
+  installer again and attaches them if it now works. They are never shown
+  as ended, never respawned by Respawn All, and never killed (they cannot be
+  reached). ⌘W on such a pane always asks first ("This session may still be
+  running and cannot be reached right now."), and closing it leaves the
+  session running until the next launch with a working runtime reclaims it
+  (Housekeeping).
 - **Ended**: the client exited and `exists(id)` is false. When the session's
   process exits, the zmx daemon exits too, unlinks its socket and the session
   vanishes from `ls`; there is no "exited but listed" state. The client's own
@@ -317,15 +391,18 @@ is not configurable.
 - **Daemon killed from outside** (SIGKILL, reboot): `ls` reports the stale
   socket as an error entry, cleans it up, and `ls --short` omits it. The pane
   ends up in the same ended state.
-- **Respawn**: creates a new session with the same `launch`, directory and
-  location, and rebinds the pane to it. The old session ID is retired. The
+- **Respawn**: kills the old session (always: a pane that looks ended may
+  still be alive, and a not-found kill is harmless), creates a new session
+  with the same `launch`, directory and location, and rebinds the pane to
+  it. The old session ID is retired and its zmx log removed. Close Pane
+  likewise always kills. The
   surface is fully reset first (RIS, scrollback cleared), so modes a dead
   program left on, such as the alternate screen or mouse reporting, do not
   carry over.
-- **Disconnected** (remote only): the ssh transport died. The placeholder
-  shows **Reconnect** / **Close Pane**, and Armadale retries in the
-  background with exponential backoff (1 s → 30 s) until the host answers,
-  then re-attaches automatically.
+- **Disconnected**, remote (step 6): the ssh transport died. Same
+  placeholder; Armadale also retries in the background with exponential
+  backoff (1 s → 30 s) until the host answers, then re-attaches
+  automatically.
 - **Workspace › Respawn All Ended** exists for the morning‑after‑reboot case
   where every session is gone.
 
@@ -352,14 +429,32 @@ to the home directory. This is done by `LaunchResolver`. Because the
 daemon inherits the cwd and environment of the **creating** client only
 (verified), later attaches cannot change them; zmx's tracked‑variable
 mechanism keeps `SSH_AUTH_SOCK` current. zmx itself sets `ZMX_SESSION` inside
-the child; Armadale leaves that alone.
+the child. The daemon also passes on the creating client's `ZMX_DIR` and
+`ZMX_NO_DETACH_KEY=1`. None of them may reach the program: with them, a
+user's own `zmx ls` or `zmx attach x` inside a pane would list Armadale's
+private sessions or switch this one away. The program is therefore started
+as `ctty-exec --unset ZMX_DIR --unset ZMX_NO_DETACH_KEY --unset ZMX_SESSION
+--unset ZMX_SESSION_PREFIX <program> <argv0> …`, and the trampoline removes
+them before its `execv` (verified: `env | grep ZMX` in a pane prints
+nothing).
 
 ### Housekeeping
 
 zmx writes one log per daemon to `ZMX_DIR/logs/<name>.log` plus a shared
 `zmx.log`, at debug level, each truncated at 2 MB but never deleted. At
 launch Armadale removes log files whose session ID is neither live nor
-referenced by the model.
+referenced by the model, and during a run it removes a session's log as
+soon as it kills or retires the session.
+
+At launch, once the live probe has answered, Armadale also ends live
+sessions in its runtime directory that no saved session refers to (for
+example one whose pane was closed while the runtime was unavailable).
+Armadale only ever manages sessions it created, and this keeps to that:
+the runtime directory is private to the app, and only `a-<id>` names are
+listed. It is done only when an existing state file loaded cleanly; with
+no state file at all (a first launch, or a file the user removed), or after
+a damaged, recovered or newer-format one, the references are unknown and
+nothing is killed (`OrphanReclaimer`).
 
 ---
 
@@ -479,11 +574,37 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   buffer fills and the child blocks, as it would on any slow terminal. A
   full 64 KB batch is handed over at once, whatever the interval. Under a
   flood (`yes`, a million-line `seq`) the main actor is therefore busy
-  (about 2,200 batches a second were measured with a free consumer) but
-  stays responsive, because each feed is bounded and the main run loop
-  handles events between feeds. Memory stays bounded by the backpressure.
+  (about 2,200 batches a second were measured with a free consumer); the
+  consumer yields after every batch (while output keeps coming, the stream
+  hands over the next batch without ever suspending, so without the yield
+  it would hold the main actor for the whole flood). For an **ephemeral**
+  session, memory stays bounded by the backpressure: the child blocks.
   A hard limit of one batch per 16 ms was rejected: it would cap output at
   about 4 MB/s.
+- **zmx floods.** Backpressure cannot reach a program inside a persistent
+  session: zmx 0.8.1's client copies everything the daemon sends into an
+  unbounded stdout buffer (`loop.zig`), so a pane that falls behind only
+  grows that client. When the session client's buffered backlog grows past
+  ~16 MB, Armadale drops that client and reattaches to a bounded snapshot
+  (10,000 scrollback lines plus the screen), so output produced in that
+  window is skipped. This only happens when the renderer is genuinely far
+  behind, not on fast output that is being rendered.
+  The backlog is measured directly as the client process's memory
+  footprint (`proc_pid_rusage`, `ri_phys_footprint`), sampled off the main
+  actor every 500 ms while attached, after a 1 s grace period following
+  each attach; two consecutive samples over the limit trigger the
+  reattach. There is no rate or "consumer behind" heuristic: an earlier
+  version that reattached on sustained output above 320 KB/s misfired on a
+  30 fps full-screen redraw (~390 KB/s, rendered fine), resetting the pane
+  every ~3 s. Measured with zmx 0.8.1: an idle client, and one carrying
+  ~410 KB/s for 5 s that the pane keeps up with, stays at about 1.4 MB
+  (0 reattaches); one second of `yes` against a pane limited to ~6 MB/s
+  takes the client to about 35 MB. The suggested 32 MB limit was therefore
+  too close to that peak to trigger reliably; 16 MB is about eleven times
+  an idle client. Without the mitigation the prompt appeared 78 s after
+  ^C; with it, 0.75 s, after one reattach (in the app the reviewer saw
+  100% CPU for 260 s and a 115 MB client before). The ephemeral backend
+  is unchanged: there the child blocks, as on any slow terminal.
 - The stream finishes at EOF/EIO. If a leftover background job keeps the
   terminal open after the process exits, it finishes 100 ms after the exit
   instead, and the master is closed.
@@ -588,9 +709,23 @@ WorkspaceWindowController (NSWindowController, one per open workspace)
   backend's live sessions once, then opens every workspace whose window was
   open at last quit and attaches its visible panes first, the rest lazily
   when their tab is first shown.
-- Quit never kills sessions. Closing a pane kills its session after a
-  confirmation if it is still running (configurable). Closing a window keeps
-  the workspace.
+- Quit never kills sessions. `applicationShouldTerminate` hangs every
+  pane's client up synchronously (SIGHUP and closing its terminal; no
+  waiting) and returns `.terminateNow`, then the state is saved
+  synchronously. `.terminateLater` was tried and rejected: SIGTERM's handler
+  ran inside a main-queue block, where AppKit's nested run loop starves the
+  main actor, so the reply never came and logout would hang. SIGTERM now
+  quits from the run loop, performed in the common **and modal-panel**
+  modes, so an app-modal alert (a launch or save-failure warning shown with
+  `runModal()`) does not hold the quit until someone clicks OK; the
+  terminate path (`applicationShouldTerminate` → `.terminateNow`, then the
+  synchronous save) runs from inside the modal session.
+  `scripts/check-quit.sh` checks both cases: exit within 2 s (measured:
+  119 ms each), with no client left and the daemons alive, and with the
+  fallback alert up, the state saved on the way out. Closing a pane kills its session after a confirmation if it is
+  still running or disconnected (configurable), and also kills a session
+  that was never shown (restored but not yet attached). Closing a window
+  keeps the workspace.
 - Closing the last tab in a tab group removes the tab group. Closing the
   last tab group in a workspace closes the workspace's window; the workspace
   stays in the model and in the sidebar, and reopening it creates a fresh
@@ -727,6 +862,16 @@ armadale/
   fresh session gets no replay, which is why creation attaches twice.
 - **Lost exit codes.** zmx discards the program's exit status, so the
   *Session Ended* placeholder cannot show it in v1.
+- **Unbounded client buffering** in zmx 0.8.1 (see section 7, "zmx
+  floods"): backpressure cannot reach a program inside a persistent
+  session. When the session client's buffered backlog grows past ~16 MB,
+  Armadale drops that client and reattaches to a bounded snapshot, so
+  output produced in that window is skipped; this only happens when the
+  renderer is genuinely far behind, not on fast output that is being
+  rendered. A zmx release with a bounded client buffer, or one that stops
+  reading the daemon while stdout is blocked, would make this unnecessary.
+- **Alternate-screen replay** drops the primary screen and scrollback from
+  the pane (section 4).
 - **SwiftTerm under Swift 6.** It is not annotated for strict concurrency.
   The adapter confines it to the main actor with `@preconcurrency import`,
   and the swappable surface means a cleaner renderer can replace it later.

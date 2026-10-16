@@ -30,20 +30,32 @@ private final class FakeHandle: ProcessHandle {
         var writes: [[UInt8]] = []
         var resizes: [PTYSize] = []
         var terminated = false
+        var hungUp = false
+        var footprint: UInt64?
     }
 
     let output: AsyncStream<[UInt8]>
+    let runtimeVersion: String?
     private let continuation: AsyncStream<[UInt8]>.Continuation
     private let exitLatch = Latch<Int32?>()
     private let record = Mutex(Record())
 
-    init() {
+    init(runtimeVersion: String? = nil) {
+        self.runtimeVersion = runtimeVersion
         (output, continuation) = AsyncStream.makeStream(of: [UInt8].self)
     }
 
     var writes: [[UInt8]] { record.withLock { $0.writes } }
     var resizes: [PTYSize] { record.withLock { $0.resizes } }
     var terminated: Bool { record.withLock { $0.terminated } }
+    var hungUp: Bool { record.withLock { $0.hungUp } }
+    func setFootprint(_ value: UInt64?) { record.withLock { $0.footprint = value } }
+    var clientFootprint: UInt64? { record.withLock { $0.footprint } }
+    func hangUp() {
+        record.withLock { $0.hungUp = true }
+        exitLatch.set(nil)
+        continuation.finish()
+    }
 
     func emit(_ text: String) { continuation.yield(Array(text.utf8)) }
     func finishOutput() { continuation.finish() }
@@ -64,28 +76,56 @@ private actor FakeBackend: PersistenceBackend {
     private(set) var handles: [FakeHandle] = []
     private(set) var created: [(session: Session, size: PTYSize)] = []
     private(set) var killed: [SessionID] = []
+    private(set) var attached: [Session] = []
+    private(set) var resolved: [SessionID] = []
     var createError: (any Error)?
+    /// Thrown by attach (when attaching is possible at all).
+    var attachError: (any Error)?
+    /// Answers to resolveExit, in order; `.ended` once used up.
+    var resolutions: [ExitResolution] = []
+    /// Whether attach succeeds (a persistent backend) or throws noSuchSession.
+    var canAttach = false
+    /// The runtime version handles report.
+    var runtimeVersion: String?
+    /// Sessions `exists` reports as alive.
+    var alive: Set<SessionID> = []
     var createDelay: Duration?
     var killDelay: Duration?
 
     func setCreateError(_ error: (any Error)?) { createError = error }
     func setCreateDelay(_ delay: Duration?) { createDelay = delay }
     func setKillDelay(_ delay: Duration?) { killDelay = delay }
+    func setResolutions(_ list: [ExitResolution]) { resolutions = list }
+    func setCanAttach(_ value: Bool) { canAttach = value }
+    func setAttachError(_ error: (any Error)?) { attachError = error }
+    func setRuntimeVersion(_ value: String?) { runtimeVersion = value }
+    func setAlive(_ ids: Set<SessionID>) { alive = ids }
 
     func create(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
         if let createDelay { try await Task.sleep(for: createDelay) }
         if let createError { throw createError }
-        let handle = FakeHandle()
+        let handle = FakeHandle(runtimeVersion: runtimeVersion)
         handles.append(handle)
         created.append((session, size))
         return handle
     }
 
     func attach(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
-        throw BackendError.notPersistent
+        guard canAttach else { throw BackendError.notPersistent }
+        if let attachError { throw attachError }
+        attached.append(session)
+        let handle = FakeHandle(runtimeVersion: runtimeVersion)
+        handles.append(handle)
+        created.append((session, size))
+        return handle
     }
 
-    func exists(_ id: SessionID) async throws -> Bool { false }
+    func resolveExit(of session: Session) async -> ExitResolution {
+        resolved.append(session.id)
+        return resolutions.isEmpty ? .ended : resolutions.removeFirst()
+    }
+
+    func exists(_ id: SessionID) async throws -> Bool { alive.contains(id) }
     func liveSessions() async throws -> Set<SessionID> { [] }
     func kill(_ id: SessionID) async throws {
         if let killDelay { try await Task.sleep(for: killDelay) }
@@ -102,6 +142,7 @@ private actor FakeBackend: PersistenceBackend {
 private final class RecordingDelegate: SessionControllerDelegate {
     var states: [SessionState] = []
     var titles: [String] = []
+    var versions: [String] = []
     var directories: [String] = []
     var replacements: [(SessionID, Session)] = []
 
@@ -110,6 +151,9 @@ private final class RecordingDelegate: SessionControllerDelegate {
     func sessionController(_ controller: SessionController, didChangeDirectory path: String) { directories.append(path) }
     func sessionController(_ controller: SessionController, didReplace old: SessionID, with new: Session) {
         replacements.append((old, new))
+    }
+    func sessionController(_ controller: SessionController, didRecordRuntimeVersion version: String) {
+        versions.append(version)
     }
 }
 
@@ -267,8 +311,10 @@ struct SessionControllerTests {
         #expect(controller.state == .attached)
         #expect(surface.text.contains("\u{1b}c"), "the surface is reset")
         #expect(surface.scrollbackClears == 1)
-        // An ended session is not killed again.
-        #expect(await backend.killed.isEmpty)
+        // The old session is killed even though it looked ended: a session
+        // shown as ended or disconnected may still be alive, and killing a
+        // gone one is harmless.
+        #expect(await backend.killed == [session.id])
 
         let second = try await handle(1)
         second.emit("fresh")
@@ -370,7 +416,9 @@ struct SessionControllerTests {
         await controller.close()
         await starting.value
         let id = session.id
-        await eventuallyAsync { await backend.killed == [id] }
+        // Once by close() (not found yet: the create is still running) and
+        // once more when the late create completes.
+        await eventuallyAsync { await backend.killed == [id, id] }
         #expect(try await handle().terminated)
         #expect(controller.state == .ended(exitCode: nil))
         // A closed controller never connects again.
@@ -406,6 +454,304 @@ struct SessionControllerTests {
         handle.exit(0) // output never finishes
         await eventually { controller.state == .ended(exitCode: 0) }
         #expect(surface.text == "held")
+    }
+
+    // MARK: Exit resolution
+
+    /// Ends the current (index) handle's process with its output.
+    private func endClient(_ index: Int) async throws {
+        let handle = try await handle(index)
+        handle.finishOutput()
+        handle.exit(0)
+    }
+
+    @Test func endedResolutionEndsWithoutReattaching() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        await controller.start(.create)
+        try await endClient(0)
+        await eventually { controller.state.isEnded }
+        #expect(await backend.resolved == [session.id])
+        #expect(await backend.attached.isEmpty)
+    }
+
+    @Test func detachedResolutionReattachesOnceThenDisconnects() async throws {
+        await backend.setCanAttach(true)
+        await backend.setResolutions([.detached, .detached])
+        let controller = makeController()
+        await controller.start(.create)
+        surface.fed = Array("old screen".utf8)
+
+        // The client dies but the session lives: one automatic reattach,
+        // starting from a reset surface.
+        try await endClient(0)
+        await eventuallyAsync { await backend.attached.count == 1 }
+        await eventually { controller.state == .attached }
+        #expect(await backend.attached.first?.id == session.id)
+        #expect(surface.text.hasSuffix("\u{1b}c"), "the surface is reset before the replay")
+        #expect(surface.scrollbackClears == 1)
+        let reattached = try await handle(1)
+        reattached.emit("replayed")
+        await eventually { surface.text.hasSuffix("replayed") }
+        // Input goes to the new client.
+        surface.delegate?.surface(surface, didInput: [0x61])
+        #expect(reattached.writes == [[0x61]])
+
+        // It dies again at once (two hangups within the allowance): no
+        // second automatic reattach, and since the backend says the session
+        // is still alive it is disconnected, never ended.
+        try await endClient(1)
+        await eventually { controller.state.isDisconnected }
+        #expect(await backend.attached.count == 1)
+        #expect(await backend.resolved == [session.id, session.id])
+        #expect(delegate.states == [
+            .attaching, .attached, .attaching, .attached,
+            .disconnected(reason: "The connection to the session was lost."),
+        ])
+        #expect(await backend.killed.isEmpty, "a disconnected session is left running")
+
+        // Reconnect attaches again.
+        await controller.reconnect()
+        #expect(controller.state == .attached)
+        #expect(await backend.attached.count == 2)
+
+        // Respawn from a disconnected session kills the live daemon first.
+        await controller.respawn()
+        #expect(await backend.killed == [session.id])
+        #expect(controller.session.id != session.id)
+    }
+
+    @Test func aFailedReattachEnds() async throws {
+        await backend.setResolutions([.detached])
+        let controller = makeController() // canAttach false: attach throws
+        await controller.start(.create)
+        try await endClient(0)
+        await eventually { controller.state.isEnded }
+        #expect(controller.state == .ended(exitCode: nil))
+        #expect(controller.failure == nil)
+    }
+
+    @Test func noSuchSessionIsNotAFailure() async {
+        await backend.setCreateError(BackendError.noSuchSession(session.id))
+        let controller = makeController()
+        await controller.start(.create)
+        #expect(controller.state == .ended(exitCode: nil))
+        #expect(controller.failure == nil)
+    }
+
+    @Test func createRecordsTheRuntimeVersion() async throws {
+        await backend.setRuntimeVersion("9.9.9")
+        let controller = makeController()
+        await controller.start(.create)
+        #expect(controller.session.runtimeVersion == "9.9.9")
+        #expect(delegate.versions == ["9.9.9"])
+    }
+
+    @Test func attachDoesNotRecordAVersionAndResetsTheSurface() async throws {
+        await backend.setCanAttach(true)
+        await backend.setRuntimeVersion("9.9.9")
+        let controller = makeController()
+        await controller.start(.attach)
+        #expect(controller.state == .attached)
+        #expect(delegate.versions.isEmpty)
+        #expect(surface.text == "\u{1b}c")
+        #expect(surface.scrollbackClears == 1)
+    }
+
+    @Test func markEndedAndDetach() async throws {
+        let ended = makeController()
+        ended.markEnded()
+        #expect(ended.state == .ended(exitCode: nil))
+        #expect(await backend.created.isEmpty)
+
+        let controller = makeController()
+        await controller.start(.create)
+        let handle = try await handle()
+        await controller.detach()
+        #expect(controller.state == .detached)
+        #expect(handle.terminated)
+        #expect(await backend.killed.isEmpty, "detaching never ends the session")
+        #expect(await backend.resolved.isEmpty)
+    }
+
+    @Test func closingAnUnattachedSessionKillsItInTheBackend() async {
+        let controller = makeController()
+        await controller.close()
+        #expect(await backend.killed == [session.id])
+    }
+
+    /// Orphan guard: a session that looks ended is still killed on close
+    /// and on respawn (it may only look ended).
+    @Test func closeAndRespawnAfterEndedStillKill() async throws {
+        let closing = makeController()
+        await closing.start(.create)
+        try await endClient(0)
+        await eventually { closing.state.isEnded }
+        await closing.close()
+        #expect(await backend.killed == [session.id])
+
+        let respawning = makeController()
+        respawning.markEnded()
+        await respawning.respawn()
+        #expect(await backend.killed == [session.id, session.id])
+    }
+
+    @Test func aReattachThatCannotAttachDisconnects() async throws {
+        await backend.setCanAttach(true)
+        await backend.setResolutions([.detached])
+        await backend.setAttachError(BackendError.runtimeFailure("Could not establish the session."))
+        await backend.setAlive([session.id])
+        let controller = makeController()
+        await controller.start(.create)
+        try await endClient(0)
+        await eventually { controller.state.isDisconnected }
+        #expect(controller.state == .disconnected(reason: "Could not establish the session."))
+        #expect(await backend.killed.isEmpty)
+        // Attaching at launch fails the same way.
+        let restored = makeController()
+        await restored.start(.attach)
+        #expect(restored.state.isDisconnected)
+    }
+
+    /// A create that fails while the session is (or may be) running is
+    /// disconnected, not ended; only a confirmed-gone one is ended.
+    @Test func aFailedCreateOfALiveSessionDisconnects() async {
+        await backend.setCreateError(BackendError.runtimeFailure("The session did not start within 5 seconds."))
+        await backend.setAlive([session.id])
+        let alive = makeController()
+        await alive.start(.create)
+        #expect(alive.state == .disconnected(reason: "The session did not start within 5 seconds."))
+        #expect(await backend.killed.isEmpty)
+
+        await backend.setAlive([])
+        let gone = makeController()
+        await gone.start(.create)
+        #expect(gone.state == .ended(exitCode: nil))
+        #expect(gone.failure == "The session did not start within 5 seconds.")
+    }
+
+    @Test func unavailableSessionsAreNeverStartedRespawnedOrKilled() async throws {
+        let controller = makeController()
+        controller.markUnavailable(reason: "no runtime")
+        #expect(controller.state == .unavailable(reason: "no runtime"))
+        await controller.start(.attach)
+        await controller.respawn()
+        #expect(controller.state.isUnavailable)
+        #expect(await backend.created.isEmpty)
+        #expect(delegate.replacements.isEmpty)
+        // Once a working backend is there, it can be attached.
+        let working = FakeBackend()
+        await working.setCanAttach(true)
+        controller.useBackend(working, makeOutputFilter: { IdentityOutputFilter() })
+        #expect(controller.state == .detached)
+        await controller.start(.attach)
+        #expect(controller.state == .attached)
+        #expect(await working.attached.map(\.id) == [session.id])
+
+        // Closing an unavailable one does not kill it.
+        let other = makeController()
+        other.markUnavailable(reason: "no runtime")
+        await other.close()
+        #expect(await backend.killed.isEmpty)
+    }
+
+    @Test func detachNowHangsUpWithoutEndingTheSession() async throws {
+        let controller = makeController()
+        await controller.start(.create)
+        let handle = try await handle()
+        controller.detachNow()
+        #expect(handle.hungUp, "synchronously")
+        #expect(controller.state == .detached)
+        #expect(await backend.killed.isEmpty)
+        #expect(await backend.resolved.isEmpty)
+    }
+
+    /// A client whose footprint stays above the limit (two samples in a
+    /// row) is dropped and reattached; a small one is left alone, and
+    /// nothing is sampled during the grace period after an attach.
+    @Test func aClientWithALargeBacklogIsReattached() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        controller.attachGracePeriod = .milliseconds(150)
+        controller.footprintSampleInterval = .milliseconds(20)
+        await controller.start(.create)
+        let first = try await handle(0)
+        // A fresh client: about 2.4 MB in practice.
+        first.setFootprint(3 * 1024 * 1024)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(await backend.attached.isEmpty)
+        // A large backlog: reattached from a reset surface.
+        first.setFootprint(48 * 1024 * 1024)
+        await eventuallyAsync { await backend.attached.count == 1 }
+        await eventually { controller.state == .attached }
+        #expect(first.hungUp)
+        #expect(controller.floodReattaches == 1)
+        #expect(await backend.killed.isEmpty)
+        // The new client is not sampled during its grace period.
+        let second = try await handle(1)
+        second.setFootprint(48 * 1024 * 1024)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await backend.attached.count == 1)
+        await eventuallyAsync { await backend.attached.count == 2 }
+    }
+
+    /// One sample over the limit is not enough: it takes two in a row.
+    @Test func aSingleLargeSampleIsIgnored() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        controller.attachGracePeriod = .zero
+        controller.footprintSampleInterval = .milliseconds(100)
+        await controller.start(.create)
+        let first = try await handle(0)
+        first.setFootprint(48 * 1024 * 1024)
+        try await Task.sleep(for: .milliseconds(30)) // one sample taken at ~0 ms
+        first.setFootprint(3 * 1024 * 1024)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(await backend.attached.isEmpty)
+        #expect(controller.floodReattaches == 0)
+    }
+
+    /// Ephemeral sessions keep real backpressure (the child blocks), so their
+    /// plain PTY handles report no footprint and are never reattached,
+    /// however far behind the consumer is.
+    @Test func plainPTYHandlesReportNoFootprint() async throws {
+        let process = try PTYProcess.spawn(
+            program: "/usr/bin/yes", environment: testEnvironment(), size: PTYSize(columns: 80, rows: 24))
+        try await Task.sleep(for: .milliseconds(300)) // nobody reads: far behind
+        #expect((process as any ProcessHandle).clientFootprint == nil)
+        await process.terminate()
+    }
+
+}
+
+/// Launch housekeeping: live sessions that no saved session refers to.
+@Suite("OrphanReclaimer")
+struct OrphanReclaimerTests {
+    let referenced = SessionID.generate()
+    let orphan = SessionID.generate()
+
+    @Test func killsUnreferencedLiveSessionsWhenStateLoadedCleanly() async {
+        let backend = FakeBackend()
+        let killed = await OrphanReclaimer.reclaim(
+            live: [referenced, orphan], referenced: [referenced, SessionID.generate()],
+            stateLoadedCleanly: true, backend: backend)
+        #expect(killed == [orphan])
+        #expect(await backend.killed == [orphan])
+    }
+
+    @Test func killsNothingWhenTheStateDidNotLoadCleanly() async {
+        let backend = FakeBackend()
+        let killed = await OrphanReclaimer.reclaim(
+            live: [referenced, orphan], referenced: [referenced], stateLoadedCleanly: false, backend: backend)
+        #expect(killed.isEmpty)
+        #expect(await backend.killed.isEmpty)
+    }
+
+    @Test func nothingToDo() async {
+        let backend = FakeBackend()
+        #expect(await OrphanReclaimer.reclaim(
+            live: [referenced], referenced: [referenced], stateLoadedCleanly: true, backend: backend).isEmpty)
+        #expect(OrphanReclaimer.orphans(live: [], referenced: [referenced]).isEmpty)
     }
 }
 

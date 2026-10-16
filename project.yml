@@ -58,6 +58,27 @@ targets:
       path: Armadale/Resources/Armadale.entitlements
       properties:
         com.apple.security.app-sandbox: false
+    # Bundles zmx before the Copy Files phases (docs/DESIGN.md section 4,
+    # "Bundling"): a universal Contents/Helpers/zmx re-signed like ctty-exec,
+    # and the Linux builds as data in Contents/Resources/remote/. Verifies
+    # Vendor/zmx against scripts/zmx.lock first (fetching it if needed).
+    preBuildScripts:
+      - name: Embed zmx
+        script: '"${SRCROOT}/scripts/embed-zmx.sh"'
+        basedOnDependencyAnalysis: true
+        inputFiles:
+          - $(SRCROOT)/scripts/embed-zmx.sh
+          - $(SRCROOT)/scripts/fetch-zmx.sh
+          - $(SRCROOT)/scripts/zmx.lock
+          - $(SRCROOT)/Vendor/zmx/macos-aarch64/zmx
+          - $(SRCROOT)/Vendor/zmx/macos-x86_64/zmx
+          - $(SRCROOT)/Vendor/zmx/linux-aarch64/zmx
+          - $(SRCROOT)/Vendor/zmx/linux-x86_64/zmx
+        outputFiles:
+          - $(DERIVED_FILE_DIR)/zmx
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/zmx
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/remote/zmx-linux-aarch64
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/remote/zmx-linux-x86_64
     dependencies:
       - package: ArmadaleCore
       - package: ArmadaleSessions
@@ -75,6 +96,12 @@ targets:
       base:
         PRODUCT_NAME: Armadale
         PRODUCT_BUNDLE_IDENTIFIER: com.tinylittleapps.armadale
+        # The "Embed zmx" phase is this target's only script phase, and it
+        # cannot run sandboxed: codesign writes a temporary file next to the
+        # helper, and fetch-zmx.sh (when Vendor/zmx does not verify) downloads
+        # and writes Vendor/zmx. Its inputs and outputs are still declared
+        # for dependency analysis.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         # Signing: "Sign to Run Locally" so the project builds without a team.

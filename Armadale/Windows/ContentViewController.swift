@@ -115,9 +115,16 @@ final class ContentViewController: NSViewController, NSMenuItemValidation {
         paneView?.controller.clearScreen()
     }
 
+    /// Workspace › Respawn All Ended (⌥⌘R): every ended pane in this
+    /// window's workspace, shown or not.
+    @objc func respawnAllEnded(_ sender: Any?) {
+        registry.respawnAllEnded(in: workspaceID)
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(closePane(_:)), #selector(clearScreen(_:)): paneView != nil
+        case #selector(respawnAllEnded(_:)): registry.hasEndedSessions(in: workspaceID)
         default: true
         }
     }
@@ -126,19 +133,29 @@ final class ContentViewController: NSViewController, NSMenuItemValidation {
     /// still running and the user has not turned confirmation off.
     private func closePane(_ paneID: PaneID, confirm: Bool) {
         guard let tab = model.tab(containing: paneID), let sessionID = tab.pane(paneID)?.sessionID else { return }
-        let isRunning = registry.controller(for: sessionID)?.isRunning ?? false
+        // A disconnected session may still be running too.
+        let controller = registry.controller(for: sessionID)
+        let isRunning = (controller?.isRunning ?? false) || (controller?.state.isDisconnected ?? false)
+        // An unavailable one cannot be ended from here at all: always ask.
+        let isUnreachable = controller?.state.isUnavailable ?? false
         let wantsConfirmation = UserDefaults.standard.bool(forKey: Self.confirmClosingRunningSessionKey)
-        guard confirm, isRunning, wantsConfirmation, let window = view.window else {
+        guard confirm, isUnreachable || (isRunning && wantsConfirmation), let window = view.window else {
             performClose(paneID, sessionID: sessionID)
             return
         }
         let alert = NSAlert()
         alert.messageText = "Close this pane?"
-        alert.informativeText = "A process is still running in this pane. Closing it will end the session."
+        if isUnreachable {
+            alert.informativeText = "This session may still be running and cannot be reached right now. "
+                + "Closing the pane leaves it running until Armadale next starts with sessions available, "
+                + "and then ends it."
+        } else {
+            alert.informativeText = "A process is still running in this pane. Closing it will end the session."
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Don’t ask again"
+        }
         alert.addButton(withTitle: "Close")
         alert.addButton(withTitle: "Cancel")
-        alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = "Don’t ask again"
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 if alert.suppressionButton?.state == .on {

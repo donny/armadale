@@ -35,6 +35,19 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # The pinned zmx binaries (scripts/zmx.lock) are bundled into the app
+      # and used by the ArmadaleSessions integration tests. Cached by the
+      # lock file's hash; the fetch script re-verifies a cache hit against the
+      # pinned SHA-256 sums and downloads whatever is missing or wrong.
+      - name: Cache zmx
+        uses: actions/cache@v4
+        with:
+          path: Vendor/zmx
+          key: zmx-${{ hashFiles('scripts/zmx.lock') }}
+
+      - name: Fetch zmx
+        run: scripts/fetch-zmx.sh
+
       - name: Generate project
         run: xcodegen generate
 

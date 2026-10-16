@@ -188,6 +188,31 @@ public final class PTYProcess: ProcessHandle {
         await terminate(gracePeriod: .seconds(2))
     }
 
+    /// Hangs up at once and returns without waiting: SIGHUP to the child,
+    /// its group and the terminal's foreground job, then the master is
+    /// closed. SIGKILL follows 2 s later if the child is still there (unless
+    /// the app has exited by then, in which case the closed terminal has
+    /// hung it up anyway). Used when quitting and to drop a flooded client.
+    public func hangUp() {
+        let pid = pid
+        let exit = exit
+        queue.sync {
+            guard exit.value == nil else { return }
+            let fd = io.withLock { $0.fd }
+            let foreground = fd >= 0 ? tcgetpgrp(fd) : -1
+            kill(pid, SIGHUP)
+            killpg(pid, SIGHUP)
+            if foreground > 0, foreground != pid { killpg(foreground, SIGHUP) }
+            queue.asyncAfter(deadline: .now() + .seconds(2)) {
+                if exit.value == nil {
+                    kill(pid, SIGKILL)
+                    killpg(pid, SIGKILL)
+                }
+            }
+        }
+        beginShutdown()
+    }
+
     func terminate(gracePeriod: Duration) async {
         if exit.value == nil {
             await signal(SIGHUP)
@@ -209,6 +234,22 @@ public final class PTYProcess: ProcessHandle {
     /// Suspends until the process exits; `nil` if the waiting task is cancelled.
     public var termination: Termination? {
         get async { await exit.wait() }
+    }
+
+    /// How the process ended, or `nil` if it is still running.
+    public var terminationIfExited: Termination? { exit.value }
+
+    /// Waits until the process exits or `timeout` passes; `nil` if it is
+    /// still running then.
+    public func waitForExit(timeout: Duration) async -> Termination? {
+        await exit.wait(timeout: timeout)
+    }
+
+    /// Looks at the output not yet consumed from ``output`` without
+    /// consuming it: waits until `predicate` holds for it, the output ends,
+    /// or `timeout` passes. See `OutputBuffer.peek`.
+    func peekOutput(timeout: Duration, until predicate: ([UInt8]) -> Bool) async -> (bytes: [UInt8], isFinished: Bool) {
+        await buffer.peek(timeout: timeout, until: predicate)
     }
 
     // MARK: Reading
@@ -275,12 +316,15 @@ public final class PTYProcess: ProcessHandle {
         }
     }
 
-    /// Reads whatever is still buffered in the PTY (bounded), then shuts down.
+    /// Reads whatever is still buffered in the PTY, then shuts down. Bounded
+    /// (16 MB) only against a background job that keeps writing after the
+    /// process exited; what an exited process wrote is all read, even when
+    /// backpressure had paused reading.
     private func drainAndShutdown() {
         let fd = io.withLock { $0.fd }
         if fd >= 0 {
             withUnsafeTemporaryAllocation(byteCount: OutputBuffer.maxBatch, alignment: 1) { chunk in
-                for _ in 0..<16 {
+                for _ in 0..<256 {
                     let count = read(fd, chunk.baseAddress, chunk.count)
                     if count > 0 {
                         _ = buffer.append(UnsafeRawBufferPointer(rebasing: chunk[..<count]))
@@ -371,11 +415,35 @@ public final class PTYProcess: ProcessHandle {
             self?.processDidExit()
         }
         source.resume()
-        // The child may have exited before the source was registered.
-        queue.async { [weak self] in
-            guard Self.reap(pid, into: exit) else { return }
-            source.cancel()
-            self?.processDidExit()
+        // `resume()` registers the kevent asynchronously: a child that exits
+        // before the registration lands (it then targets a zombie) never
+        // produces the event. So also poll with `waitpid` on the same queue,
+        // backing off from 50 ms to 1 s, until the child is reaped: cheap,
+        // and a missed exit can never leave a zombie and a waiter forever.
+        Self.pollExit(queue: queue, after: .milliseconds(0), pid: pid, exit: exit, source: source, owner: WeakRef(self))
+    }
+
+    /// One poll, then the next one, on the process's own serial queue (the
+    /// same queue as the event handler, so the two never race); the closure
+    /// keeps the queue alive after the process object is gone, and polling
+    /// goes on until the child is reaped.
+    private static func pollExit(
+        queue: DispatchQueue, after delay: DispatchTimeInterval, pid: pid_t,
+        exit: Latch<Termination>, source: any DispatchSourceProcess, owner: WeakRef
+    ) {
+        queue.asyncAfter(deadline: .now() + delay) {
+            if exit.value != nil { return } // reaped by the event handler
+            if reap(pid, into: exit) {
+                source.cancel()
+                owner.process?.processDidExit()
+                return
+            }
+            let next: DispatchTimeInterval
+            switch delay {
+            case .milliseconds(let ms) where ms < 1000: next = .milliseconds(min(max(ms * 2, 50), 1000))
+            default: next = .milliseconds(1000)
+            }
+            pollExit(queue: queue, after: next, pid: pid, exit: exit, source: source, owner: owner)
         }
     }
 

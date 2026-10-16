@@ -8,9 +8,24 @@ public enum HelperLocator {
     public struct NotFound: Error, CustomStringConvertible, Sendable {
         public let name: String
         public let searched: [String]
+        /// The override variable named a path that is not an executable.
+        public var badOverride: (variable: String, path: String)?
+
+        public init(name: String, searched: [String], badOverride: (variable: String, path: String)? = nil) {
+            self.name = name
+            self.searched = searched
+            self.badOverride = badOverride
+        }
+
         public var description: String {
-            "Armadale's \(name) helper was not found. Looked in: \(searched.joined(separator: ", ")). "
-                + "Build the app (or `swift build` in Packages/ArmadaleSessions), or set the override variable."
+            if let badOverride {
+                return "\(badOverride.variable) is set to \(badOverride.path), which is not an executable file. "
+                    + "Fix or unset it; Armadale does not fall back to another \(name) when it is set."
+            }
+            let hint = name == "zmx"
+                ? "Run scripts/fetch-zmx.sh to download the pinned zmx release into Vendor/zmx, or set \(HelperLocator.zmxOverride)."
+                : "Build the app (or `swift build` in Packages/ArmadaleSessions), or set \(HelperLocator.cttyExecOverride)."
+            return "Armadale's \(name) helper was not found. Looked in: \(searched.joined(separator: ", ")). " + hint
         }
     }
 
@@ -26,16 +41,63 @@ public enum HelperLocator {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         mainBundle: Bundle = .main
     ) throws(NotFound) -> URL {
-        try locate("ctty-exec", override: environment[cttyExecOverride], mainBundle: mainBundle)
+        try locate("ctty-exec", override: environment[cttyExecOverride], overrideVariable: cttyExecOverride, mainBundle: mainBundle)
     }
 
-    static func locate(_ name: String, override: String?, mainBundle: Bundle) throws(NotFound) -> URL {
+    /// Environment variable that overrides the `zmx` location.
+    public static let zmxOverride = "ARMADALE_ZMX"
+
+    /// The bundled `zmx` (not the installed copy that sessions run; see
+    /// ``HelperInstaller``), looked up in order:
+    /// 1. `$ARMADALE_ZMX`;
+    /// 2. `Contents/Helpers/zmx` of the main bundle;
+    /// 3. `Vendor/zmx/macos-<arch>/zmx` in the source tree, where
+    ///    `scripts/fetch-zmx.sh` puts it (SwiftPM and Xcode package tests).
+    public static func zmx(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        mainBundle: Bundle = .main
+    ) throws(NotFound) -> URL {
+        try locate("zmx", override: environment[zmxOverride], overrideVariable: zmxOverride, mainBundle: mainBundle, extra: vendoredZmx)
+    }
+
+    /// `Vendor/zmx/macos-<arch>/zmx` of the repository this file was built from.
+    public static var vendoredZmx: URL {
+        #if arch(arm64)
+        let platform = "macos-aarch64"
+        #else
+        let platform = "macos-x86_64"
+        #endif
+        // Sources/ArmadaleSessions/HelperLocator.swift → repository root.
+        return URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ArmadaleSessions
+            .deletingLastPathComponent() // Sources
+            .deletingLastPathComponent() // Packages/ArmadaleSessions
+            .deletingLastPathComponent() // Packages
+            .deletingLastPathComponent() // repository
+            .appending(path: "Vendor/zmx/\(platform)/zmx")
+    }
+
+    static func locate(
+        _ name: String, override: String?, overrideVariable: String? = nil, mainBundle: Bundle, extra: URL? = nil
+    ) throws(NotFound) -> URL {
+        // An explicit override is used or it is an error, never skipped: a
+        // silent fallback would hide a mistake in a test setup.
+        if let override, !override.isEmpty {
+            let url = URL(fileURLWithPath: override)
+            guard isExecutableFile(url) else {
+                let error = NotFound(
+                    name: name, searched: [override],
+                    badOverride: (overrideVariable ?? "The override for \(name)", override))
+                NSLog("Armadale: %@", error.description)
+                throw error
+            }
+            return url
+        }
         // Candidates are produced lazily: the test-bundle lookup walks the
         // loaded images and is only needed when the others fail.
         let candidates: [() -> URL?] = [
-            { override.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) } },
             { mainBundle.bundleURL.appending(path: "Contents/Helpers/\(name)") },
-            { productsDirectory()?.appending(path: name) },
+            { extra ?? productsDirectory()?.appending(path: name) },
         ]
         var searched: [String] = []
         for candidate in candidates {

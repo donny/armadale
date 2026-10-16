@@ -17,8 +17,24 @@ public protocol PersistenceBackend: Sendable {
     func liveSessions() async throws -> Set<SessionID>
     /// Ends the session and reaps its daemon.
     func kill(_ id: SessionID) async throws
-    /// The session's retained output, for display after it has ended.
+    /// The session's scrollback and screen as VT bytes. Live sessions only:
+    /// an ended session has no history left to read.
     func history(_ id: SessionID) async throws -> Data
+    /// Decides what the exit of a session's client process means. A zmx
+    /// client exits both when its session ends and when it is merely
+    /// disconnected (its exit status is always 0), so the backend looks at
+    /// the session itself. Never throws: a backend that cannot tell answers
+    /// ``ExitResolution/detached`` and lets one reattach settle it.
+    func resolveExit(of session: Session) async -> ExitResolution
+}
+
+/// What the exit of a session's client process meant.
+public enum ExitResolution: Sendable, Hashable {
+    /// The session is gone (its program exited, or it was killed).
+    case ended
+    /// Only the client went away; the session is still alive and can be
+    /// reattached.
+    case detached
 }
 
 /// Failures common to every ``PersistenceBackend``.
@@ -29,12 +45,16 @@ public enum BackendError: Error, Sendable, Hashable, CustomStringConvertible {
     case noSuchSession(SessionID)
     /// The backend keeps no history for this session.
     case historyUnavailable(SessionID)
+    /// The session runtime failed: a control command exited with an error
+    /// or timed out, or a client could not be started.
+    case runtimeFailure(String)
 
     public var description: String {
         switch self {
         case .notPersistent: "Sessions of this kind do not survive quitting Armadale."
         case .noSuchSession(let id): "Session \(id) does not exist."
         case .historyUnavailable(let id): "No history is kept for session \(id)."
+        case .runtimeFailure(let message): message
         }
     }
 }
@@ -77,6 +97,27 @@ public protocol ProcessHandle: AnyObject, Sendable {
     var exitStatus: Int32? { get async }
     /// Whether the process has not exited yet.
     var isRunning: Bool { get }
+    /// Version of the session runtime this client belongs to, when the
+    /// backend has one (the zmx version that created a session). The app
+    /// records it on the ``Session`` after a create.
+    var runtimeVersion: String? { get }
+    /// Disconnects at once, without waiting: hangs up the process and
+    /// closes its terminal. Safe to call while the app is quitting.
+    func hangUp()
+    /// For clients that buffer output without limit (zmx 0.8.1), the client
+    /// process's memory footprint in bytes, which is where an output backlog
+    /// accumulates when the pane cannot keep up; `nil` for handles that do
+    /// not report it (plain PTY processes, where backpressure works). The
+    /// controller drops and reattaches a client whose footprint stays large.
+    var clientFootprint: UInt64? { get }
+}
+
+extension ProcessHandle {
+    public var runtimeVersion: String? { nil }
+    public var clientFootprint: UInt64? { nil }
+    public func hangUp() {
+        Task { await terminate() }
+    }
 }
 
 /// The runtime state of a session as seen by its pane.
@@ -89,8 +130,13 @@ public enum SessionState: Sendable, Hashable {
     case attached
     /// The session's process has exited.
     case ended(exitCode: Int32?)
-    /// The transport died; the session may still be alive on the host.
+    /// Armadale lost its connection to the session (its client keeps
+    /// going away, or cannot attach); the session may still be running.
     case disconnected(reason: String)
+    /// The session's runtime is not available in this run (the persistent
+    /// backend could not be set up); the session may still be running and
+    /// is left alone.
+    case unavailable(reason: String)
 
     /// Whether the pane is connected to a live process.
     public var isAttached: Bool {
@@ -101,6 +147,16 @@ public enum SessionState: Sendable, Hashable {
     /// Whether the session can never produce more output without a respawn.
     public var isEnded: Bool {
         if case .ended = self { return true }
+        return false
+    }
+
+    public var isDisconnected: Bool {
+        if case .disconnected = self { return true }
+        return false
+    }
+
+    public var isUnavailable: Bool {
+        if case .unavailable = self { return true }
         return false
     }
 }

@@ -14,6 +14,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     var onWindowStateChange: ((WorkspaceWindowController, WindowState) -> Void)?
 
     private let model: AppModel
+    /// Its persistence warning is appended to the subtitle while sessions
+    /// do not outlive the app.
+    private let registry: SessionRegistry
     private let splitViewController = NSSplitViewController()
     private let sidebarItem: NSSplitViewItem
     private var titleTask: Task<Void, Never>?
@@ -24,6 +27,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     init(model: AppModel, workspaceID: WorkspaceID, registry: SessionRegistry) {
         self.model = model
         self.workspaceID = workspaceID
+        self.registry = registry
 
         let sidebar = NSHostingController(rootView: SidebarView(model: model, currentWorkspaceID: workspaceID))
         sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
@@ -105,12 +109,15 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     private func observeTitles() {
         let model = model
         let workspaceID = workspaceID
+        let registry = registry
         titleTask = Task { [weak self] in
             let presentations = Observations {
                 let workspace = model.workspace(workspaceID)
+                let group = workspace?.selectedTabGroup?.name ?? ""
+                let warning = registry.persistenceWarning
                 return Presentation(
                     title: workspace?.name ?? "Armadale",
-                    subtitle: workspace?.selectedTabGroup?.name ?? "",
+                    subtitle: [group, warning ?? ""].filter { !$0.isEmpty }.joined(separator: " — "),
                     isOpen: workspace?.window?.isOpen ?? false)
             }
             for await presentation in presentations {

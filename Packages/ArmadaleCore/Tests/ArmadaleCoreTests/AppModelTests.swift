@@ -257,4 +257,29 @@ struct AppModelTests {
         #expect(model.session(id)?.workingDirectory == "/tmp/x")
         #expect(model.changeCount == before + 1)
     }
+
+    @Test func setRuntimeVersionIsRecordedAndPersisted() throws {
+        let (model, _, _) = makeModel()
+        let id = model.sessions[0].id
+        #expect(model.session(id)?.runtimeVersion == nil)
+        let before = model.changeCount
+        model.setRuntimeVersion("0.8.1", for: id)
+        model.setRuntimeVersion("0.8.1", for: id)
+        model.setRuntimeVersion("1.0", for: SessionID.generate())
+        #expect(model.session(id)?.runtimeVersion == "0.8.1")
+        #expect(model.changeCount == before + 1)
+        #expect(model.persistedState.sessions.first?.runtimeVersion == "0.8.1")
+    }
+
+    @Test func sessionIDsInAWorkspace() throws {
+        let (model, ws, group) = makeModel()
+        let tab = try #require(model.newTab(in: group, profile: nil, workingDirectory: nil))
+        let pane = try #require(model.workspace(ws)?.tabGroups[0].tabs.first { $0.id == tab }?.focusedPaneID)
+        _ = model.splitPane(pane, axis: .horizontal)
+        let other = model.newWorkspace(name: "Other")
+        #expect(model.sessionIDs(in: ws).count == 3)
+        #expect(Set(model.sessionIDs(in: ws)).isDisjoint(with: model.sessionIDs(in: other)))
+        #expect(model.sessionIDs(in: other).count == 1)
+        #expect(model.sessionIDs(in: WorkspaceID.generate()).isEmpty)
+    }
 }

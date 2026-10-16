@@ -83,6 +83,23 @@ final class OutputBuffer: Sendable {
 
     var isFinished: Bool { state.withLock { $0.isFinished } }
 
+    /// Waits, without consuming anything, until the output not yet delivered
+    /// satisfies `predicate`, the output has finished, or `timeout` passes;
+    /// returns that output. Used to look at a client's first bytes before
+    /// its stream is handed to the consumer. Polls: it is only used for a
+    /// moment at attach time.
+    func peek(timeout: Duration, until predicate: ([UInt8]) -> Bool) async -> (bytes: [UInt8], isFinished: Bool) {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while true {
+            let (bytes, finished) = state.withLock { ($0.pending, $0.isFinished) }
+            if finished || predicate(bytes) || clock.now >= deadline || Task.isCancelled {
+                return (bytes, finished)
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     // MARK: Consumer
 
     private func next() async -> [UInt8]? {

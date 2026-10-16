@@ -21,6 +21,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignalSource: (any DispatchSourceSignal)?
     private var isTerminating = false
     private var hasReportedSaveFailure = false
+    /// Why sessions do not persist in this run, if the session runtime
+    /// could not be set up; reported once the app is running.
+    private var sessionSetupFailure: String?
+    /// The persistent runtime, for log housekeeping.
+    private var zmxRuntime: ZmxRuntime?
+    /// The state file loaded as written (or there was none yet). Only then
+    /// are the saved sessions a complete list of what Armadale created.
+    private let stateLoadedCleanly: Bool
 
     /// What to tell the user about the state file at launch.
     private struct LoadReport {
@@ -74,17 +82,122 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         self.stateURL = url
+        // Orphan reclaim needs a state file that existed and loaded: with no
+        // file at all (first launch, or a file the user removed) the references
+        // are unknown, and running sessions must not be killed.
+        if case .loaded(_, isFirstLaunch: false) = result { self.stateLoadedCleanly = true } else { self.stateLoadedCleanly = false }
         self.canSave = result.allowsSaving
         self.loadReport = report
         self.model = AppModel(state: state)
-        // Step 2: plain PTY sessions that end with the app; zmx arrives in step 3.
+        let sessions = Self.makeSessionBackend(for: state.sessions)
+        self.zmxRuntime = sessions.runtime
+        self.sessionSetupFailure = sessions.failure
         self.registry = SessionRegistry(
             model: model,
-            backend: EphemeralBackend(),
+            runtime: sessions.setup,
             restoredSessionIDs: Set(state.sessions.map(\.id)))
         self.saver = StateSaver(url: url)
         UserDefaults.standard.register(defaults: [ContentViewController.confirmClosingRunningSessionKey: true])
         super.init()
+        wireRegistry()
+    }
+
+    private func wireRegistry() {
+        registry.setUpPersistentRuntime = { [weak self] in
+            guard let self, ProcessInfo.processInfo.environment["ARMADALE_BACKEND"] != "ephemeral" else { return nil }
+            let sessions = Self.makeSessionBackend(for: self.model.sessions)
+            guard sessions.setup.isPersistent else { return nil }
+            self.zmxRuntime = sessions.runtime
+            return sessions.setup
+        }
+        // Logs of sessions retired during this run go at once, not only at
+        // the next launch.
+        registry.onSessionRetired = { [weak self] id in
+            self?.zmxRuntime?.removeLog(for: id)
+        }
+        registry.onRuntimeVersionRecorded = { [weak self] in
+            self?.saveNow()
+        }
+    }
+
+    /// Writes the state at once instead of after the debounce.
+    private func saveNow() {
+        guard canSave else { return }
+        saver.schedule(model.persistedState)
+        saver.flush()
+    }
+
+    // MARK: Sessions
+
+    /// What runs the app's (local) sessions, and how it was set up.
+    private struct SessionBackend {
+        var setup: SessionRuntimeSetup
+        var runtime: ZmxRuntime?
+        var failure: String?
+    }
+
+    /// The persistent zmx backend, with the helpers installed into the
+    /// state directory's `bin/`. If that cannot be set up the app still
+    /// works, with sessions that end when it quits. `ARMADALE_BACKEND=ephemeral`
+    /// selects those deliberately (tests, debugging).
+    private static func makeSessionBackend(for sessions: [Session]) -> SessionBackend {
+        let environment = ProcessInfo.processInfo.environment
+        let ephemeral = { (failure: String?) in
+            SessionBackend(
+                setup: SessionRuntimeSetup(
+                    backend: EphemeralBackend(), makeOutputFilter: { IdentityOutputFilter() }, isPersistent: false),
+                runtime: nil, failure: failure)
+        }
+        if environment["ARMADALE_BACKEND"] == "ephemeral" {
+            return ephemeral(nil)
+        }
+        do {
+            let installer = try HelperInstaller.forApp(environment: environment)
+            let installed = try installer.install(
+                referencedZmxVersions: Set(sessions.compactMap(\.runtimeVersion)))
+            let runtime = ZmxRuntime(stateDirectory: StateLocation.directory(environment: environment))
+            try runtime.prepare()
+            let backend = LocalZmxBackend(configuration: LocalZmxBackend.Configuration(
+                runtime: runtime,
+                executables: installed.zmxExecutables,
+                cttyExec: installed.cttyExec.path,
+                resolver: LaunchResolver()))
+            let versions = Dictionary(
+                sessions.compactMap { session in session.runtimeVersion.map { (session.id, $0) } },
+                uniquingKeysWith: { _, last in last })
+            Task { await backend.noteRuntimeVersions(versions) }
+            return SessionBackend(
+                setup: SessionRuntimeSetup(backend: backend, makeOutputFilter: { ZmxOutputFilter() }, isPersistent: true),
+                runtime: runtime, failure: nil)
+        } catch {
+            NSLog("Armadale: persistent sessions unavailable: %@", String(describing: error))
+            return ephemeral(String(describing: error))
+        }
+    }
+
+    /// Launch housekeeping once the live probe has answered: ends live
+    /// sessions no saved session refers to (only when the state loaded
+    /// cleanly; see ``OrphanReclaimer``), then removes the runtime's log files
+    /// of sessions that are neither alive nor in the model.
+    private func collectGarbageAfterProbe() {
+        guard let runtime = zmxRuntime else { return }
+        let model = model
+        let probe = registry.liveProbe
+        let backend = registry.backend
+        let stateLoadedCleanly = stateLoadedCleanly
+        Task {
+            guard let live = await probe.value else { return }
+            let referenced = Set(model.sessions.map(\.id))
+            let killed = await OrphanReclaimer.reclaim(
+                live: live, referenced: referenced, stateLoadedCleanly: stateLoadedCleanly, backend: backend)
+            if !killed.isEmpty {
+                NSLog("Armadale: ended %d session(s) that no pane refers to any more", killed.count)
+            }
+            let removed = runtime.collectGarbageLogs(live: live.subtracting(killed), referenced: referenced)
+            if !removed.isEmpty {
+                NSLog("Armadale: removed %d log file(s) of ended sessions", removed.count)
+            }
+        }
     }
 
     // MARK: NSApplicationDelegate
@@ -113,17 +226,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.reportSaveFailure(error)
         }
         observeModelForPersistence()
+        collectGarbageAfterProbe()
         NSApp.activate()
 
         if let report = loadReport {
             loadReport = nil
             showAlert(message: report.message, details: report.details, style: .warning)
         }
+        if sessionSetupFailure != nil {
+            // The details (logged at setup) name internals; the alert does not.
+            sessionSetupFailure = nil
+            showAlert(
+                message: "Sessions won’t survive quitting Armadale",
+                details: "Armadale could not set up the service that keeps sessions running. Your shells work, "
+                    + "but they will end when Armadale quits, and sessions from earlier runs can’t be reattached. "
+                    + "Reinstalling Armadale may fix this.",
+                style: .warning)
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Windows closing because the app quits must stay "open" for next launch.
         isTerminating = true
+        // Quitting never ends sessions: hang up every client now (SIGHUP and
+        // closing its terminal are synchronous; the session daemons keep
+        // running) and quit at once. Never `.terminateLater`: a quit that
+        // waits on async work deadlocks when it starts inside a main-queue
+        // block, as SIGTERM's handler does (AppKit then runs a nested run
+        // loop the main actor cannot run in), which would block logout.
+        registry.detachAllNow()
         return .terminateNow
     }
 
@@ -163,8 +294,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// File › New Window: a new workspace in its own window.
     @objc func newWindow(_ sender: Any?) {
+        let reference = NSApp.keyWindow ?? NSApp.mainWindow
         let id = model.newWorkspace()
         openWindow(for: id)
+        // Cascade from the current window instead of opening exactly on top.
+        if let reference, let window = windowControllers[id]?.window, window !== reference {
+            window.cascadeTopLeft(from: reference.cascadeTopLeft(from: .zero))
+        }
     }
 
     // MARK: Windows
@@ -230,8 +366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler {
-            MainActor.assumeIsolated {
-                NSApp.terminate(nil)
+            // From the run loop rather than inside this dispatch block, so
+            // the quit runs like ⌘Q's; in the common and modal-panel modes,
+            // so an app-modal alert (a launch warning, a save failure) does
+            // not hold it up until someone clicks OK. Logout must not wait.
+            RunLoop.main.perform(inModes: [.common, .modalPanel]) {
+                MainActor.assumeIsolated {
+                    NSApp.terminate(nil)
+                }
             }
         }
         source.resume()

@@ -132,10 +132,17 @@ public struct LaunchResolver: Sendable {
         return path
     }
 
-    func environment(for session: Session, workingDirectory: String) -> [String: String] {
-        var environment = context.environment.filter { key, _ in
-            !Self.removedVariables.contains(key) && !Self.removedPrefixes.contains { key.hasPrefix($0) }
+    /// `environment` without the variables that describe whatever Armadale
+    /// was started from (and without `ZMX_SESSION*`): the base for sessions
+    /// and for helper processes such as zmx control commands.
+    public static func scrubbed(_ environment: [String: String]) -> [String: String] {
+        environment.filter { key, _ in
+            !removedVariables.contains(key) && !removedPrefixes.contains { key.hasPrefix($0) }
         }
+    }
+
+    func environment(for session: Session, workingDirectory: String) -> [String: String] {
+        var environment = Self.scrubbed(context.environment)
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
         environment["TERM_PROGRAM"] = "Armadale"

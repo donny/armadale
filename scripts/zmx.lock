@@ -1,0 +1,9 @@
+# Pinned zmx release (https://zmx.sh). Read by scripts/fetch-zmx.sh and by
+# ArmadaleSessions' tests (ZmxVersion.current must equal the version below).
+# To update: change the version, replace every hash with the SHA-256 of the
+# new tarballs, update ZmxVersion.swift, and run scripts/fetch-zmx.sh.
+version 0.8.1
+1d86b1c9fba47fa707a6f0e976b20510b07c1c26d0ed010b9414b2a2c5e6beef  zmx-0.8.1-macos-aarch64.tar.gz
+3208578ad91d8a62077772dc8a1369a92033d9e84169bac673ef8542b6ff9707  zmx-0.8.1-macos-x86_64.tar.gz
+943eb44c812333fd450da12097521afd3339436e86f8c2ac618b905c4c9ece68  zmx-0.8.1-linux-aarch64.tar.gz
+dfd75720b942466f28870731cc86dbc07afa72fb8f3bd5eeb4ff707e4eecebe8  zmx-0.8.1-linux-x86_64.tar.gz
