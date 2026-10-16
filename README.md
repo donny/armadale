@@ -9,8 +9,11 @@ splits and SwiftUI for chrome. Terminal rendering sits behind a pluggable
 persistence comes from a private, bundled `zmx` daemon. Layout is stored as
 versioned JSON in `~/Library/Application Support/Armadale/`.
 
-Status: step 1 (skeleton): project, packages, data model, layout operations,
-state persistence, and an empty window with a read-only sidebar.
+Status: step 2 (one pane). The window shows the focused pane of the
+selected tab: a real login shell on Armadale's own PTY layer, rendered by
+SwiftTerm. When the session ends, the pane shows *Session Ended* with
+Respawn / Close Pane. Sessions are not yet persistent: they end when the app
+quits, and after a relaunch they show as ended (zmx arrives in step 3).
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -37,6 +40,10 @@ xcodebuild -project Armadale.xcodeproj -scheme Armadale \
 (cd Packages/ArmadaleCore && swift test)
 ```
 
+`ArmadaleSessions` tests spawn real processes on PTYs (zsh and bare
+binaries) through the `ctty-exec` helper, so they need no mocks for the I/O
+path. They take about 10 s.
+
 Dependency versions are locked in
 `Armadale.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
 It is the only tracked file inside the generated project, and
@@ -53,13 +60,38 @@ time you build.
 Set `ARMADALE_STATE_DIR=/some/dir` to point the app at a different state
 directory, for example when debugging.
 
+### The `ctty-exec` helper
+
+Sessions are spawned through a tiny trampoline, `ctty-exec`, which makes the
+PTY the child's controlling terminal and then execs the real program. Without
+it, `^C` and window resizes never reach the program; see docs/DESIGN.md
+section 7. Its source is `Packages/ArmadaleSessions/Sources/ctty-exec/main.swift`,
+and it is built in two places:
+
+- `project.yml` has a `ctty-exec` command-line tool target. The app depends
+  on it, and a Copy Files phase puts it in `Armadale.app/Contents/Helpers/`,
+  re-signed with the app's identity.
+- `Packages/ArmadaleSessions` declares it as an executable target, so
+  `swift build` / `swift test` build it next to the test bundle.
+
+`HelperLocator` looks for it in `$ARMADALE_CTTY_EXEC`, then in the app's
+`Contents/Helpers/`, then next to the running test bundle. Set
+`ARMADALE_CTTY_EXEC=/path/to/ctty-exec` to override the location.
+
+When you check PTY behaviour by hand, use zsh or a bare program, never
+`/bin/sh`. macOS's `/bin/sh` is bash, which acquires the controlling
+terminal itself and so hides a broken spawn.
+
+The `confirmClosingRunningSession` user default (default `true`) controls
+whether ⌘W asks before closing a pane whose process is still running.
+
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `Armadale/` | AppKit app: lifecycle, menus, windows, SwiftUI sidebar |
+| `Armadale/` | AppKit app: lifecycle, menus, windows, SwiftUI sidebar, panes, `SessionRegistry` |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `AppModel`, `StateStore`, migrations (no AppKit) |
-| `Packages/ArmadaleSessions` | Session backends and process plumbing (protocols only so far) |
+| `Packages/ArmadaleSessions` | `PTYProcess`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol and appearance types |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |

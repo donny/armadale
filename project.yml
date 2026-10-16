@@ -63,6 +63,14 @@ targets:
       - package: ArmadaleSessions
       - package: TerminalSurface
       - package: SwiftTermSurface
+      # Copy Files phase: Contents/Helpers/ctty-exec, re-signed on copy with
+      # the app's identity (docs/DESIGN.md section 4, "Bundling").
+      - target: ctty-exec
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
     settings:
       base:
         PRODUCT_NAME: Armadale
@@ -82,6 +90,38 @@ targets:
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
         COMBINE_HIDPI_IMAGES: YES
+
+  # The trampoline that gives spawned sessions their controlling terminal
+  # (docs/DESIGN.md section 7). Same source as the SwiftPM executable target
+  # in Packages/ArmadaleSessions, which `swift test` uses.
+  ctty-exec:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Packages/ArmadaleSessions/Sources/ctty-exec
+    settings:
+      base:
+        PRODUCT_NAME: ctty-exec
+        PRODUCT_BUNDLE_IDENTIFIER: com.tinylittleapps.armadale.ctty-exec
+        # An Info.plist section in the binary gives the helper a stable code
+        # signing identifier (its bundle ID) instead of a hash-suffixed name.
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        # No entitlements at all. Xcode would otherwise inject base
+        # entitlements (get-task-allow) and, because it considers
+        # entitlements required, com.apple.application-identifier: a restricted
+        # entitlement that, without a provisioning profile, can make AMFI
+        # refuse to launch the helper under Developer ID, so every session
+        # would fail to start. Sign-on-copy preserves whatever is here.
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+        ENTITLEMENTS_REQUIRED: NO
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
+        SKIP_INSTALL: YES
 
 schemes:
   Armadale:

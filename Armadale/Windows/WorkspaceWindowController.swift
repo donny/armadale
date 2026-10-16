@@ -21,7 +21,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     private static let defaultSize = NSSize(width: 1100, height: 700)
     private static let defaultSidebarWidth: CGFloat = 240
 
-    init(model: AppModel, workspaceID: WorkspaceID) {
+    init(model: AppModel, workspaceID: WorkspaceID, registry: SessionRegistry) {
         self.model = model
         self.workspaceID = workspaceID
 
@@ -30,7 +30,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         sidebarItem.minimumThickness = 180
         sidebarItem.maximumThickness = 420
         sidebarItem.canCollapse = true
-        let content = NSSplitViewItem(viewController: ContentViewController())
+        let content = NSSplitViewItem(
+            viewController: ContentViewController(model: model, workspaceID: workspaceID, registry: registry))
         content.minimumThickness = 320
         splitViewController.addSplitViewItem(sidebarItem)
         splitViewController.addSplitViewItem(content)

@@ -12,10 +12,11 @@ private final class EchoHandle: ProcessHandle {
         (output, continuation) = AsyncStream.makeStream(of: [UInt8].self)
     }
 
-    func write(_ bytes: [UInt8]) async { continuation.yield(bytes) }
-    func resize(_ size: PTYSize) async {}
+    func write(_ bytes: [UInt8]) { continuation.yield(bytes) }
+    func resize(_ size: PTYSize) {}
     func terminate() async { continuation.finish() }
     var exitStatus: Int32? { get async { 0 } }
+    var isRunning: Bool { false }
 }
 
 @Suite("ArmadaleSessions")
@@ -30,7 +31,7 @@ struct SessionStateTests {
 
     @Test func handleEchoesAndFinishes() async {
         let handle = EchoHandle()
-        await handle.write(Array("hi".utf8))
+        handle.write(Array("hi".utf8))
         await handle.terminate()
         var received: [UInt8] = []
         for await chunk in handle.output { received += chunk }

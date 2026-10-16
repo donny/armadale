@@ -332,6 +332,37 @@ public final class AppModel {
         didChange()
     }
 
+    /// Records a session's working directory as reported by its program
+    /// (OSC 7), so a respawn or split starts there.
+    public func setWorkingDirectory(_ path: String, for id: SessionID) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }),
+              sessions[index].workingDirectory != path
+        else { return }
+        sessions[index].workingDirectory = path
+        didChange()
+    }
+
+    /// Replaces session `old` with `new` (a respawn): every pane bound to
+    /// `old` is rebound to `new`, and `old` is retired. Does nothing if `old`
+    /// is unknown or `new`'s ID is already in use.
+    public func replaceSession(_ old: SessionID, with new: Session) {
+        guard let index = sessions.firstIndex(where: { $0.id == old }),
+              !sessions.contains(where: { $0.id == new.id })
+        else { return }
+        sessions[index] = new
+        for w in workspaces.indices {
+            for g in workspaces[w].tabGroups.indices {
+                for t in workspaces[w].tabGroups[g].tabs.indices {
+                    for p in workspaces[w].tabGroups[g].tabs[t].panes.indices
+                    where workspaces[w].tabGroups[g].tabs[t].panes[p].sessionID == old {
+                        workspaces[w].tabGroups[g].tabs[t].panes[p].sessionID = new.id
+                    }
+                }
+            }
+        }
+        didChange()
+    }
+
     // MARK: - Internals
 
     private struct TabGroupPath { var workspace: Int; var tabGroup: Int }

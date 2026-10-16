@@ -1,11 +1,14 @@
 import AppKit
 import ArmadaleCore
+import ArmadaleSessions
 
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: AppModel
+    /// Session controllers for every pane shown so far.
+    private let registry: SessionRegistry
     private let stateURL: URL
     private let saver: StateSaver
     /// False when the state on disk must not be overwritten (written by a
@@ -74,7 +77,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.canSave = result.allowsSaving
         self.loadReport = report
         self.model = AppModel(state: state)
+        // Step 2: plain PTY sessions that end with the app; zmx arrives in step 3.
+        self.registry = SessionRegistry(
+            model: model,
+            backend: EphemeralBackend(),
+            restoredSessionIDs: Set(state.sessions.map(\.id)))
         self.saver = StateSaver(url: url)
+        UserDefaults.standard.register(defaults: [ContentViewController.confirmClosingRunningSessionKey: true])
         super.init()
     }
 
@@ -170,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let workspace = model.workspace(id), workspace.window?.isOpen != true || workspace.tabGroups.isEmpty {
             model.reopenWorkspace(id)
         }
-        let controller = WorkspaceWindowController(model: model, workspaceID: id)
+        let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
         controller.onWindowStateChange = { [weak self] controller, state in
             guard let self, !self.isTerminating else { return }
             if !state.isOpen {

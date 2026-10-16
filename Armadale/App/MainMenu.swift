@@ -28,6 +28,7 @@ enum MainMenu {
         let file = submenu("File", in: main)
         file.addItem(withTitle: "New Window", action: #selector(AppDelegate.newWindow(_:)), keyEquivalent: "n")
         file.addItem(.separator())
+        file.addItem(withTitle: "Close Pane", action: #selector(ContentViewController.closePane(_:)), keyEquivalent: "w")
         file.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
 
         // Edit
@@ -35,10 +36,14 @@ enum MainMenu {
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
         edit.addItem(.separator())
+        // Nil-targeted: Copy, Paste and Select All reach SwiftTerm's terminal
+        // view through the responder chain when it is first responder.
         edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Clear Screen", action: #selector(ContentViewController.clearScreen(_:)), keyEquivalent: "k")
 
         // View
         let view = submenu("View", in: main)

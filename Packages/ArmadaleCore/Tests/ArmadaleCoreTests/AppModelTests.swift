@@ -227,4 +227,34 @@ struct AppModelTests {
         model.newWorkspace()
         #expect(model.workspaces.map(\.name) == ["Workspace", "Workspace 2"])
     }
+
+    @Test func replaceSessionRebindsPaneAndRetiresOld() throws {
+        let (model, _, _) = makeModel()
+        let tab = model.workspaces[0].tabGroups[0].tabs[0]
+        let old = try #require(model.session(tab.panes[0].sessionID))
+        model.setTitle("vim", for: old.id)
+        let fresh = Session(
+            location: old.location, profileID: old.profileID, launch: old.launch, workingDirectory: old.workingDirectory)
+        let before = model.changeCount
+        model.replaceSession(old.id, with: fresh)
+        #expect(model.session(old.id) == nil)
+        #expect(model.session(fresh.id) == fresh)
+        #expect(model.workspaces[0].tabGroups[0].tabs[0].panes[0].sessionID == fresh.id)
+        #expect(model.sessions.count == 1)
+        #expect(model.changeCount == before + 1)
+        // Unknown old IDs and duplicate new IDs are ignored.
+        model.replaceSession(old.id, with: Session(profileID: old.profileID, launch: old.launch, workingDirectory: "/"))
+        model.replaceSession(fresh.id, with: fresh)
+        #expect(model.sessions == [fresh])
+    }
+
+    @Test func setWorkingDirectoryRecordsOSC7() throws {
+        let (model, _, _) = makeModel()
+        let id = model.sessions[0].id
+        let before = model.changeCount
+        model.setWorkingDirectory("/tmp/x", for: id)
+        model.setWorkingDirectory("/tmp/x", for: id)
+        #expect(model.session(id)?.workingDirectory == "/tmp/x")
+        #expect(model.changeCount == before + 1)
+    }
 }

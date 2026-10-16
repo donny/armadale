@@ -225,14 +225,20 @@ detail: nothing in the UI, menus or settings says "zmx".
 
 ```swift
 protocol PersistenceBackend: Sendable {
-    func create(_ session: Session) async throws -> ProcessHandle   // attach, creating
-    func attach(_ session: Session) async throws -> ProcessHandle   // attach only if exists
+    func create(_ session: Session, size: PTYSize) async throws -> ProcessHandle  // attach, creating
+    func attach(_ session: Session, size: PTYSize) async throws -> ProcessHandle  // attach only if exists
     func exists(_ id: SessionID) async throws -> Bool
     func liveSessions() async throws -> Set<SessionID>
     func kill(_ id: SessionID) async throws
     func history(_ id: SessionID) async throws -> Data               // live sessions only
 }
 ```
+
+`size` is the PTY's initial window size. It has to be set when the PTY is
+opened, otherwise the program's first output (a shell prompt, an agent's
+first screen) is laid out for the wrong width. Failures common to all
+backends are `BackendError` values (`notPersistent`, `noSuchSession`,
+`historyUnavailable`).
 
 Implementations:
 
@@ -242,7 +248,9 @@ Implementations:
   `execvpe`. There is **no `--` separator**: zmx would try to execute `--`.
 - `RemoteZmxBackend` — same commands wrapped in `ssh` (section 6).
 - `EphemeralBackend` — a plain PTY with no daemon. Used as a fallback when
-  the remote host cannot take a zmx deployment, and in UI tests.
+  the remote host cannot take a zmx deployment, and in UI tests. Its
+  `attach` always throws `BackendError.notPersistent`, so sessions it
+  created show as ended after a relaunch.
 
 The distinction between **create** and **attach** matters: `zmx attach`
 creates a session if none exists, which would silently respawn a dead agent
@@ -310,7 +318,10 @@ is not configurable.
   socket as an error entry, cleans it up, and `ls --short` omits it. The pane
   ends up in the same ended state.
 - **Respawn**: creates a new session with the same `launch`, directory and
-  location, and rebinds the pane to it. The old session ID is retired.
+  location, and rebinds the pane to it. The old session ID is retired. The
+  surface is fully reset first (RIS, scrollback cleared), so modes a dead
+  program left on, such as the alternate screen or mouse reporting, do not
+  carry over.
 - **Disconnected** (remote only): the ssh transport died. The placeholder
   shows **Reconnect** / **Close Pane**, and Armadale retries in the
   background with exponential backoff (1 s → 30 s) until the host answers,
@@ -322,8 +333,22 @@ is not configurable.
 
 `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Armadale`,
 `TERM_PROGRAM_VERSION`, `ARMADALE_SESSION_ID`, `LANG` (from the user's
-locale), the user's login shell environment (the program is launched through
-`$SHELL -l -c` for shell profiles), plus profile environment. Because the
+locale), the user's login shell environment, plus profile environment
+(merged last, so it wins). A session without a program runs the login shell
+from the user database as a login shell (`argv[0]` `-zsh`, plus `-l`). A
+session with a program runs it as `$SHELL -l -c 'exec <program> <args…>'`,
+so it is found on, and runs with, the login `PATH` rather than the app's
+minimal launchd environment.
+
+The base is the app's own environment, minus variables that describe
+whatever Armadale itself was started from: `ZMX_SESSION*`, `TMUX`, `STY`,
+`TERM_SESSION_ID`, `ITERM_*`, `KITTY_*`, `GHOSTTY_*`, `WEZTERM_*`,
+`ALACRITTY_*`, `LC_TERMINAL*`, `VTE_VERSION`, `WINDOWID`, `SHLVL`,
+`OLDPWD`, `TERMINFO`, `COLORFGBG`, `XPC_SERVICE_NAME`, `DYLD_*` and other
+Xcode launch variables, and Armadale's own
+`ARMADALE_*` (for example `ARMADALE_STATE_DIR`). `PWD` is set to the
+working directory, and a working directory that no longer exists falls back
+to the home directory. This is done by `LaunchResolver`. Because the
 daemon inherits the cwd and environment of the **creating** client only
 (verified), later attaches cannot change them; zmx's tracked‑variable
 mechanism keeps `SSH_AUTH_SOCK` current. zmx itself sets `ZMX_SESSION` inside
@@ -428,24 +453,81 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   Swift after a fork in a multithreaded app.
 - The parent keeps the slave fd open until `posix_spawn` returns; closing it
   earlier resets the tty and the child reads a 0×0 window size.
+- The PTY pair is opened with `O_CLOEXEC | O_NOCTTY` on the `open` calls
+  themselves (`/dev/ptmx`, `grantpt`, `unlockpt`, `ptsname_r`), not
+  `openpty()` followed by `fcntl`. A `Process` launched concurrently
+  elsewhere in the app therefore cannot inherit the master, and the app
+  never acquires the terminal itself.
+- `ctty-exec` is signed with no entitlements at all
+  (`CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`, `ENTITLEMENTS_REQUIRED = NO`).
+  Xcode would otherwise add `com.apple.application-identifier`, a restricted
+  entitlement that, without a provisioning profile, can stop the helper
+  from launching under Developer ID. Release builds keep the
+  hardened-runtime flag.
+- `HelperLocator` finds `ctty-exec` via `$ARMADALE_CTTY_EXEC`, then
+  `Contents/Helpers/` of the main bundle, then next to the running `.xctest`
+  bundle (SwiftPM and Xcode build the executable there for package tests).
 - Only fds 0–2 reach the child (`CLOEXEC_DEFAULT`). This matters because the
   zmx daemon only closes inherited fds 3–63.
-- Output is read with a `DispatchSource` on the master fd into a 64 KB
-  buffer and delivered to the main actor in coalesced batches (≤ 16 ms or
-  when the buffer fills), which keeps a chatty agent from starving the UI.
-- Input and resizes are written on a serial queue. Process exit is observed
-  with `DispatchSource.makeProcessSource(.exit)` and `waitpid`. For zmx
-  clients the exit status is meaningless (always 0); the session state is
-  decided by `exists(id)` afterwards.
-- The spike harness in the scratchpad (`PTYSpawn.swift`, `ctty-exec.swift`)
-  is the reference implementation for step 2 and compiles under Swift 6
-  strict concurrency with no `nonisolated(unsafe)` or `@unchecked Sendable`.
+- Output is read with a `DispatchSource` on the non-blocking master fd into
+  a 64 KB buffer and delivered as an `AsyncStream<[UInt8]>` of batches of at
+  most 64 KB. Delivery is throttled rather than debounced: the first bytes
+  after a quiet period go out at once, so echo is never delayed, and within
+  16 ms of the previous batch more output waits until the 16 ms are up or
+  64 KB have accumulated. The stream is pull-based. Above 256 KB of
+  undelivered output the read source is suspended, so the kernel's PTY
+  buffer fills and the child blocks, as it would on any slow terminal. A
+  full 64 KB batch is handed over at once, whatever the interval. Under a
+  flood (`yes`, a million-line `seq`) the main actor is therefore busy
+  (about 2,200 batches a second were measured with a free consumer) but
+  stays responsive, because each feed is bounded and the main run loop
+  handles events between feeds. Memory stays bounded by the backpressure.
+  A hard limit of one batch per 16 ms was rejected: it would cap output at
+  about 4 MB/s.
+- The stream finishes at EOF/EIO. If a leftover background job keeps the
+  terminal open after the process exits, it finishes 100 ms after the exit
+  instead, and the master is closed.
+- Input and resizes go through a serial queue in call order.
+  `ProcessHandle.write` and `resize` are synchronous enqueue calls rather
+  than `async`, because separate tasks calling async methods could reorder
+  keystrokes. Partial writes and `EAGAIN` are retried without blocking reads.
+  Process exit is observed with `DispatchSource.makeProcessSource(.exit)`
+  and `waitpid`. For zmx clients the exit status is meaningless (always 0);
+  the session state is decided by `exists(id)` afterwards.
+- `terminate()` sends SIGHUP to the child, its process group and the
+  terminal's foreground job, sends SIGKILL to the same set if anything is
+  still running 2 s later, then closes the master. Signals are only sent
+  before the child is reaped, on the same queue that reaps it, so a reused
+  pid is never signalled.
+- Dropping a `PTYProcess` closes the master and also sends SIGHUP itself.
+  The kernel's hangup on master close only reaches a child that has already
+  acquired the terminal, and one dropped right after spawn may not have done
+  so yet (observed: a `sleep` outlived its closed PTY). The child is still
+  reaped when it exits, so neither fds nor zombies leak.
+- `PTYProcess` is a port of the spike harness (`PTYSpawn.swift`,
+  `ctty-exec.swift`). It is Sendable with all mutable state in
+  `Synchronization.Mutex`, and uses no `nonisolated(unsafe)` or
+  `@unchecked Sendable`. `forkpty` stays selectable as a fallback.
 - One‑shot commands (`zmx ls`, `kill`, ssh control) go through an
   `actor CommandRunner` built on `Process` with async `run() -> (status,
   stdout, stderr)` and a timeout.
 - `SessionController` (`@MainActor`) is the per‑session glue: owns the
   surface, the `ProcessHandle`, the state machine, the attention flag, and
-  forwards title / cwd / bell to `AppModel`.
+  forwards title / cwd / bell to `AppModel` through a delegate. An optional
+  `OutputFilter`, made fresh for each attach, rewrites output before it
+  reaches the surface. It is the identity for ephemeral sessions; zmx uses
+  it to strip the RIS sequence at end of stream. The filter's `finish()`
+  runs exactly once per attach, however the session ends. The session ends
+  when the process has exited and its output has drained, or 500 ms after
+  the exit if the stream stays open.
+- `respawn()` is not re-entrant: a second call while one is in progress
+  does nothing, so a double click cannot retire one session twice. A
+  connect that `close()` or `respawn()` overtakes is killed in the backend
+  when it completes, not just disconnected, so no daemon is left
+  unreferenced.
+- ⌘K clears the surface's scrollback and sends ^L to the program, the
+  conventional redraw key. A shell clears and redraws its own prompt, so
+  its idea of the cursor stays correct. An ended pane is cleared locally.
 
 ### Concurrency rules
 
@@ -481,6 +563,15 @@ WorkspaceWindowController (NSWindowController, one per open workspace)
 - `SplitTreeView` diffs the new `PaneLayout` against the current view tree
   and reparents existing `PaneView`s rather than rebuilding, preserving
   terminal views and first responder.
+- An app-level `SessionRegistry` owns one `SessionController` and its
+  `PaneView` per session shown so far. It creates them lazily when a pane
+  first becomes visible and keeps them until the session leaves the model,
+  so tab switches and window closes never destroy a terminal. It is the
+  controllers' delegate, and it records titles, directories and respawns in
+  `AppModel`.
+- The pane area is pinned to the content view's safe area. On macOS 27 the
+  content view extends under both the transparent title bar and the
+  floating sidebar.
 - Keyboard focus follows `focusedPaneID`; the focused pane has a subtle
   accent border, the unfocused ones dim slightly.
 - The tab bar is custom SwiftUI (not `NSTabView`): it needs shortcut badges,
@@ -569,13 +660,15 @@ armadale/
 │   ├── Windows/                     WorkspaceWindowController, ContentViewController
 │   ├── Sidebar/                     SidebarView (SwiftUI)
 │   ├── Tabs/                        TabBarView (SwiftUI)
-│   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, PlaceholderView
+│   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
+│   ├── Sessions/                    SessionRegistry (controllers per session)
 │   ├── Settings/                    SettingsWindowController + SwiftUI tabs
 │   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements
-│   └── Support/                     Keybindings, ThemeCatalog
+│   └── Support/                     Keybindings, ThemeCatalog (DefaultTheme until step 5)
 ├── Packages/
 │   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations   (no AppKit)
-│   ├── ArmadaleSessions/            PTYProcess, CommandRunner, backends, SSHTransport, SessionController
+│   ├── ArmadaleSessions/            PTYProcess, CommandRunner, backends, SSHTransport, SessionController,
+│   │                                LaunchResolver, HelperLocator; Sources/ctty-exec (helper source)
 │   ├── TerminalSurface/             protocol + appearance types
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)

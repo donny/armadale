@@ -5,10 +5,12 @@ import Foundation
 /// (this Mac, or one SSH host). Implementations are actors or otherwise
 /// thread-safe; everything crossing the boundary is `Sendable`.
 public protocol PersistenceBackend: Sendable {
-    /// Attaches to `session`, creating it if it does not exist.
-    func create(_ session: Session) async throws -> any ProcessHandle
+    /// Attaches to `session`, creating it if it does not exist. `size` is
+    /// the PTY's initial window size, so the program's first output is laid
+    /// out for the pane it appears in.
+    func create(_ session: Session, size: PTYSize) async throws -> any ProcessHandle
     /// Attaches to `session` only if it already exists; never creates one.
-    func attach(_ session: Session) async throws -> any ProcessHandle
+    func attach(_ session: Session, size: PTYSize) async throws -> any ProcessHandle
     /// Whether the session is alive.
     func exists(_ id: SessionID) async throws -> Bool
     /// All live sessions this backend owns.
@@ -17,6 +19,24 @@ public protocol PersistenceBackend: Sendable {
     func kill(_ id: SessionID) async throws
     /// The session's retained output, for display after it has ended.
     func history(_ id: SessionID) async throws -> Data
+}
+
+/// Failures common to every ``PersistenceBackend``.
+public enum BackendError: Error, Sendable, Hashable, CustomStringConvertible {
+    /// The backend cannot reattach: its sessions do not outlive the app.
+    case notPersistent
+    /// The session does not exist (any more).
+    case noSuchSession(SessionID)
+    /// The backend keeps no history for this session.
+    case historyUnavailable(SessionID)
+
+    public var description: String {
+        switch self {
+        case .notPersistent: "Sessions of this kind do not survive quitting Armadale."
+        case .noSuchSession(let id): "Session \(id) does not exist."
+        case .historyUnavailable(let id): "No history is kept for session \(id)."
+        }
+    }
 }
 
 /// A PTY window size, as passed to `TIOCSWINSZ`.
@@ -37,19 +57,26 @@ public struct PTYSize: Sendable, Hashable {
 }
 
 /// A running client process attached to a session, usually through a PTY.
+///
+/// `write` and `resize` are synchronous and only enqueue: calls take effect
+/// in the order they are made, which async methods called from separate
+/// tasks could not guarantee (keystrokes must never be reordered).
 public protocol ProcessHandle: AnyObject, Sendable {
     /// Output bytes, delivered in coalesced batches. Finishes when the
-    /// process closes its side of the PTY.
+    /// process closes its side of the PTY. Supports a single consumer.
     var output: AsyncStream<[UInt8]> { get }
-    /// Writes input to the process.
-    func write(_ bytes: [UInt8]) async
-    /// Resizes the PTY.
-    func resize(_ size: PTYSize) async
-    /// Asks the process to exit (SIGHUP, then SIGKILL after a grace period).
+    /// Queues input for the process.
+    func write(_ bytes: [UInt8])
+    /// Queues a PTY resize (`TIOCSWINSZ`).
+    func resize(_ size: PTYSize)
+    /// Asks the process to exit (SIGHUP, then SIGKILL after a grace period)
+    /// and returns once it has.
     func terminate() async
     /// Suspends until the process exits, then returns its exit code, or
     /// `nil` if it was killed by a signal or its status is unknown.
     var exitStatus: Int32? { get async }
+    /// Whether the process has not exited yet.
+    var isRunning: Bool { get }
 }
 
 /// The runtime state of a session as seen by its pane.

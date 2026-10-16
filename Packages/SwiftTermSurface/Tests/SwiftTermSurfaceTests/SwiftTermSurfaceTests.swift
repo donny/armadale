@@ -80,4 +80,15 @@ struct SwiftTermSurfaceTests {
         surface.simulateLinkActivation("https://example.com")
         #expect(delegate.links == ["https://example.com"])
     }
+
+    /// The Edit menu's Copy / Paste / Select All are nil-targeted, so they
+    /// reach SwiftTerm through the responder chain when the terminal view is
+    /// first responder.
+    @Test func editMenuActionsReachTheTerminalView() {
+        let view = SwiftTermSurface().view
+        #expect(view.acceptsFirstResponder)
+        #expect(view.responds(to: #selector(NSText.copy(_:))))
+        #expect(view.responds(to: #selector(NSText.paste(_:))))
+        #expect(view.responds(to: #selector(NSText.selectAll(_:))))
+    }
 }
