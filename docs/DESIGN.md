@@ -60,6 +60,42 @@ Each tab row carries a status glyph:
 | ○ ended | all panes have exited |
 | ⚠ disconnected | remote host unreachable; sessions may still be alive there |
 
+*Step 4:* the glyph is shared by the sidebar's tab rows and the tab bar
+(`StatusGlyph`), computed by `SessionRegistry.status(of:)`. Two states were
+added: *starting* (dotted circle: not attached yet, or a pane never shown
+whose session the launch probe did not find alive) and *unavailable* (the
+persistent runtime could not be set up). A pane not shown yet whose session
+the probe found alive counts as running. A tab shows the most important
+state of its panes: disconnected, unavailable, running, starting, and ended
+only when all have ended. *Attention* arrives with step 7.
+
+The current workspace's row is emphasised (accent icon, semibold), the
+window's selected tab group is the selected row, and a closed workspace is
+dimmed with a "reopen" icon. Rows: a click on another workspace shows or
+opens its window; on a tab group or tab, selects it (bringing its window to
+front if it belongs to another workspace). Double-click renames (a sheet,
+not inline editing). Context menus: workspace — New Tab Group, Rename,
+Show/Open Window, Delete Workspace… (always confirmed); tab group — New Tab,
+New Tab Group, Rename, Close Tab Group (confirmed like ⌘W); tab — Rename,
+Close Tab, Close Other Tabs. Drag and drop uses a private UTType
+(`com.tinylittleapps.armadale.hierarchy-item`, declared in Info.plist), so a
+tab dropped on a terminal never types anything: a tab group dropped on
+another of the same workspace takes its place; a tab (from the tab bar or the
+sidebar) dropped on a tab group moves to its end and becomes that group's
+selected tab, while the window keeps showing its current group (Finder-like
+filing; a group left empty by a move is kept and shows an empty state with
+New Tab; ⌘W there closes the group, without asking since nothing runs in
+it). A rename sheet opens on the window of the workspace that owns the
+item, so double-clicking another workspace's row (which brings its window
+forward) puts the sheet there.
+
+Closing asks first (unless turned off) when a session may be running:
+running or disconnected, or *starting* when a process may exist: a session
+restored from an earlier run before the launch probe has answered, or one
+whose start is under way. A session created in this run whose pane was
+never shown has no process and does not ask. Unreachable (unavailable)
+sessions always ask (`CloseRisk`, unit-tested).
+
 ---
 
 ## 2. Data model (`ArmadaleCore`)
@@ -141,14 +177,36 @@ not a profile: it is any profile with a `.remote(host)` location.
 
 Layout operations live in `PaneLayout` as pure functions with unit tests:
 `split(pane, axis, newPane)`, `remove(pane)` (collapses the parent),
-`neighbor(of:direction:)`, `resize(pane, delta)`, `swap`, `equalize`.
+`neighbor(of:direction:)`, `resize(pane, delta)`, `swap`, `equalize` (weighted
+by how many panes sit side by side on each axis, so nested columns come out
+equal, as in Ghostty), and
+(step 4) `moveDivider(of:toward:by:)` (⌃⌘ arrow: moves the pane's nearest
+divider on that axis in the arrow's direction, as Ghostty's
+`resize_split` does, whichever side of it the pane is on),
+`hasSameShape(as:)` and `clampingRatios()`.
+
+`SplitTreeReconciler` (also in `ArmadaleCore`, pure and tested) turns
+successive layouts of one view into `SplitTree`s: the same tree with an
+identity on every split container. A new split keeps an old container's
+identity when that container held exactly the same panes on the same axis
+(a subtree that moved, e.g. when closing a pane collapses its parent), or
+else when the old tree had an unclaimed container with the same axis at the
+same position (e.g. the parent of a pane that was split). The app keeps one
+`NSSplitView` per identity, so a pane is only reparented when its parent
+container really changed.
 
 ### `AppModel`
 
 A single `@MainActor @Observable final class AppModel` owns `[Workspace]`,
 `[Session]`, `[Host]`, `[Profile]` and exposes intent methods
 (`newTab(in:)`, `splitFocusedPane(axis:)`, `closePane(_:)`,
-`moveTab(_:to:)`, …). Every mutation goes through it, which is what makes the
+`moveTab(_:to:)`, …). Step 4 added `moveTabGroup`, `closeTabGroup`,
+`closeOtherTabs(than:)`, `selectTab(number:)` (9 means last),
+`selectTabGroup(number:)`, `selectAdjacentTab(offset:)` (wraps),
+`moveFocus(_:)` (unzooms), `resizeFocusedPane(toward:by:)` (ignored while
+zoomed), `equalizePanes`, `toggleZoom` (only with more than one pane) and
+`setSplitRatios(_:for:)` (divider drags; ignored unless the layout still has
+that shape). Every mutation goes through it, which is what makes the
 sidebar and tab bar trivially consistent across windows and what triggers
 persistence.
 
@@ -666,16 +724,21 @@ AppKit owns lifecycle and windows; SwiftUI is hosted where it is the better
 tool.
 
 ```
-WorkspaceWindowController (NSWindowController, one per open workspace)
+WorkspaceWindowController (NSWindowController, one per open workspace;
+│                          menu commands land here)
+├── WorkspaceWindow (NSWindow; reports first-responder changes)
+├── WorkspaceActions                                    select / create / rename /
+│                                                       close (confirmed) / drops
 └── NSSplitViewController
     ├── Sidebar: NSHostingController<SidebarView>       SwiftUI List, drag & drop
     └── Content: ContentViewController
-        ├── NSHostingView<TabBarView>                  SwiftUI, ⌘N badges, "+"
-        └── PaneContainerView (NSView)
-            └── SplitTreeView (nested NSSplitViews mirroring PaneLayout)
+        ├── TabBarHostingView<TabBarView>              SwiftUI, ⌘N badges, "+"
+        └── PaneContainerView (NSView)                 or an empty-group state
+            └── SplitTreeView (nested PaneSplitViews mirroring PaneLayout)
                 └── PaneView per leaf
                     ├── surface.view                   terminal
-                    └── NSHostingView<PlaceholderView> Session Ended / Disconnected
+                    ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
+                    └── focus overlay                  border / dim, no hit testing
 ```
 
 - Window uses `titlebarAppearsTransparent`, `toolbarStyle = .unified`, and
@@ -683,7 +746,45 @@ WorkspaceWindowController (NSWindowController, one per open workspace)
   produces the header in the mockup. The toolbar holds the sidebar toggle.
 - `SplitTreeView` diffs the new `PaneLayout` against the current view tree
   and reparents existing `PaneView`s rather than rebuilding, preserving
-  terminal views and first responder.
+  terminal views and first responder. *Implementation (step 4):* the diff is
+  `SplitTreeReconciler` (section 2); containers whose identity survives keep
+  their `NSSplitView`, and only changed children are moved. Frames are
+  assigned top-down before anything is laid out inside a view: a new
+  container gets its final frame, and a pane its final size, before the
+  pane is moved into it, and a split with no size lays nothing out. (A new
+  container starting at zero size would otherwise squeeze the pane moved
+  into it to 0×0 first, sending its program an extra resize through a tiny
+  grid; `ArmadaleAppTests` checks that a split resizes each affected
+  terminal exactly once.) Panes left in a dropped container are detached
+  from it. Each
+  `PaneSplitView` lays its two panes out from the model's ratio in one pass
+  (its own frames, then `setPosition` at the same place so NSSplitView's
+  divider drawing follows; letting `super` resize proportionally first gave
+  nested panes two sizes per layout pass, and their programs two SIGWINCHes).
+  Its delegate is a separate object: an `NSSplitView` that is its own
+  delegate recurses forever in `respondsToSelector:`. Ratios stay within
+  0.1–0.9 while dragging. A drag updates the view at once and is written to
+  the model 400 ms after the last move (`setSplitRatios`), or at once when
+  the tab changes, a keyboard resize comes, or the window closes.
+- The selected tab shows its layout, or only its zoomed pane. After every
+  change the visible sessions are started (after layout, so they start at
+  their real size), and keyboard focus moves to the focused pane when the
+  tab or the focused pane changed, or when reparenting left no responder; it
+  is never taken from the sidebar or a sheet otherwise. In the other
+  direction `WorkspaceWindow.makeFirstResponder` reports every change, so a
+  click into a pane (or its padding) focuses it in the model.
+- Closing a window stops its content controller: pending divider positions
+  are written, it stops following the model, and its pane views are taken
+  out of the closed window (the registry keeps them). The app delegate then
+  drops the window controller, and both controllers deinit (logged in debug
+  builds; `ArmadaleAppTests` checks it).
+- Hierarchy commands are nil-targeted menu items handled by
+  `WorkspaceWindowController`, which is in the responder chain whether a
+  terminal or the sidebar has focus; the tab bar, the sidebar and the menu
+  all go through one `WorkspaceActions` per window, so closing asks the same
+  question everywhere (running or disconnected sessions, honouring the
+  "don't ask again" default; unreachable ones always). App-wide commands
+  (new workspace, font size) are on the app delegate.
 - An app-level `SessionRegistry` owns one `SessionController` and its
   `PaneView` per session shown so far. It creates them lazily when a pane
   first becomes visible and keeps them until the session leaves the model,
@@ -694,10 +795,18 @@ WorkspaceWindowController (NSWindowController, one per open workspace)
   content view extends under both the transparent title bar and the
   floating sidebar.
 - Keyboard focus follows `focusedPaneID`; the focused pane has a subtle
-  accent border, the unfocused ones dim slightly.
+  accent border, the unfocused ones dim slightly (only while more than one
+  pane is on screen).
 - The tab bar is custom SwiftUI (not `NSTabView`): it needs shortcut badges,
   status glyphs, drag reordering, and dragging a tab onto a sidebar tab group
-  to move it.
+  to move it. Tabs share the width (110–220 pt) and scroll when they do not
+  fit; each shows its status glyph, title (custom, else session title, else
+  profile name), a split/zoom hint, and ⌘1…⌘8 badges (⌘9 on the last tab),
+  which turn into a close button on hover. Click selects; dropping a tab on
+  another takes its position (from any group or window); middle click
+  (handled by the hosting view, SwiftUI has no gesture for it) and the close
+  button close it with the ⌘W confirmation; the context menu has Rename,
+  Close, Close Other Tabs.
 - Settings is an `NSWindowController` hosting a SwiftUI `TabView`:
   **General** (default profile, default directory, confirm‑on‑close),
   **Appearance** (font, size, theme, cursor, renderer), **Profiles**,
@@ -730,6 +839,13 @@ WorkspaceWindowController (NSWindowController, one per open workspace)
   last tab group in a workspace closes the workspace's window; the workspace
   stays in the model and in the sidebar, and reopening it creates a fresh
   "Main" group with one Shell tab.
+- A new workspace's window (⌘N), or a reopened one without a saved frame,
+  cascades from the key window. Open windows, their frames, sidebar width,
+  and every workspace's selected group, tab and focused pane are in the
+  state file, so a relaunch restores them. Window geometry is recorded when
+  a move or live resize ends, and, debounced by 500 ms, after a sidebar
+  drag or collapse and after a resize that is not live (zoom), so a crash
+  loses at most that half second.
 - Reboot or daemon loss simply yields panes in the ended state on next
   launch, with "Respawn All Ended" one click away.
 
@@ -764,6 +880,18 @@ bindings are marked ✱.
 
 Rebinding is out of scope for v1; the table is exposed read‑only in Settings.
 
+*Step 4 notes.* Every row is an `NSMenuItem` key equivalent (built in
+`App/MainMenu.swift`, which is the shortcut table until Settings shows it),
+so the shortcuts appear in the menus and work whatever has focus, and keys
+not bound there reach the terminal. ⌃Tab / ⌃⇧Tab and ⌘+ are hidden
+alternates (`allowsKeyEquivalentWhenHidden`) of ⇧⌘] / ⇧⌘[ and ⌘=. ⌘9 goes
+to the last tab, ⇧⌘9 to the ninth tab group. ⌃⌘ arrows move the nearest
+divider by 5 % of its split (`moveDivider`). ⌘= / ⌘- / ⌘0 change the font
+size of every pane, in memory, until Settings (step 5) stores it. ⌘, is
+present but disabled until Settings exists. Commands also in the menus
+without a default key: Close Tab, Close Tab Group, Rename Workspace / Tab
+Group / Tab, Delete Workspace.
+
 ---
 
 ## 10. Agent sessions
@@ -792,14 +920,16 @@ armadale/
 ├── project.yml                      XcodeGen spec
 ├── Armadale/                        app target (AppKit)
 │   ├── App/                         main.swift, AppDelegate, menus
-│   ├── Windows/                     WorkspaceWindowController, ContentViewController
+│   ├── Windows/                     WorkspaceWindowController, WorkspaceActions, ContentViewController
 │   ├── Sidebar/                     SidebarView (SwiftUI)
-│   ├── Tabs/                        TabBarView (SwiftUI)
+│   ├── Tabs/                        TabBarView, StatusGlyph (SwiftUI)
 │   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
-│   ├── Sessions/                    SessionRegistry (controllers per session)
+│   ├── Sessions/                    SessionRegistry (controllers per session), SessionStatus / CloseRisk
 │   ├── Settings/                    SettingsWindowController + SwiftUI tabs
 │   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements
-│   └── Support/                     Keybindings, ThemeCatalog (DefaultTheme until step 5)
+│   └── Support/                     DefaultTheme (ThemeCatalog in step 5), TerminalPreferences,
+│                                    HierarchyDragItem, TextPrompt; the shortcut table is App/MainMenu
+├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/
 │   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations   (no AppKit)
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, backends, SSHTransport, SessionController,
@@ -813,6 +943,12 @@ armadale/
 
 - `ArmadaleCore` and the layout operations are fully unit‑tested with Swift
   Testing and run in a few seconds without a UI.
+- `ArmadaleAppTests` (step 4) tests the app target's own code: the split
+  tree view with real SwiftTerm surfaces, the close-confirmation rule, and
+  window controller lifetime. It is unhosted: it compiles the app's sources
+  (all but `main.swift`) into the test bundle, so the app never launches, no
+  window is shown, no state file is touched, and an inert backend starts no
+  process.
 - `ArmadaleSessions` has integration tests that spawn a real local zmx
   session, kill it, and assert the state machine.
 - No hosted CI: GitHub Actions is disabled for this repository. The full

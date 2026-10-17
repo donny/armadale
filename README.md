@@ -9,14 +9,21 @@ splits and SwiftUI for chrome. Terminal rendering sits behind a pluggable
 persistence comes from a private, bundled `zmx` daemon. Layout is stored as
 versioned JSON in `~/Library/Application Support/Armadale/`.
 
-Status: step 3 (persistence). The window shows the focused pane of the
-selected tab: a real login shell, rendered by SwiftTerm, running in a
-private zmx session. Quitting Armadale disconnects the panes but leaves the
-sessions running; on relaunch every pane reattaches to the same shell and
-its screen and scrollback are replayed. A session whose program exited (or
-that is gone after a reboot) shows *Session Ended* with Respawn / Close
+Status: step 4 (hierarchy). Each workspace is a window with a sidebar
+listing every workspace, its tab groups and tabs (with status glyphs), a tab
+bar for the selected tab group, and the selected tab's split panes. Splits
+(⌘D / ⇧⌘D), focus (⌥⌘ arrows), resize (⌃⌘ arrows, or drag a divider), zoom
+(⇧⌘↩), equalize (⌃⌘=), tabs (⌘T, ⌘1…⌘9, ⌃Tab), tab groups (⇧⌘N, ⇧⌘1…⇧⌘9)
+and workspaces (⌘N) work from the menus and the keyboard; tabs and tab groups
+can be renamed, reordered by dragging, and a tab dragged onto a sidebar tab
+group moves there. Closing a window keeps its workspace in the sidebar, from
+where it reopens. Sessions persist as in step 3: quitting Armadale leaves
+them running, and a relaunch restores the windows, layouts and selections and
+reattaches every visible pane, replaying its screen and scrollback. A
+session whose program exited shows *Session Ended* with Respawn / Close
 Pane, and **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended pane
-of the window's workspace.
+of the window's workspace. The full shortcut table is in
+[docs/DESIGN.md](docs/DESIGN.md) section 9.
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -43,6 +50,11 @@ xcodebuild -project Armadale.xcodeproj -scheme Armadale \
 # Or test a single package
 (cd Packages/ArmadaleCore && swift test)
 ```
+
+`ArmadaleAppTests` tests the app target's own code (split tree view with
+real SwiftTerm surfaces, close-confirmation rule, window controller
+lifetime). It is unhosted: the app's sources are compiled into the bundle,
+so the app never launches, no window appears and no process is started.
 
 `ArmadaleSessions` tests spawn real processes on PTYs (zsh and bare
 binaries) through the `ctty-exec` helper, so they need no mocks for the I/O
@@ -105,6 +117,14 @@ be alive. With the fallback alert up (it makes `<state dir>/bin` a regular
 file so the session runtime cannot be set up), the quit must not wait for
 the alert and must still save the state.
 
+`aFloodIsCutShortByReattaching` floods a session until the client has
+passed the 16 MB limit and been reattached (up to 15 s), then expects the
+prompt within 5 s of ^C. On a heavily loaded machine either step can be out
+of reach (the flood never fills the client, or the test renderer drains the
+bounded backlog at a few hundred KB/s); those cases are recorded as known
+issues with the measured numbers, not failures, but the reattach must still
+happen and the prompt must still arrive within 60 s.
+
 The integration test `floodBaselineWithoutReattach` measures a zmx flood
 without the reattach mitigation (docs/DESIGN.md section 7); it only runs
 when `ARMADALE_FLOOD_BASELINE` is set (to the number of seconds to wait for
@@ -153,15 +173,16 @@ When you check PTY behaviour by hand, use zsh or a bare program, never
 terminal itself and so hides a broken spawn.
 
 The `confirmClosingRunningSession` user default (default `true`) controls
-whether ⌘W asks before closing a pane whose process is still running.
+whether closing a pane (⌘W), a tab or a tab group asks first when a process
+in it is still running.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `Armadale/` | AppKit app: lifecycle, menus, windows, SwiftUI sidebar, panes, `SessionRegistry` |
-| `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `AppModel`, `StateStore`, migrations (no AppKit) |
+| `Armadale/` | AppKit app: lifecycle, menus (the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` |
+| `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `LocalZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol and appearance types |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |

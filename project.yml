@@ -47,6 +47,13 @@ targets:
         # Quitting must go through applicationWillTerminate so state is saved.
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
+        # Tabs and tab groups dragged in the tab bar and the sidebar
+        # (Armadale/Support/HierarchyDragItem.swift). Private to the app.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.tinylittleapps.armadale.hierarchy-item
+            UTTypeDescription: Armadale tab or tab group
+            UTTypeConformsTo:
+              - public.data
     # No App Sandbox, by design (docs/DESIGN.md, "Distribution"): Armadale
     # spawns the user's login shell and arbitrary agents with full access to
     # their files, runs a private zmx helper copied to
@@ -150,6 +157,39 @@ targets:
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
         SKIP_INSTALL: YES
 
+  # Tests for the app target's own code (split tree view, close-risk rule,
+  # window controller lifetime). Unhosted on purpose: the app is never
+  # launched, so no window appears, no state file is read or written, and no
+  # session daemon is started. The app's sources are compiled into the
+  # bundle instead (all but main.swift).
+  ArmadaleAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ArmadaleAppTests
+      - path: Armadale
+        excludes:
+          - App/main.swift
+          - Resources/**
+    dependencies:
+      - package: ArmadaleCore
+      - package: ArmadaleSessions
+      - package: TerminalSurface
+      - package: SwiftTermSurface
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tinylittleapps.armadale.app-tests
+        GENERATE_INFOPLIST_FILE: YES
+        # Not the app's Info.plist (XcodeGen would pick it up from the
+        # sources): its NSPrincipalClass makes xctest create a second
+        # NSApplication.
+        INFOPLIST_FILE: ""
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
+
 schemes:
   Armadale:
     build:
@@ -163,6 +203,7 @@ schemes:
       # Tests live in the local packages; this makes
       # `xcodebuild test -scheme Armadale` run all of them.
       targets:
+        - ArmadaleAppTests
         - package: ArmadaleCore/ArmadaleCoreTests
         - package: ArmadaleSessions/ArmadaleSessionsTests
         - package: TerminalSurface/TerminalSurfaceTests

@@ -32,5 +32,18 @@
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Armadale tab or tab group</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.tinylittleapps.armadale.hierarchy-item</string>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -1,6 +1,11 @@
 import AppKit
+import ArmadaleCore
 
-/// Builds the main menu in code (there is no nib).
+/// Builds the main menu in code (there is no nib). Every shortcut of
+/// DESIGN §9 is a menu key equivalent, so it shows in the menus and works
+/// whatever has keyboard focus; keys that are not bound here reach the
+/// terminal. Workspace commands are nil-targeted and land on the key
+/// window's ``WorkspaceWindowController``; app-wide ones on ``AppDelegate``.
 @MainActor
 enum MainMenu {
     static func make() -> NSMenu {
@@ -11,6 +16,9 @@ enum MainMenu {
         let app = submenu(appName, in: main)
         app.addItem(withTitle: "About \(appName)",
                     action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(.separator())
+        // Settings arrive in step 5; the item is there so ⌘, is reserved.
+        app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
         app.addItem(.separator())
         let services = NSMenu(title: "Services")
         app.addItem(withTitle: "Services", action: nil, keyEquivalent: "").submenu = services
@@ -26,15 +34,25 @@ enum MainMenu {
 
         // File
         let file = submenu("File", in: main)
-        file.addItem(withTitle: "New Window", action: #selector(AppDelegate.newWindow(_:)), keyEquivalent: "n")
+        file.addItem(withTitle: "New Workspace", action: #selector(AppDelegate.newWindow(_:)), keyEquivalent: "n")
+        file.addItem(withTitle: "New Tab Group", action: #selector(WorkspaceWindowController.newTabGroup(_:)),
+                     keyEquivalent: "n").keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "New Tab", action: #selector(WorkspaceWindowController.newTab(_:)), keyEquivalent: "t")
         file.addItem(.separator())
-        file.addItem(withTitle: "Close Pane", action: #selector(ContentViewController.closePane(_:)), keyEquivalent: "w")
-        file.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
+        file.addItem(withTitle: "Close Pane", action: #selector(WorkspaceWindowController.closePane(_:)),
+                     keyEquivalent: "w")
+        file.addItem(withTitle: "Close Tab", action: #selector(WorkspaceWindowController.closeTab(_:)),
+                     keyEquivalent: "")
+        file.addItem(withTitle: "Close Tab Group", action: #selector(WorkspaceWindowController.closeTabGroup(_:)),
+                     keyEquivalent: "")
+        file.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+            .keyEquivalentModifierMask = [.command, .shift]
 
         // Edit
         let edit = submenu("Edit", in: main)
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+            .keyEquivalentModifierMask = [.command, .shift]
         edit.addItem(.separator())
         // Nil-targeted: Copy, Paste and Select All reach SwiftTerm's terminal
         // view through the responder chain when it is first responder.
@@ -43,7 +61,8 @@ enum MainMenu {
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         edit.addItem(.separator())
-        edit.addItem(withTitle: "Clear Screen", action: #selector(ContentViewController.clearScreen(_:)), keyEquivalent: "k")
+        edit.addItem(withTitle: "Clear Screen", action: #selector(WorkspaceWindowController.clearScreen(_:)),
+                     keyEquivalent: "k")
 
         // View
         let view = submenu("View", in: main)
@@ -51,19 +70,105 @@ enum MainMenu {
                      action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
             .keyEquivalentModifierMask = [.command, .control]
         view.addItem(.separator())
+        view.addItem(withTitle: "Bigger", action: #selector(AppDelegate.increaseFontSize(_:)), keyEquivalent: "=")
+        // ⌘+ (⇧⌘=) as well, hidden, as in most Mac apps.
+        let plus = view.addItem(withTitle: "Bigger", action: #selector(AppDelegate.increaseFontSize(_:)),
+                                keyEquivalent: "+")
+        hideAlternate(plus)
+        view.addItem(withTitle: "Smaller", action: #selector(AppDelegate.decreaseFontSize(_:)), keyEquivalent: "-")
+        view.addItem(withTitle: "Actual Size", action: #selector(AppDelegate.resetFontSize(_:)), keyEquivalent: "0")
+        view.addItem(.separator())
         view.addItem(withTitle: "Toggle Full Screen",
                      action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "\r")
 
+        // Pane
+        let pane = submenu("Pane", in: main)
+        pane.addItem(withTitle: "Split Right", action: #selector(WorkspaceWindowController.splitRight(_:)),
+                     keyEquivalent: "d")
+        pane.addItem(withTitle: "Split Down", action: #selector(WorkspaceWindowController.splitDown(_:)),
+                     keyEquivalent: "d").keyEquivalentModifierMask = [.command, .shift]
+        pane.addItem(.separator())
+        for direction in Direction.allCases {
+            let item = pane.addItem(
+                withTitle: "Focus \(name(of: direction)) Pane",
+                action: #selector(WorkspaceWindowController.focusPane(_:)), keyEquivalent: arrowKey(direction))
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.tag = directionTag(direction)
+        }
+        pane.addItem(.separator())
+        for direction in Direction.allCases {
+            let item = pane.addItem(
+                withTitle: "Move Divider \(name(of: direction))",
+                action: #selector(WorkspaceWindowController.resizePane(_:)), keyEquivalent: arrowKey(direction))
+            item.keyEquivalentModifierMask = [.command, .control]
+            item.tag = directionTag(direction)
+        }
+        pane.addItem(withTitle: "Equalize Panes", action: #selector(WorkspaceWindowController.equalizePanes(_:)),
+                     keyEquivalent: "=").keyEquivalentModifierMask = [.command, .control]
+        pane.addItem(withTitle: "Zoom Pane", action: #selector(WorkspaceWindowController.togglePaneZoom(_:)),
+                     keyEquivalent: "\r").keyEquivalentModifierMask = [.command, .shift]
+
         // Workspace
         let workspace = submenu("Workspace", in: main)
+        workspace.addItem(withTitle: "Rename Workspace…",
+                          action: #selector(WorkspaceWindowController.renameWorkspace(_:)), keyEquivalent: "")
+        workspace.addItem(withTitle: "Rename Tab Group…",
+                          action: #selector(WorkspaceWindowController.renameTabGroup(_:)), keyEquivalent: "")
+        workspace.addItem(withTitle: "Rename Tab…",
+                          action: #selector(WorkspaceWindowController.renameTab(_:)), keyEquivalent: "")
+        workspace.addItem(.separator())
         workspace.addItem(withTitle: "Respawn All Ended",
-                          action: #selector(ContentViewController.respawnAllEnded(_:)), keyEquivalent: "r")
+                          action: #selector(WorkspaceWindowController.respawnAllEnded(_:)), keyEquivalent: "r")
             .keyEquivalentModifierMask = [.command, .option]
+        workspace.addItem(.separator())
+        workspace.addItem(withTitle: "Delete Workspace…",
+                          action: #selector(WorkspaceWindowController.deleteWorkspace(_:)), keyEquivalent: "")
 
         // Window
+        //
+        // ⇧⌘] / ⇧⌘[ and ⇧⌘1…9 are written as the unshifted character plus a
+        // Shift mask, not as "}" or "!". That is the form that displays as
+        // ⇧⌘] / ⇧⌘1, and since macOS 12 AppKit matches menu key equivalents
+        // by key, with automatic key-equivalent localization for the current
+        // layout (`NSMenuItem.allowsAutomaticKeyEquivalentLocalization`,
+        // on by default). Verified on macOS 27 in step 4: ⇧⌘1 / ⇧⌘2 select
+        // tab groups (not tabs, which ⌘1 would), ⇧⌘] / ⇧⌘[ change tabs.
         let window = submenu("Window", in: main)
         window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        window.addItem(.separator())
+        let next = window.addItem(withTitle: "Show Next Tab",
+                                  action: #selector(WorkspaceWindowController.selectNextTab(_:)), keyEquivalent: "]")
+        next.keyEquivalentModifierMask = [.command, .shift]
+        let previous = window.addItem(withTitle: "Show Previous Tab",
+                                      action: #selector(WorkspaceWindowController.selectPreviousTab(_:)),
+                                      keyEquivalent: "[")
+        previous.keyEquivalentModifierMask = [.command, .shift]
+        let nextControl = window.addItem(withTitle: "Show Next Tab",
+                                         action: #selector(WorkspaceWindowController.selectNextTab(_:)),
+                                         keyEquivalent: "\t")
+        nextControl.keyEquivalentModifierMask = [.control]
+        hideAlternate(nextControl)
+        let previousControl = window.addItem(withTitle: "Show Previous Tab",
+                                             action: #selector(WorkspaceWindowController.selectPreviousTab(_:)),
+                                             keyEquivalent: "\t")
+        previousControl.keyEquivalentModifierMask = [.control, .shift]
+        hideAlternate(previousControl)
+        window.addItem(.separator())
+        for number in 1...9 {
+            let item = window.addItem(
+                withTitle: number == 9 ? "Show Last Tab" : "Show Tab \(number)",
+                action: #selector(WorkspaceWindowController.selectTabByNumber(_:)), keyEquivalent: "\(number)")
+            item.tag = number
+        }
+        window.addItem(.separator())
+        for number in 1...9 {
+            let item = window.addItem(
+                withTitle: "Show Tab Group \(number)",
+                action: #selector(WorkspaceWindowController.selectTabGroupByNumber(_:)), keyEquivalent: "\(number)")
+            item.keyEquivalentModifierMask = [.command, .shift]
+            item.tag = number
+        }
         window.addItem(.separator())
         window.addItem(withTitle: "Bring All to Front",
                        action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
@@ -75,6 +180,46 @@ enum MainMenu {
         NSApp.helpMenu = help
 
         return main
+    }
+
+    // MARK: Directions
+
+    /// Menu item tags for the four directions (⌥⌘ / ⌃⌘ arrows).
+    static func directionTag(_ direction: Direction) -> Int {
+        (Direction.allCases.firstIndex(of: direction) ?? 0) + 1
+    }
+
+    static func direction(forTag tag: Int) -> Direction? {
+        let index = tag - 1
+        return Direction.allCases.indices.contains(index) ? Direction.allCases[index] : nil
+    }
+
+    private static func name(of direction: Direction) -> String {
+        switch direction {
+        case .left: "Left"
+        case .right: "Right"
+        case .up: "Up"
+        case .down: "Down"
+        }
+    }
+
+    private static func arrowKey(_ direction: Direction) -> String {
+        let key = switch direction {
+        case .left: NSLeftArrowFunctionKey
+        case .right: NSRightArrowFunctionKey
+        case .up: NSUpArrowFunctionKey
+        case .down: NSDownArrowFunctionKey
+        }
+        return String(Character(UnicodeScalar(UInt16(key)) ?? " "))
+    }
+
+    // MARK: Helpers
+
+    /// A second shortcut for a command shown once: hidden, but its key
+    /// equivalent still works.
+    private static func hideAlternate(_ item: NSMenuItem) {
+        item.isHidden = true
+        item.allowsKeyEquivalentWhenHidden = true
     }
 
     private static func submenu(_ title: String, in main: NSMenu) -> NSMenu {

@@ -9,6 +9,15 @@ public enum Axis: String, Codable, Sendable, Hashable, CaseIterable {
 /// A direction for geometric pane navigation.
 public enum Direction: String, Codable, Sendable, Hashable, CaseIterable {
     case left, right, up, down
+
+    /// The split axis this direction moves along: left/right cross
+    /// side-by-side splits, up/down stacked ones.
+    public var axis: Axis {
+        switch self {
+        case .left, .right: .horizontal
+        case .up, .down: .vertical
+        }
+    }
 }
 
 /// A rectangle in the unit square, with the origin at the top-left and `y`
@@ -49,9 +58,10 @@ public indirect enum PaneLayout: Sendable, Hashable {
     /// and when decoding.
     public static let ratioRange: ClosedRange<Double> = 0.1...0.9
 
-    /// `ratio` clamped to ``ratioRange``.
+    /// `ratio` clamped to ``ratioRange``; a non-finite ratio becomes 0.5.
     public static func clampedRatio(_ ratio: Double) -> Double {
-        min(max(ratio, ratioRange.lowerBound), ratioRange.upperBound)
+        guard ratio.isFinite else { return 0.5 }
+        return min(max(ratio, ratioRange.lowerBound), ratioRange.upperBound)
     }
 
     // MARK: Queries
@@ -188,11 +198,30 @@ public indirect enum PaneLayout: Sendable, Hashable {
     /// ancestor exists or `delta` is not finite.
     public func resize(_ pane: PaneID, axis: Axis, delta: Double) -> PaneLayout {
         guard delta.isFinite else { return self }
-        return resized(pane, axis: axis, delta: delta).layout
+        return adjustingNearestSplit(of: pane, axis: axis) { ratio, inFirst in
+            inFirst ? ratio + delta : ratio - delta
+        }.layout
     }
 
-    /// Returns the new layout and whether an ancestor split was found below this node.
-    private func resized(_ pane: PaneID, axis: Axis, delta: Double) -> (layout: PaneLayout, handled: Bool) {
+    /// Moves the divider of `pane`'s nearest ancestor split along
+    /// `direction`'s axis by `amount` (a fraction of that split) in
+    /// `direction`, whichever side of it `pane` is on: `.right` / `.down`
+    /// grow the split's first child, `.left` / `.up` its second. This is
+    /// what ⌃⌘ arrow does (Ghostty's `resize_split`). The ratio is clamped
+    /// to ``ratioRange``. Unchanged if there is no such split or `amount`
+    /// is not finite.
+    public func moveDivider(of pane: PaneID, toward direction: Direction, by amount: Double) -> PaneLayout {
+        guard amount.isFinite else { return self }
+        let delta = direction == .right || direction == .down ? amount : -amount
+        return adjustingNearestSplit(of: pane, axis: direction.axis) { ratio, _ in ratio + delta }.layout
+    }
+
+    /// Replaces the ratio of `pane`'s nearest ancestor split along `axis`
+    /// with `transform(ratio, paneIsInFirst)`, clamped. Returns the new
+    /// layout and whether such a split was found below this node.
+    private func adjustingNearestSplit(
+        of pane: PaneID, axis: Axis, transform: (Double, Bool) -> Double
+    ) -> (layout: PaneLayout, handled: Bool) {
         guard case .split(let splitAxis, let ratio, let first, let second) = self else {
             return (self, false)
         }
@@ -201,7 +230,7 @@ public indirect enum PaneLayout: Sendable, Hashable {
 
         // Prefer the deepest matching split, which is the nearest ancestor.
         let child = inFirst ? first : second
-        let result = child.resized(pane, axis: axis, delta: delta)
+        let result = child.adjustingNearestSplit(of: pane, axis: axis, transform: transform)
         if result.handled {
             let rebuilt: PaneLayout = inFirst
                 ? .split(axis: splitAxis, ratio: ratio, first: result.layout, second: second)
@@ -209,8 +238,39 @@ public indirect enum PaneLayout: Sendable, Hashable {
             return (rebuilt, true)
         }
         guard splitAxis == axis else { return (self, false) }
-        let proposed = inFirst ? ratio + delta : ratio - delta
+        let proposed = transform(ratio, inFirst)
         return (.split(axis: splitAxis, ratio: Self.clampedRatio(proposed), first: first, second: second), true)
+    }
+
+    /// Whether `other` has the same splits (axes and nesting) and the same
+    /// leaves in the same places, ignoring ratios.
+    public func hasSameShape(as other: PaneLayout) -> Bool {
+        switch (self, other) {
+        case let (.pane(a), .pane(b)):
+            a == b
+        case let (.split(axisA, _, firstA, secondA), .split(axisB, _, firstB, secondB)):
+            axisA == axisB && firstA.hasSameShape(as: firstB) && secondA.hasSameShape(as: secondB)
+        default:
+            false
+        }
+    }
+
+    /// The same tree with every ratio clamped to ``ratioRange`` (and
+    /// non-finite ratios reset to 0.5).
+    public func clampingRatios() -> PaneLayout {
+        switch self {
+        case .pane: self
+        case .split(let axis, let ratio, let first, let second):
+            .split(
+                axis: axis, ratio: Self.clampedRatio(ratio),
+                first: first.clampingRatios(), second: second.clampingRatios())
+        }
+    }
+
+    /// Whether the tree has more than one leaf.
+    public var isSplit: Bool {
+        if case .split = self { return true }
+        return false
     }
 
     /// Exchanges the positions of panes `a` and `b`. Unchanged unless both are present.
@@ -276,12 +336,30 @@ public indirect enum PaneLayout: Sendable, Hashable {
         }
     }
 
-    /// The same tree with every split ratio reset to 0.5.
+    /// The same tree with every split's ratio set so that the panes along each
+    /// axis get equal room: a side that holds more panes side by side on that
+    /// axis gets proportionally more of the split, so three nested columns
+    /// come out as thirds rather than 25/25/50 (as Ghostty's equalize does).
     public func equalized() -> PaneLayout {
         switch self {
-        case .pane: self
+        case .pane: return self
         case .split(let axis, _, let first, let second):
-            .split(axis: axis, ratio: 0.5, first: first.equalized(), second: second.equalized())
+            let f = Double(first.extent(along: axis))
+            let s = Double(second.extent(along: axis))
+            return .split(axis: axis, ratio: f / (f + s), first: first.equalized(), second: second.equalized())
+        }
+    }
+
+    /// How many panes sit side by side along `axis` in this subtree's widest
+    /// run: a split on the same axis adds its sides, one across it takes the
+    /// larger side, a pane counts one.
+    private func extent(along axis: Axis) -> Int {
+        switch self {
+        case .pane: 1
+        case .split(let splitAxis, _, let first, let second):
+            splitAxis == axis
+                ? first.extent(along: axis) + second.extent(along: axis)
+                : max(first.extent(along: axis), second.extent(along: axis))
         }
     }
 

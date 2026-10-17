@@ -19,8 +19,21 @@ final class PaneView: NSView {
     /// The name shown in the placeholder.
     var titleProvider: () -> String = { "Shell" }
 
+    /// How the pane shows focus: nothing while it is the only pane on
+    /// screen; with several, the focused one gets a subtle accent border and
+    /// the others dim slightly.
+    enum FocusStyle: Equatable {
+        case alone, focused, unfocused
+    }
+
+    var focusStyle: FocusStyle = .alone {
+        didSet { if focusStyle != oldValue { updateFocusOverlay() } }
+    }
+
     private var placeholder: NSHostingView<SessionPlaceholderView>?
+    private let focusOverlay = PassThroughView()
     private var stateObservation: Task<Void, Never>?
+    private var fontObservation: Task<Void, Never>?
 
     /// Space between the pane's edge and the text, filled with the theme's
     /// background. The bottom and sides are deep enough that the first glyph
@@ -40,7 +53,12 @@ final class PaneView: NSView {
             height: bounds.height - padding.top - padding.bottom)
         terminal.autoresizingMask = [.width, .height]
         addSubview(terminal)
+        focusOverlay.frame = bounds
+        focusOverlay.autoresizingMask = [.width, .height]
+        focusOverlay.wantsLayer = true
+        addSubview(focusOverlay)
         observeState()
+        observeFontSize()
     }
 
     @available(*, unavailable)
@@ -50,12 +68,43 @@ final class PaneView: NSView {
 
     isolated deinit {
         stateObservation?.cancel()
+        fontObservation?.cancel()
     }
 
     /// Makes the terminal the window's first responder.
     func focusTerminal() {
-        guard let window else { return }
+        guard let window, window.firstResponder !== controller.surface.view else { return }
         window.makeFirstResponder(controller.surface.view)
+    }
+
+    /// Whether the terminal (or anything inside this pane) is first responder.
+    var containsFirstResponder: Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder.isDescendant(of: self)
+    }
+
+    /// A click on the padding around the terminal focuses it too.
+    override func mouseDown(with event: NSEvent) {
+        focusTerminal()
+    }
+
+    private func updateFocusOverlay() {
+        guard let layer = focusOverlay.layer else { return }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            switch focusStyle {
+            case .alone:
+                layer.borderWidth = 0
+                layer.backgroundColor = nil
+            case .focused:
+                layer.borderWidth = 1.5
+                layer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.55).cgColor
+                layer.backgroundColor = nil
+            case .unfocused:
+                layer.borderWidth = 0
+                layer.backgroundColor = NSColor.black.withAlphaComponent(isDark ? 0.22 : 0.07).cgColor
+            }
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -69,7 +118,8 @@ final class PaneView: NSView {
     }
 
     private func applyAppearance() {
-        let appearance = DefaultTheme.appearance(for: effectiveAppearance)
+        updateFocusOverlay()
+        let appearance = TerminalPreferences.shared.terminalAppearance(for: effectiveAppearance)
         controller.surface.apply(appearance)
         let background = appearance.theme.background
         layer?.backgroundColor = CGColor(
@@ -83,6 +133,19 @@ final class PaneView: NSView {
             let changes = Observations { PlaceholderState(state: controller.state, failure: controller.failure) }
             for await change in changes {
                 self?.update(state: change.state, failure: change.failure)
+            }
+        }
+    }
+
+    /// ⌘= / ⌘- / ⌘0 apply to every pane, shown or not.
+    private func observeFontSize() {
+        let preferences = TerminalPreferences.shared
+        fontObservation = Task { [weak self] in
+            var last: Double?
+            for await size in Observations({ preferences.fontSize }) {
+                guard let self else { return }
+                if last != nil, last != size { self.applyAppearance() }
+                last = size
             }
         }
     }
@@ -123,8 +186,14 @@ final class PaneView: NSView {
             let hosting = NSHostingView(rootView: view)
             hosting.frame = bounds
             hosting.autoresizingMask = [.width, .height]
-            addSubview(hosting, positioned: .above, relativeTo: controller.surface.view)
+            addSubview(hosting, positioned: .below, relativeTo: focusOverlay)
             placeholder = hosting
         }
     }
+}
+
+/// A view that draws but never takes mouse events, so clicks reach the
+/// terminal below it.
+final class PassThroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

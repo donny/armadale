@@ -53,9 +53,10 @@ final class SessionRegistry {
     /// The `liveSessions()` call made at launch (and again after a
     /// successful retry); `nil` result if it failed.
     @ObservationIgnored private(set) var liveProbe: Task<Set<SessionID>?, Never>
-    /// The probe's answer once it has arrived.
-    @ObservationIgnored private var liveAtLaunch: Set<SessionID>?
-    @ObservationIgnored private var panes: [SessionID: PaneView] = [:]
+    /// The probe's answer once it has arrived. Observed, like `panes`, so
+    /// status glyphs update when it arrives and when a pane is first shown.
+    private var liveAtLaunch: Set<SessionID>?
+    private var panes: [SessionID: PaneView] = [:]
     /// Sessions in the model as last observed, and sessions already ended
     /// for good here (closed or retired by a respawn).
     @ObservationIgnored private var knownSessionIDs: Set<SessionID>
@@ -108,7 +109,9 @@ final class SessionRegistry {
         let controller = SessionController(
             session: session,
             backend: runtime.backend,
-            makeSurface: { SwiftTermSurface(appearance: DefaultTheme.appearance(for: NSApp.effectiveAppearance)) },
+            makeSurface: {
+                SwiftTermSurface(appearance: TerminalPreferences.shared.terminalAppearance(for: NSApp.effectiveAppearance))
+            },
             makeOutputFilter: runtime.makeOutputFilter)
         controller.delegate = self
         let pane = PaneView(controller: controller)
@@ -231,6 +234,46 @@ final class SessionRegistry {
             controller.markEnded() // a pane never shown is still detached
             Task { await controller.respawn() }
         }
+    }
+
+    // MARK: Status
+
+    /// The status of one session, from its controller if it has been shown,
+    /// else from the launch probe.
+    func status(of sessionID: SessionID) -> SessionStatus {
+        if let controller = panes[sessionID]?.controller {
+            switch controller.state {
+            case .attached: return .running
+            case .ended: return .ended
+            case .disconnected: return .disconnected
+            case .unavailable: return .unavailable
+            case .attaching: return .pending
+            case .detached: break
+            }
+        }
+        guard let session = model.session(sessionID) else { return .ended }
+        let restored = restoredSessionIDs.contains(sessionID)
+        guard restored else { return .pending }
+        switch policy.action(for: session, restored: true, live: liveAtLaunch) {
+        case .markEnded: return .ended
+        case .markUnavailable: return .unavailable
+        case .create, .attach: return liveAtLaunch?.contains(sessionID) == true ? .running : .pending
+        }
+    }
+
+    /// The summary of several sessions (a tab's panes).
+    func status(of sessionIDs: [SessionID]) -> SessionStatus {
+        SessionStatus.summary(of: sessionIDs.map { status(of: $0) })
+    }
+
+    /// Whether closing these sessions needs a confirmation (``CloseRisk``).
+    func closeRisk(of sessionIDs: [SessionID]) -> CloseRisk {
+        CloseRisk.assess(sessionIDs.map { id in
+            CloseRisk.Item(
+                status: status(of: id),
+                mayExist: restoredSessionIDs.contains(id) || panes[id].map { $0.controller.state != .detached } ?? false,
+                isRunning: panes[id]?.controller.isRunning ?? false)
+        })
     }
 
     // MARK: Helpers

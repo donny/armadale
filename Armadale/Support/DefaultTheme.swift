@@ -31,8 +31,8 @@ enum DefaultTheme {
     static let fontName = NSFont(name: "SFMono-Regular", size: 12) != nil ? "SFMono-Regular" : "Menlo"
 
     @MainActor
-    static func appearance(for appearance: NSAppearance) -> TerminalAppearance {
+    static func appearance(for appearance: NSAppearance, fontSize: Double = 12) -> TerminalAppearance {
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return TerminalAppearance(fontName: fontName, fontSize: 12, theme: isDark ? dark : light)
+        return TerminalAppearance(fontName: fontName, fontSize: fontSize, theme: isDark ? dark : light)
     }
 }

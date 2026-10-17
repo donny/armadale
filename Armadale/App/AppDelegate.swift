@@ -5,7 +5,7 @@ import ArmadaleSessions
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let model: AppModel
     /// Session controllers for every pane shown so far.
     private let registry: SessionRegistry
@@ -97,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runtime: sessions.setup,
             restoredSessionIDs: Set(state.sessions.map(\.id)))
         self.saver = StateSaver(url: url)
-        UserDefaults.standard.register(defaults: [ContentViewController.confirmClosingRunningSessionKey: true])
+        UserDefaults.standard.register(defaults: [WorkspaceActions.confirmClosingRunningSessionKey: true])
         super.init()
         wireRegistry()
     }
@@ -292,22 +292,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Actions
 
-    /// File › New Window: a new workspace in its own window.
+    /// File › New Workspace (⌘N): a new workspace in its own window,
+    /// cascaded from the current one.
     @objc func newWindow(_ sender: Any?) {
         let reference = NSApp.keyWindow ?? NSApp.mainWindow
         let id = model.newWorkspace()
-        openWindow(for: id)
-        // Cascade from the current window instead of opening exactly on top.
-        if let reference, let window = windowControllers[id]?.window, window !== reference {
-            window.cascadeTopLeft(from: reference.cascadeTopLeft(from: .zero))
+        openWindow(for: id, cascadingFrom: reference)
+    }
+
+    /// ⌘, is reserved for Settings, which arrive in step 5.
+    @objc func showSettings(_ sender: Any?) {
+        NSSound.beep()
+    }
+
+    /// View › Bigger (⌘=): every pane, for this run.
+    @objc func increaseFontSize(_ sender: Any?) {
+        TerminalPreferences.shared.increaseFontSize()
+    }
+
+    /// View › Smaller (⌘-).
+    @objc func decreaseFontSize(_ sender: Any?) {
+        TerminalPreferences.shared.decreaseFontSize()
+    }
+
+    /// View › Actual Size (⌘0).
+    @objc func resetFontSize(_ sender: Any?) {
+        TerminalPreferences.shared.resetFontSize()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let preferences = TerminalPreferences.shared
+        switch menuItem.action {
+        case #selector(increaseFontSize(_:)): return preferences.canIncreaseFontSize
+        case #selector(decreaseFontSize(_:)): return preferences.canDecreaseFontSize
+        case #selector(resetFontSize(_:)): return preferences.fontSize != TerminalPreferences.defaultFontSize
+        case #selector(showSettings(_:)): return false
+        default: return true
         }
     }
 
     // MARK: Windows
 
+    /// Brings a workspace's window to front, opening it if it is closed
+    /// (the sidebar's workspace rows).
+    func showWorkspace(_ id: WorkspaceID) {
+        guard model.workspace(id) != nil else { return }
+        openWindow(for: id, cascadingFrom: NSApp.keyWindow)
+        windowControllers[id]?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+    }
+
     /// Shows the workspace's window, creating it (and, if the workspace has
-    /// no tab groups left, a fresh "Main" group) as needed.
-    private func openWindow(for id: WorkspaceID) {
+    /// no tab groups left, a fresh "Main" group) as needed. A new window
+    /// without a saved frame is cascaded from `reference`.
+    private func openWindow(for id: WorkspaceID, cascadingFrom reference: NSWindow? = nil) {
         if let existing = windowControllers[id] {
             existing.showWindow(nil)
             return
@@ -316,6 +354,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model.reopenWorkspace(id)
         }
         let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
+        controller.actions.showWorkspace = { [weak self] id in self?.showWorkspace(id) }
+        controller.actions.windowOfWorkspace = { [weak self] id in self?.windowControllers[id]?.window }
+        // Cascade from the current window instead of opening exactly on top.
+        if !controller.hadSavedFrame, let reference, let window = controller.window, window !== reference {
+            window.cascadeTopLeft(from: reference.cascadeTopLeft(from: .zero))
+        }
         controller.onWindowStateChange = { [weak self] controller, state in
             guard let self, !self.isTerminating else { return }
             if !state.isOpen {

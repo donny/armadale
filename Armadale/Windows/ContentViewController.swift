@@ -1,33 +1,50 @@
 import AppKit
 import ArmadaleCore
 import ArmadaleSessions
+import SwiftUI
 
-/// The content side of a workspace window: the focused pane of the selected
-/// tab. (The tab bar and the split tree arrive in step 4; `paneContainer`
-/// is where `SplitTreeView` will go.)
+/// The content side of a workspace window (DESIGN §8): the tab bar of the
+/// selected tab group and, below it, the selected tab's split tree.
+///
+/// It follows the model: whenever the selected tab, its layout, zoom or
+/// focus change, the ``SplitTreeView`` is updated (reparenting the
+/// registry's pane views, never recreating them), the visible sessions are
+/// started, and keyboard focus is put on the focused pane. In the other
+/// direction, clicking into a pane focuses it in the model, and divider
+/// drags are written back to the model after a short pause.
 @MainActor
-final class ContentViewController: NSViewController, NSMenuItemValidation {
-    /// UserDefaults key: ask before closing a pane whose process is running.
-    static let confirmClosingRunningSessionKey = "confirmClosingRunningSession"
-
+final class ContentViewController: NSViewController {
     private let model: AppModel
     private let workspaceID: WorkspaceID
     private let registry: SessionRegistry
-    private let paneContainer = NSView()
-    private var shown: Focus?
-    private var paneView: PaneView?
-    private var focusTask: Task<Void, Never>?
+    private let actions: WorkspaceActions
+    private let paneContainer = PaneContainerView()
+    private var tabBar: TabBarHostingView?
+    private var shown: Display?
+    /// The pane views on screen, by pane.
+    private var visiblePanes: [PaneID: PaneView] = [:]
+    private var displayTask: Task<Void, Never>?
+    /// Divider drags not yet written to the model.
+    private var pendingRatios: (tab: TabID, layout: PaneLayout)?
+    private var ratioTask: Task<Void, Never>?
 
-    /// The pane on screen and the session it shows.
-    private struct Focus: Equatable, Sendable {
-        var paneID: PaneID
-        var sessionID: SessionID
+    /// How long divider drags wait before they are written to the model.
+    private static let ratioDebounce: Duration = .milliseconds(400)
+
+    /// What the pane area shows.
+    private struct Display: Equatable {
+        var tabID: TabID
+        /// The layout on screen: the tab's, or only the zoomed pane.
+        var layout: PaneLayout
+        var focusedPaneID: PaneID
+        var sessions: [PaneID: SessionID]
     }
 
-    init(model: AppModel, workspaceID: WorkspaceID, registry: SessionRegistry) {
+    init(model: AppModel, workspaceID: WorkspaceID, registry: SessionRegistry, actions: WorkspaceActions) {
         self.model = model
         self.workspaceID = workspaceID
         self.registry = registry
+        self.actions = actions
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -36,19 +53,66 @@ final class ContentViewController: NSViewController, NSMenuItemValidation {
         fatalError("init(coder:) is not supported")
     }
 
+    /// Set once the window has closed: nothing is shown or observed any more.
+    private var isStopped = false
+
     isolated deinit {
-        focusTask?.cancel()
+        displayTask?.cancel()
+        ratioTask?.cancel()
+        #if DEBUG
+        NSLog("Armadale: ContentViewController deinit (%@)", workspaceID.raw)
+        #endif
+    }
+
+    /// The window is closing: writes pending divider positions, stops
+    /// following the model, and lets go of the pane views (the registry
+    /// keeps them for when the workspace is shown again). A controller that
+    /// outlives its window can therefore never move panes back into it.
+    func stop() {
+        guard !isStopped else { return }
+        commitRatios()
+        isStopped = true
+        displayTask?.cancel()
+        displayTask = nil
+        shown = nil
+        visiblePanes = [:]
+        paneContainer.splitTree.update(layout: nil) { _ in NSView() }
     }
 
     override func loadView() {
         let container = NSView()
+        let frames = TabFrameStore()
+        let tabBar = TabBarHostingView(rootView: TabBarView(
+            model: model, registry: registry, workspaceID: workspaceID, actions: actions, frames: frames))
+        tabBar.frames = frames
+        tabBar.onMiddleClick = { [weak self] tab in self?.actions.closeTab(tab) }
+        tabBar.sizingOptions = []
+        tabBar.translatesAutoresizingMaskIntoConstraints = false
+        self.tabBar = tabBar
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
         paneContainer.translatesAutoresizingMaskIntoConstraints = false
+        paneContainer.onNewTab = { [weak self] in self?.actions.newTab() }
+        paneContainer.splitTree.onRatiosChanged = { [weak self] layout in self?.dividersMoved(layout) }
+
+        container.addSubview(tabBar)
+        container.addSubview(separator)
         container.addSubview(paneContainer)
         // The content view extends under the transparent title bar and the
-        // floating sidebar; keep the terminal inside the safe area.
+        // floating sidebar; keep the tab bar and terminals inside the safe area.
         let safeArea = container.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            paneContainer.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            tabBar.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
+            tabBar.heightAnchor.constraint(equalToConstant: TabBarView.height),
+            separator.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            separator.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
+            paneContainer.topAnchor.constraint(equalTo: separator.bottomAnchor),
             paneContainer.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
             paneContainer.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
             paneContainer.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor),
@@ -60,121 +124,182 @@ final class ContentViewController: NSViewController, NSMenuItemValidation {
         super.viewDidLoad()
         let model = model
         let workspaceID = workspaceID
-        focusTask = Task { [weak self] in
-            let focuses = Observations { () -> Focus? in
-                guard let tab = model.workspace(workspaceID)?.selectedTabGroup?.selectedTab,
-                      let pane = tab.pane(tab.focusedPaneID)
-                else { return nil }
-                return Focus(paneID: pane.id, sessionID: pane.sessionID)
+        displayTask = Task { [weak self] in
+            let displays = Observations { () -> Display? in
+                guard let tab = model.selectedTab(in: workspaceID) else { return nil }
+                let layout = tab.zoomedPaneID.map(PaneLayout.pane) ?? tab.layout
+                return Display(
+                    tabID: tab.id,
+                    layout: layout,
+                    focusedPaneID: tab.focusedPaneID,
+                    sessions: Dictionary(tab.panes.map { ($0.id, $0.sessionID) }, uniquingKeysWith: { first, _ in first }))
             }
-            for await focus in focuses {
-                self?.show(focus)
+            for await display in displays {
+                guard let self else { return }
+                self.show(display)
             }
         }
     }
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        paneView?.focusTerminal()
+        focusedPaneView?.focusTerminal()
     }
 
-    private func show(_ focus: Focus?) {
-        guard focus != shown else { return }
-        shown = focus
-        guard let focus, let pane = registry.paneView(for: focus.sessionID) else {
-            paneView?.removeFromSuperview()
-            paneView = nil
+    /// The pane view of the focused pane, if it is on screen.
+    var focusedPaneView: PaneView? {
+        shown.flatMap { visiblePanes[$0.focusedPaneID] }
+    }
+
+    // MARK: Showing the model
+
+    private func show(_ display: Display?) {
+        guard !isStopped, display != shown else { return }
+        // Divider drags still waiting go to the model first. If that changed
+        // the model, this display is already stale: the next one follows.
+        if pendingRatios != nil {
+            let before = model.changeCount
+            commitRatios()
+            if model.changeCount != before { return }
+        }
+        let previous = shown
+        shown = display
+        guard let display else {
+            paneContainer.splitTree.update(layout: nil) { _ in NSView() }
+            paneContainer.showsEmptyState = model.workspace(workspaceID)?.selectedTabGroup != nil
+            visiblePanes = [:]
             return
         }
-        if pane !== paneView {
-            // Detach, never destroy: the registry keeps the old pane alive.
-            paneView?.removeFromSuperview()
-            pane.frame = paneContainer.bounds
-            pane.autoresizingMask = [.width, .height]
-            paneContainer.addSubview(pane)
-            paneView = pane
+        paneContainer.showsEmptyState = false
+
+        var panes: [PaneID: PaneView] = [:]
+        paneContainer.splitTree.update(layout: display.layout) { paneID in
+            guard let sessionID = display.sessions[paneID], let pane = registry.paneView(for: sessionID) else {
+                return paneContainer.blankView(for: paneID)
+            }
+            panes[paneID] = pane
+            return pane
         }
-        let paneID = focus.paneID
-        pane.onClosePane = { [weak self] in self?.closePane(paneID, confirm: false) }
-        // Lay out first so the session starts at the pane's real size.
+        visiblePanes = panes
+
+        let isSplit = panes.count > 1
+        for (paneID, pane) in panes {
+            pane.onClosePane = { [weak self] in self?.actions.closePane(paneID, confirm: false) }
+            pane.focusStyle = !isSplit ? .alone : (paneID == display.focusedPaneID ? .focused : .unfocused)
+        }
+
+        // Lay out first so new sessions start at their pane's real size.
         view.layoutSubtreeIfNeeded()
-        registry.startIfNeeded(focus.sessionID)
-        pane.focusTerminal()
-    }
+        for paneID in display.layout.leaves() {
+            if let sessionID = display.sessions[paneID] { registry.startIfNeeded(sessionID) }
+        }
 
-    // MARK: Actions
-
-    /// File › Close Pane (⌘W).
-    @objc func closePane(_ sender: Any?) {
-        guard let shown else { return }
-        closePane(shown.paneID, confirm: true)
-    }
-
-    /// Edit › Clear Screen (⌘K).
-    @objc func clearScreen(_ sender: Any?) {
-        paneView?.controller.clearScreen()
-    }
-
-    /// Workspace › Respawn All Ended (⌥⌘R): every ended pane in this
-    /// window's workspace, shown or not.
-    @objc func respawnAllEnded(_ sender: Any?) {
-        registry.respawnAllEnded(in: workspaceID)
-    }
-
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        switch menuItem.action {
-        case #selector(closePane(_:)), #selector(clearScreen(_:)): paneView != nil
-        case #selector(respawnAllEnded(_:)): registry.hasEndedSessions(in: workspaceID)
-        default: true
+        // Keyboard focus follows the model. Only take it when the focus or
+        // the tab changed, or when reparenting left the window with no
+        // responder in a pane (never from the sidebar or a sheet otherwise).
+        let focusChanged = previous?.tabID != display.tabID || previous?.focusedPaneID != display.focusedPaneID
+        let responderLost = view.window.map { $0.firstResponder === $0 || $0.firstResponder == nil } ?? false
+        if focusChanged || responderLost {
+            focusedPaneView?.focusTerminal()
         }
     }
 
-    /// Closes a pane, killing its session. Asks first if the process is
-    /// still running and the user has not turned confirmation off.
-    private func closePane(_ paneID: PaneID, confirm: Bool) {
-        guard let tab = model.tab(containing: paneID), let sessionID = tab.pane(paneID)?.sessionID else { return }
-        // A disconnected session may still be running too.
-        let controller = registry.controller(for: sessionID)
-        let isRunning = (controller?.isRunning ?? false) || (controller?.state.isDisconnected ?? false)
-        // An unavailable one cannot be ended from here at all: always ask.
-        let isUnreachable = controller?.state.isUnavailable ?? false
-        let wantsConfirmation = UserDefaults.standard.bool(forKey: Self.confirmClosingRunningSessionKey)
-        guard confirm, isUnreachable || (isRunning && wantsConfirmation), let window = view.window else {
-            performClose(paneID, sessionID: sessionID)
-            return
+    // MARK: From the view to the model
+
+    /// The window's first responder changed: a click (or anything else)
+    /// put it in a pane of this tab, so focus that pane in the model.
+    func firstResponderDidChange(_ responder: NSResponder?) {
+        guard let shown, let view = responder as? NSView else { return }
+        guard let (paneID, _) = visiblePanes.first(where: { view.isDescendant(of: $0.value) }),
+              paneID != shown.focusedPaneID
+        else { return }
+        model.focus(pane: paneID)
+    }
+
+    private func dividersMoved(_ layout: PaneLayout) {
+        guard let tabID = shown?.tabID, shown?.layout.hasSameShape(as: layout) == true else { return }
+        pendingRatios = (tabID, layout)
+        ratioTask?.cancel()
+        ratioTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.ratioDebounce)
+            guard !Task.isCancelled else { return }
+            self?.commitRatios()
         }
-        let alert = NSAlert()
-        alert.messageText = "Close this pane?"
-        if isUnreachable {
-            alert.informativeText = "This session may still be running and cannot be reached right now. "
-                + "Closing the pane leaves it running until Armadale next starts with sessions available, "
-                + "and then ends it."
-        } else {
-            alert.informativeText = "A process is still running in this pane. Closing it will end the session."
-            alert.showsSuppressionButton = true
-            alert.suppressionButton?.title = "Don’t ask again"
-        }
-        alert.addButton(withTitle: "Close")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            MainActor.assumeIsolated {
-                if alert.suppressionButton?.state == .on {
-                    UserDefaults.standard.set(false, forKey: Self.confirmClosingRunningSessionKey)
-                }
-                guard response == .alertFirstButtonReturn else { return }
-                self?.performClose(paneID, sessionID: sessionID)
+    }
+
+    /// Writes pending divider positions to the model now.
+    func commitRatios() {
+        ratioTask?.cancel()
+        ratioTask = nil
+        guard let pending = pendingRatios else { return }
+        pendingRatios = nil
+        // Ignored by the model if the tab's shape changed meanwhile, or if
+        // it is zoomed (the shown layout then is not the tab's).
+        guard model.tab(pending.tab)?.zoomedPaneID == nil else { return }
+        model.setSplitRatios(pending.layout, for: pending.tab)
+    }
+}
+
+/// The pane area: the split tree, or a note with a New Tab button when the
+/// selected tab group has no tabs.
+@MainActor
+final class PaneContainerView: NSView {
+    let splitTree = SplitTreeView()
+    var onNewTab: (() -> Void)?
+    private var emptyState: NSHostingView<EmptyGroupView>?
+    private var blankViews: [PaneID: NSView] = [:]
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        splitTree.frame = bounds
+        splitTree.autoresizingMask = [.width, .height]
+        addSubview(splitTree)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    var showsEmptyState: Bool = false {
+        didSet {
+            guard showsEmptyState != oldValue else { return }
+            if showsEmptyState {
+                let hosting = NSHostingView(rootView: EmptyGroupView { [weak self] in self?.onNewTab?() })
+                hosting.frame = bounds
+                hosting.autoresizingMask = [.width, .height]
+                addSubview(hosting)
+                emptyState = hosting
+            } else {
+                emptyState?.removeFromSuperview()
+                emptyState = nil
             }
         }
     }
 
-    private func performClose(_ paneID: PaneID, sessionID: SessionID) {
-        // The model cascades (pane → tab → tab group → window); this view and
-        // the window controller follow the model. The registry ends the
-        // session's process.
-        let result = model.closePane(paneID)
-        registry.close(sessionID)
-        if case .notFound = result {
-            NSLog("Armadale: pane %@ was already gone", paneID.raw)
+    /// Stands in for a pane whose session is missing (never expected: the
+    /// saved state is repaired at launch).
+    func blankView(for paneID: PaneID) -> NSView {
+        if let view = blankViews[paneID] { return view }
+        let view = NSView()
+        blankViews[paneID] = view
+        return view
+    }
+}
+
+private struct EmptyGroupView: View {
+    let newTab: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "rectangle.dashed")
+                .font(.system(size: 30))
+                .foregroundStyle(.secondary)
+            Text("This tab group has no tabs")
+                .font(.title3.weight(.semibold))
+            Button("New Tab", action: newTab)
+                .controlSize(.large)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

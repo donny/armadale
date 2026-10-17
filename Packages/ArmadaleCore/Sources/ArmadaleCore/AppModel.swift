@@ -90,6 +90,37 @@ public final class AppModel {
         return nil
     }
 
+    /// The selected tab of the workspace's selected tab group.
+    public func selectedTab(in workspace: WorkspaceID) -> Tab? {
+        self.workspace(workspace)?.selectedTabGroup?.selectedTab
+    }
+
+    /// The workspace containing `tabGroup`.
+    public func workspaceID(containing tabGroup: TabGroupID) -> WorkspaceID? {
+        workspaces.first { $0.tabGroups.contains { $0.id == tabGroup } }?.id
+    }
+
+    /// The tab group with `id`, in any workspace.
+    public func tabGroup(_ id: TabGroupID) -> TabGroup? {
+        for workspace in workspaces {
+            if let group = workspace.tabGroups.first(where: { $0.id == id }) { return group }
+        }
+        return nil
+    }
+
+    /// The tab with `id`, in any workspace.
+    public func tab(_ id: TabID) -> Tab? {
+        guard let path = path(ofTab: id) else { return nil }
+        return workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
+    }
+
+    /// The sessions of every pane of `tab`, in layout order.
+    public func sessionIDs(ofTab id: TabID) -> [SessionID] {
+        guard let path = path(ofTab: id) else { return [] }
+        let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
+        return tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
+    }
+
     /// The title shown for `tab`: its custom title, else the focused
     /// session's title, else the focused session's profile name.
     public func displayTitle(for tab: Tab) -> String {
@@ -178,6 +209,40 @@ public final class AppModel {
         didChange()
     }
 
+    /// Selects the workspace's tab group number `number` (1-based, ⇧⌘1…9).
+    /// Returns false (and changes nothing) if there is no such group.
+    @discardableResult
+    public func selectTabGroup(number: Int, in workspaceID: WorkspaceID) -> Bool {
+        guard let groups = workspace(workspaceID)?.tabGroups, number >= 1, number <= groups.count else { return false }
+        select(tabGroup: groups[number - 1].id)
+        return true
+    }
+
+    /// Moves a tab group to position `index` among its workspace's groups.
+    /// `index` counts positions *after* the group has been removed, and is
+    /// clamped. Selection is unchanged.
+    public func moveTabGroup(_ id: TabGroupID, to index: Int) {
+        guard let path = path(ofTabGroup: id) else { return }
+        let group = workspaces[path.workspace].tabGroups.remove(at: path.tabGroup)
+        let clamped = min(max(index, 0), workspaces[path.workspace].tabGroups.count)
+        workspaces[path.workspace].tabGroups.insert(group, at: clamped)
+        didChange()
+    }
+
+    /// Closes a tab group with all its tabs and sessions. Closing the
+    /// workspace's last group marks its window closed (the workspace stays);
+    /// otherwise a neighbouring group is selected if this one was.
+    @discardableResult
+    public func closeTabGroup(_ id: TabGroupID) -> CloseResult {
+        guard let path = path(ofTabGroup: id) else { return .notFound }
+        let workspaceID = workspaces[path.workspace].id
+        let group = workspaces[path.workspace].tabGroups.remove(at: path.tabGroup)
+        removeSessions(Set(group.tabs.flatMap(\.panes).map(\.sessionID)))
+        defer { didChange() }
+        return groupRemoved(id, at: path)
+            ?? .closedTabGroup(id, in: workspaceID)
+    }
+
     // MARK: Tabs
 
     /// Adds a tab to a tab group and selects it. `profile` defaults to
@@ -221,18 +286,47 @@ public final class AppModel {
         }
 
         workspaces[path.workspace].tabGroups.remove(at: path.tabGroup)
-        let groups = workspaces[path.workspace].tabGroups
-        guard !groups.isEmpty else {
-            workspaces[path.workspace].selectedTabGroupID = nil
-            var window = workspaces[path.workspace].window ?? WindowState()
-            window.isOpen = false
-            workspaces[path.workspace].window = window
-            return .closedWindow(workspaceID)
-        }
-        if workspaces[path.workspace].selectedTabGroupID == groupID {
-            workspaces[path.workspace].selectedTabGroupID = groups[min(path.tabGroup, groups.count - 1)].id
-        }
-        return .closedTabGroup(groupID, in: workspaceID)
+        return groupRemoved(groupID, at: TabGroupPath(workspace: path.workspace, tabGroup: path.tabGroup))
+            ?? .closedTabGroup(groupID, in: workspaceID)
+    }
+
+    /// Closes every other tab of `id`'s tab group (and their sessions), and
+    /// selects `id`. Returns the tabs closed.
+    @discardableResult
+    public func closeOtherTabs(than id: TabID) -> [TabID] {
+        guard let path = path(ofTab: id) else { return [] }
+        let group = workspaces[path.workspace].tabGroups[path.tabGroup]
+        let others = group.tabs.filter { $0.id != id }
+        guard !others.isEmpty else { return [] }
+        removeSessions(Set(others.flatMap(\.panes).map(\.sessionID)))
+        workspaces[path.workspace].tabGroups[path.tabGroup].tabs.removeAll { $0.id != id }
+        workspaces[path.workspace].tabGroups[path.tabGroup].selectedTabID = id
+        didChange()
+        return others.map(\.id)
+    }
+
+    /// Selects tab number `number` (⌘1…⌘8) of the workspace's selected tab
+    /// group; 9 (⌘9) always means the last tab. Returns false if there is no
+    /// such tab.
+    @discardableResult
+    public func selectTab(number: Int, in workspaceID: WorkspaceID) -> Bool {
+        guard let tabs = workspace(workspaceID)?.selectedTabGroup?.tabs, !tabs.isEmpty, number >= 1 else { return false }
+        let index = number >= 9 ? tabs.count - 1 : number - 1
+        guard index < tabs.count else { return false }
+        select(tab: tabs[index].id)
+        return true
+    }
+
+    /// Selects the tab `offset` places after the selected one in the
+    /// workspace's selected group (negative: before), wrapping around.
+    @discardableResult
+    public func selectAdjacentTab(offset: Int, in workspaceID: WorkspaceID) -> Bool {
+        guard let group = workspace(workspaceID)?.selectedTabGroup, !group.tabs.isEmpty else { return false }
+        let count = group.tabs.count
+        let current = group.tabs.firstIndex { $0.id == group.selectedTabID } ?? 0
+        let next = ((current + offset) % count + count) % count
+        select(tab: group.tabs[next].id)
+        return true
     }
 
     /// Moves a tab to position `index` of `tabGroup`, possibly across groups
@@ -310,6 +404,70 @@ public final class AppModel {
         }
         if let sessionID { removeSessions([sessionID]) }
         return .closedPane(paneID, in: tab.id)
+    }
+
+    /// Splits the focused pane of the workspace's selected tab.
+    @discardableResult
+    public func splitFocusedPane(axis: Axis, in workspaceID: WorkspaceID) -> PaneID? {
+        guard let tab = selectedTab(in: workspaceID) else { return nil }
+        return splitPane(tab.focusedPaneID, axis: axis)
+    }
+
+    /// Moves focus in the workspace's selected tab to the nearest pane in
+    /// `direction` (``PaneLayout/neighbor(of:direction:)``). A zoomed tab
+    /// is unzoomed first. Returns the newly focused pane, or `nil` if there
+    /// is none that way (nothing changes then).
+    @discardableResult
+    public func moveFocus(_ direction: Direction, in workspaceID: WorkspaceID) -> PaneID? {
+        guard let tab = selectedTab(in: workspaceID),
+              let target = tab.layout.neighbor(of: tab.focusedPaneID, direction: direction)
+        else { return nil }
+        mutateTab(tab.id) { tab in
+            tab.focusedPaneID = target
+            tab.zoomedPaneID = nil
+        }
+        return target
+    }
+
+    /// Moves the divider next to the focused pane of the workspace's
+    /// selected tab toward `direction` by `amount` (a fraction of that
+    /// split; ``PaneLayout/moveDivider(of:toward:by:)``). Ignored while the
+    /// tab is zoomed.
+    public func resizeFocusedPane(toward direction: Direction, by amount: Double = 0.05, in workspaceID: WorkspaceID) {
+        guard let tab = selectedTab(in: workspaceID), tab.zoomedPaneID == nil else { return }
+        let layout = tab.layout.moveDivider(of: tab.focusedPaneID, toward: direction, by: amount)
+        guard layout != tab.layout else { return }
+        mutateTab(tab.id) { $0.layout = layout }
+    }
+
+    /// Resets every split ratio of the workspace's selected tab to 0.5.
+    public func equalizePanes(in workspaceID: WorkspaceID) {
+        guard let tab = selectedTab(in: workspaceID) else { return }
+        let layout = tab.layout.equalized()
+        guard layout != tab.layout else { return }
+        mutateTab(tab.id) { $0.layout = layout }
+    }
+
+    /// Zooms the focused pane of the workspace's selected tab, or unzooms.
+    /// A tab with one pane is never zoomed.
+    public func toggleZoom(in workspaceID: WorkspaceID) {
+        guard let tab = selectedTab(in: workspaceID) else { return }
+        guard tab.zoomedPaneID != nil || tab.layout.isSplit else { return }
+        mutateTab(tab.id) { tab in
+            tab.zoomedPaneID = tab.zoomedPaneID == nil ? tab.focusedPaneID : nil
+        }
+    }
+
+    /// Records split ratios the user set by dragging dividers. `layout`
+    /// must have the tab's current shape (``PaneLayout/hasSameShape(as:)``);
+    /// anything else is stale and ignored. Ratios are clamped.
+    public func setSplitRatios(_ layout: PaneLayout, for tabID: TabID) {
+        guard let path = path(ofTab: tabID) else { return }
+        let current = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].layout
+        guard current.hasSameShape(as: layout) else { return }
+        let clamped = layout.clampingRatios()
+        guard clamped != current else { return }
+        mutateTab(tabID) { $0.layout = clamped }
     }
 
     /// Focuses a pane and selects its tab and tab group.
@@ -435,6 +593,25 @@ public final class AppModel {
         guard let path = path(ofTab: id) else { return }
         body(&workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab])
         didChange()
+    }
+
+    /// Bookkeeping after the group `id` at `path` has been removed from its
+    /// workspace: marks the window closed if no group is left (and returns
+    /// `.closedWindow`), else moves the selection off the removed group and
+    /// returns `nil`.
+    private func groupRemoved(_ id: TabGroupID, at path: TabGroupPath) -> CloseResult? {
+        let groups = workspaces[path.workspace].tabGroups
+        guard !groups.isEmpty else {
+            workspaces[path.workspace].selectedTabGroupID = nil
+            var window = workspaces[path.workspace].window ?? WindowState()
+            window.isOpen = false
+            workspaces[path.workspace].window = window
+            return .closedWindow(workspaces[path.workspace].id)
+        }
+        if workspaces[path.workspace].selectedTabGroupID == id {
+            workspaces[path.workspace].selectedTabGroupID = groups[min(path.tabGroup, groups.count - 1)].id
+        }
+        return nil
     }
 
     private func fixTabSelection(workspace w: Int, tabGroup g: Int, removedIndex: Int, removedID: TabID) {

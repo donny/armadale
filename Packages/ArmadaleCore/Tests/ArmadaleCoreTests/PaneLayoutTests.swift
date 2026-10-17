@@ -190,6 +190,25 @@ struct PaneLayoutTests {
         #expect(skewed.equalized() == aBC)
     }
 
+    @Test func equalizedWeightsNestedColumnsByPaneCount() {
+        // ((a | b) | c): three columns built from two nested horizontal splits.
+        let columns = PaneLayout.split(
+            axis: .horizontal, ratio: 0.5,
+            first: .split(axis: .horizontal, ratio: 0.3, first: .pane(a), second: .pane(b)),
+            second: .pane(c))
+        let expected = PaneLayout.split(
+            axis: .horizontal, ratio: 2.0 / 3.0,
+            first: .split(axis: .horizontal, ratio: 0.5, first: .pane(a), second: .pane(b)),
+            second: .pane(c))
+        #expect(columns.equalized() == expected)
+        // A split across the axis does not add columns: (a | (b / c)) stays 50/50.
+        let mixed = PaneLayout.split(
+            axis: .horizontal, ratio: 0.2,
+            first: .pane(a),
+            second: .split(axis: .vertical, ratio: 0.85, first: .pane(b), second: .pane(c)))
+        #expect(mixed.equalized() == aBC)
+    }
+
     @Test func replaceSwapsLeafForSubtree() {
         let result = ab.replace(b, with: .split(axis: .vertical, ratio: 0.5, first: .pane(b), second: .pane(c)))
         #expect(result == aBC)
