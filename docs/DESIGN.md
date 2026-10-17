@@ -815,7 +815,8 @@ armadale/
   Testing and run in a few seconds without a UI.
 - `ArmadaleSessions` has integration tests that spawn a real local zmx
   session, kill it, and assert the state machine.
-- CI: `xcodegen generate && xcodebuild test` on a macOS 27 runner.
+- No hosted CI: GitHub Actions is disabled for this repository. The full
+  build and test command is run locally before every commit (see README).
 - Signing: hardened runtime, no sandbox entitlement, `zmx` helper signed as
   part of the bundle, notarization via `notarytool` in `scripts/notarize.sh`.
 
@@ -823,7 +824,7 @@ armadale/
 
 ## 12. Build order
 
-1. **Skeleton** — XcodeGen project, packages, CI, `ArmadaleCore` model,
+1. **Skeleton** — XcodeGen project, packages, `ArmadaleCore` model,
    `PaneLayout` operations with tests, `StateStore` with migrations.
 2. **One pane** — `PTYProcess` with the `ctty-exec` helper target,
    `EphemeralBackend`, `SwiftTermSurface`, a single window with one shell

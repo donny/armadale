@@ -76,7 +76,7 @@ struct PTYProcessTests {
         process.write([0x03])
         let termination = await process.termination
         let elapsed = ContinuousClock.now - start
-        #expect(elapsed < .seconds(3), "took \(elapsed)") // immediate locally; generous for CI
+        #expect(elapsed < .seconds(3), "took \(elapsed)") // immediate locally; generous for a loaded machine
         #expect(termination == .signaled(SIGINT) || termination == .exited(128 + SIGINT), "\(String(describing: termination))")
         #expect(!(await output.waitForEnd()).contains("done"))
     }
@@ -150,7 +150,7 @@ struct PTYProcessTests {
         let start = ContinuousClock.now
         await process.terminate()
         let elapsed = ContinuousClock.now - start
-        // 2 s grace period, then SIGKILL; the upper bound is generous for CI.
+        // 2 s grace period, then SIGKILL; the upper bound is generous for a loaded machine.
         #expect(elapsed >= .milliseconds(1900) && elapsed < .seconds(8), "took \(elapsed)")
         #expect(await process.termination == .signaled(SIGKILL))
         #expect(kill(process.pid, 0) != 0)

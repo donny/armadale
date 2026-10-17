@@ -57,7 +57,7 @@ it. The whole package takes about 15 s.
 Dependency versions are locked in
 `Armadale.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
 It is the only tracked file inside the generated project, and
-`xcodegen generate` leaves it alone. CI passes
+`xcodegen generate` leaves it alone. The build command above passes
 `-onlyUsePackageVersionsFromResolvedFile`, so builds use exactly those
 versions. To change a pin, edit `Packages/SwiftTermSurface/Package.swift`,
 run `swift package resolve` in that directory, and copy the resulting
