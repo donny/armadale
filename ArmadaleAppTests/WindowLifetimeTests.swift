@@ -40,11 +40,14 @@ struct WindowLifetimeTests {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
             model: model,
             runtime: SessionRuntimeSetup(
                 backend: InertBackend(), makeOutputFilter: { IdentityOutputFilter() }, isPersistent: false),
-            restoredSessionIDs: [])
+            restoredSessionIDs: [],
+            settings: settings)
         let firstSession = try #require(model.sessionIDs(in: workspace).first)
 
         weak var weakController: WorkspaceWindowController?
@@ -87,11 +90,13 @@ struct RegistryCloseRiskTests {
         let session = try #require(restored.first)
         // The inert backend's probe answers "nothing is alive", but only
         // once this test yields to the main actor.
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
             model: model,
             runtime: SessionRuntimeSetup(
                 backend: InertBackend(), makeOutputFilter: { IdentityOutputFilter() }, isPersistent: false),
-            restoredSessionIDs: restored)
+            restoredSessionIDs: restored, settings: settings)
         #expect(registry.status(of: session) == .pending)
         #expect(registry.closeRisk(of: [session]).mayBeRunning, "unknown yet: may be running")
 
@@ -107,11 +112,14 @@ struct RegistryCloseRiskTests {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
         let session = try #require(model.sessionIDs(in: workspace).first)
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
             model: model,
             runtime: SessionRuntimeSetup(
                 backend: InertBackend(), makeOutputFilter: { IdentityOutputFilter() }, isPersistent: false),
-            restoredSessionIDs: [])
+            restoredSessionIDs: [],
+            settings: settings)
         #expect(registry.status(of: session) == .pending)
         #expect(!registry.closeRisk(of: [session]).mayBeRunning)
     }

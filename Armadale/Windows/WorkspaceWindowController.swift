@@ -191,6 +191,13 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         actions.newTab()
     }
 
+    /// File › New Tab with Profile: the item's represented object is the
+    /// profile's ID.
+    @objc func newTabWithProfile(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        actions.newTab(profile: ProfileID(raw: raw))
+    }
+
     /// ⌘D: a new shell right of the focused pane, in its directory.
     @objc func splitRight(_ sender: Any?) {
         model.splitFocusedPane(axis: .horizontal, in: workspaceID)
@@ -304,7 +311,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         let group = workspace?.selectedTabGroup
         let tab = group?.selectedTab
         switch menuItem.action {
-        case #selector(newTab(_:)), #selector(newTabGroup(_:)), #selector(renameWorkspace(_:)),
+        case #selector(newTab(_:)), #selector(newTabWithProfile(_:)), #selector(newTabGroup(_:)), #selector(renameWorkspace(_:)),
              #selector(deleteWorkspace(_:)):
             return workspace != nil
         case #selector(closePane(_:)):

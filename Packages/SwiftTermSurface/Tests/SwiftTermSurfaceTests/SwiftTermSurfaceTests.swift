@@ -91,4 +91,28 @@ struct SwiftTermSurfaceTests {
         #expect(view.responds(to: #selector(NSText.paste(_:))))
         #expect(view.responds(to: #selector(NSText.selectAll(_:))))
     }
+
+    /// Re-applying the appearance (every tab switch does) keeps the cursor
+    /// the program chose; only a changed cursor preference overrides it.
+    @Test func reapplyingKeepsTheProgramsCursorStyle() async throws {
+        let appearance = TerminalAppearance(fontName: "Menlo", fontSize: 12, cursor: TerminalCursorStyle(shape: .block, blinks: true))
+        let surface = SwiftTermSurface(appearance: appearance)
+        #expect(surface.cursorStyleParameter == 1)
+        surface.feed(Array("\u{1b}[6 q".utf8)[...]) // steady bar, as vim in insert mode
+        for _ in 0..<50 where surface.cursorStyleParameter != 6 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(surface.cursorStyleParameter == 6)
+
+        surface.apply(appearance)
+        var themed = appearance
+        themed.fontSize = 14
+        themed.theme.background = TerminalColor(hex: 0x101010)
+        surface.apply(themed)
+        #expect(surface.cursorStyleParameter == 6, "same cursor preference: the program's choice stays")
+
+        themed.cursor = TerminalCursorStyle(shape: .underline, blinks: false)
+        surface.apply(themed)
+        #expect(surface.cursorStyleParameter == 4, "a changed preference applies")
+    }
 }

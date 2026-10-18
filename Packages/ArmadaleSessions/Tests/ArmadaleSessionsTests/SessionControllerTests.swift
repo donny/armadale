@@ -145,6 +145,8 @@ private final class RecordingDelegate: SessionControllerDelegate {
     var versions: [String] = []
     var directories: [String] = []
     var replacements: [(SessionID, Session)] = []
+    var respawnLaunch: LaunchSpec?
+    var replacedSurfaces: [ObjectIdentifier] = []
 
     func sessionController(_ controller: SessionController, didChangeState state: SessionState) { states.append(state) }
     func sessionController(_ controller: SessionController, didSetTitle title: String) { titles.append(title) }
@@ -154,6 +156,12 @@ private final class RecordingDelegate: SessionControllerDelegate {
     }
     func sessionController(_ controller: SessionController, didRecordRuntimeVersion version: String) {
         versions.append(version)
+    }
+    func sessionController(_ controller: SessionController, launchForRespawning session: Session) -> LaunchSpec? {
+        respawnLaunch
+    }
+    func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {
+        replacedSurfaces.append(ObjectIdentifier(old))
     }
 }
 
@@ -319,6 +327,59 @@ struct SessionControllerTests {
         let second = try await handle(1)
         second.emit("fresh")
         await eventually { surface.text.hasSuffix("fresh") }
+    }
+
+    @Test func respawnUsesTheLaunchTheDelegateNames() async throws {
+        let controller = makeController()
+        delegate.respawnLaunch = LaunchSpec(program: "codex", arguments: ["--full-auto"])
+        await controller.start(.create)
+        let first = try await handle(0)
+        first.finishOutput()
+        first.exit(0)
+        await eventually { controller.state.isEnded }
+        await controller.respawn()
+        #expect(controller.session.launch == LaunchSpec(program: "codex", arguments: ["--full-auto"]))
+        #expect(await backend.created.last?.session.launch == LaunchSpec(program: "codex", arguments: ["--full-auto"]))
+    }
+
+    /// A renderer change: the surface is swapped at the next connect, never
+    /// under a live terminal, and output from then on goes to the new one.
+    @Test func aPendingSurfaceIsInstalledAtTheNextAttachOnly() async throws {
+        let controller = makeController()
+        await controller.start(.create)
+        let first = try await handle(0)
+        let replacement = FakeSurface()
+        controller.replaceSurfaceOnNextAttach { replacement }
+        #expect(controller.hasPendingSurfaceReplacement)
+        first.emit("old")
+        await eventually { surface.text.hasSuffix("old") }
+        #expect(controller.surface === surface, "a live terminal keeps its surface")
+        #expect(delegate.replacedSurfaces.isEmpty)
+
+        first.finishOutput()
+        first.exit(0)
+        await eventually { controller.state.isEnded }
+        #expect(controller.surface === surface, "an ended pane keeps showing its last screen")
+
+        await controller.respawn()
+        #expect(controller.surface === replacement)
+        #expect(!controller.hasPendingSurfaceReplacement)
+        #expect(delegate.replacedSurfaces == [ObjectIdentifier(surface)])
+        #expect(surface.delegate == nil)
+        #expect(replacement.delegate === controller)
+        let second = try await handle(1)
+        second.emit("new")
+        await eventually { replacement.text.hasSuffix("new") }
+        #expect(!surface.text.contains("new"))
+    }
+
+    @Test func aPendingSurfaceCanBeCancelled() async throws {
+        let controller = makeController()
+        controller.replaceSurfaceOnNextAttach { FakeSurface() }
+        controller.replaceSurfaceOnNextAttach(nil)
+        await controller.start(.create)
+        #expect(controller.surface === surface)
+        #expect(delegate.replacedSurfaces.isEmpty)
     }
 
     @Test func respawnOfARunningSessionKillsItAndIgnoresItsOutput() async throws {

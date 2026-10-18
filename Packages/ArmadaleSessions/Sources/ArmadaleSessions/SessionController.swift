@@ -41,6 +41,12 @@ public protocol SessionControllerDelegate: AnyObject {
     /// A create recorded the runtime version that made the session
     /// (`Session.runtimeVersion`); store it.
     func sessionController(_ controller: SessionController, didRecordRuntimeVersion version: String)
+    /// The launch a respawn of `session` should use (its profile as it is
+    /// now); `nil` reuses `session.launch`.
+    func sessionController(_ controller: SessionController, launchForRespawning session: Session) -> LaunchSpec?
+    /// The controller's surface was replaced (``SessionController/replaceSurfaceOnNextAttach(_:)``):
+    /// show `controller.surface.view` instead of `old.view`.
+    func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface)
 }
 
 extension SessionControllerDelegate {
@@ -53,6 +59,10 @@ extension SessionControllerDelegate {
     public func sessionController(_ controller: SessionController, didRequestClipboard op: ClipboardOp) {}
     public func sessionController(_ controller: SessionController, didReplace old: SessionID, with new: Session) {}
     public func sessionController(_ controller: SessionController, didRecordRuntimeVersion version: String) {}
+    public func sessionController(_ controller: SessionController, launchForRespawning session: Session) -> LaunchSpec? {
+        nil
+    }
+    public func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {}
 }
 
 /// The per-session glue between a backend's ``ProcessHandle`` and a
@@ -69,7 +79,10 @@ extension SessionControllerDelegate {
 /// ``reconnect()`` to try again.
 ///
 /// The controller owns the surface for the session's whole life; views that
-/// show it reparent `surface.view` and never recreate it.
+/// show it reparent `surface.view` and never recreate it. The one exception
+/// is a renderer change: ``replaceSurfaceOnNextAttach(_:)`` swaps the
+/// surface the next time the controller connects (a respawn, a reconnect,
+/// an automatic reattach), never under a live terminal.
 @MainActor
 @Observable
 public final class SessionController {
@@ -86,7 +99,9 @@ public final class SessionController {
     /// Why the last start failed, if it did (spawn errors and the like).
     public private(set) var failure: String?
 
-    @ObservationIgnored public let surface: any TerminalSurface
+    @ObservationIgnored public private(set) var surface: any TerminalSurface
+    /// Makes the surface that replaces ``surface`` at the next connect.
+    @ObservationIgnored private var pendingSurface: (@MainActor () -> any TerminalSurface)?
     @ObservationIgnored public weak var delegate: (any SessionControllerDelegate)?
 
     @ObservationIgnored private var backend: any PersistenceBackend
@@ -164,6 +179,27 @@ public final class SessionController {
         surface.delegate = self
     }
 
+    /// Replaces the surface the next time the controller connects (attach,
+    /// create, respawn, reconnect), before anything is fed to it, so a live
+    /// terminal is never torn down. `nil` cancels a pending replacement.
+    /// The delegate is told when it happens.
+    public func replaceSurfaceOnNextAttach(_ makeSurface: (@MainActor () -> any TerminalSurface)?) {
+        pendingSurface = makeSurface
+    }
+
+    /// Whether a surface replacement is waiting for the next connect.
+    public var hasPendingSurfaceReplacement: Bool { pendingSurface != nil }
+
+    private func installPendingSurface() {
+        guard let make = pendingSurface else { return }
+        pendingSurface = nil
+        let old = surface
+        old.delegate = nil
+        surface = make()
+        surface.delegate = self
+        delegate?.sessionController(self, didReplaceSurface: old)
+    }
+
     /// Whether a live process is attached.
     public var isRunning: Bool {
         state.isAttached && (binding?.handle.isRunning ?? false)
@@ -229,8 +265,9 @@ public final class SessionController {
         setState(.detached)
     }
 
-    /// Replaces an ended (or running) session with a fresh one: same launch,
-    /// directory, profile and location, new ID. The old session is killed in
+    /// Replaces an ended (or running) session with a fresh one: same
+    /// directory, profile and location, new ID, and the launch the delegate
+    /// names (the profile as it is now), else the old one. The old session is killed in
     /// the backend first, whatever its state (a session shown as ended or
     /// disconnected may still be alive; killing a gone one is harmless).
     /// The surface is reset, the delegate told to rebind the pane, and the
@@ -251,7 +288,7 @@ public final class SessionController {
         let fresh = Session(
             location: old.location,
             profileID: old.profileID,
-            launch: old.launch,
+            launch: delegate?.sessionController(self, launchForRespawning: old) ?? old.launch,
             workingDirectory: old.workingDirectory)
         session = fresh
         // Full reset: a program that died in the alternate screen or with
@@ -291,6 +328,9 @@ public final class SessionController {
         let generation = generation
         let target = session
         failure = nil
+        // Before the size is taken: the new surface's view is laid out in
+        // the pane when the delegate installs it.
+        installPendingSurface()
         setState(.attaching)
         let size = currentPTYSize()
         let handle: any ProcessHandle

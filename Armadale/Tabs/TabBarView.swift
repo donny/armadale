@@ -89,8 +89,17 @@ struct TabBarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .help("New Tab")
+                .help("New Tab (right-click to choose a profile)")
                 .accessibilityLabel("New Tab")
+                .contextMenu {
+                    ForEach(model.profiles) { profile in
+                        Button {
+                            actions.newTab(in: group?.id, profile: profile.id)
+                        } label: {
+                            Label(profile.name, systemImage: profile.icon)
+                        }
+                    }
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 6)

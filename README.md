@@ -9,7 +9,16 @@ splits and SwiftUI for chrome. Terminal rendering sits behind a pluggable
 persistence comes from a private, bundled `zmx` daemon. Layout is stored as
 versioned JSON in `~/Library/Application Support/Armadale/`.
 
-Status: step 4 (hierarchy). Each workspace is a window with a sidebar
+Status: step 5 (settings). **Armadale › Settings…** (⌘,) has General
+(default profile and directory, close confirmation), Appearance (font,
+size, theme with separate light and dark choices, Ghostty theme import,
+cursor, renderer), Profiles (add, duplicate, delete and edit launch
+profiles), Hosts (a placeholder until remote sessions arrive) and a
+read-only Shortcuts table generated from the menus. Appearance changes
+apply to every open pane at once; **File › New Tab with Profile** (or a
+right-click on the tab bar's "+") opens a tab with any profile.
+
+Step 4 (hierarchy): each workspace is a window with a sidebar
 listing every workspace, its tab groups and tabs (with status glyphs), a tab
 bar for the selected tab group, and the selected tab's split panes. Splits
 (⌘D / ⇧⌘D), focus (⌥⌘ arrows), resize (⌃⌘ arrows, or drag a divider), zoom
@@ -53,7 +62,8 @@ xcodebuild -project Armadale.xcodeproj -scheme Armadale \
 
 `ArmadaleAppTests` tests the app target's own code (split tree view with
 real SwiftTerm surfaces, close-confirmation rule, window controller
-lifetime). It is unhosted: the app's sources are compiled into the bundle,
+lifetime, preferences, themes, the shortcut table, settings applied to
+open panes, the renderer switch, the Settings window). It is unhosted: the app's sources are compiled into the bundle,
 so the app never launches, no window appears and no process is started.
 
 `ArmadaleSessions` tests spawn real processes on PTYs (zsh and bare
@@ -138,6 +148,7 @@ the prompt, 300 by default) and can take minutes.
 | `ARMADALE_BACKEND=ephemeral` | Plain PTY sessions that end when the app quits (tests, debugging). |
 | `ARMADALE_ZMX=/path/to/zmx` | zmx binary to bundle-install and test with, instead of the app's `Contents/Helpers/zmx` or `Vendor/zmx`. |
 | `ARMADALE_CTTY_EXEC=/path/to/ctty-exec` | `ctty-exec` to use (see below). |
+| `ARMADALE_DEFAULTS_SUITE=name` | Keep settings in the UserDefaults suite `name` instead of the app's domain (same as the `-ArmadaleDefaultsSuite name` argument). |
 
 An `ARMADALE_ZMX` or `ARMADALE_CTTY_EXEC` that does not name an executable
 file is an error (logged and thrown), never a reason to fall back to the
@@ -172,19 +183,51 @@ When you check PTY behaviour by hand, use zsh or a bare program, never
 `/bin/sh`. macOS's `/bin/sh` is bash, which acquires the controlling
 terminal itself and so hides a broken spawn.
 
-The `confirmClosingRunningSession` user default (default `true`) controls
-whether closing a pane (⌘W), a tab or a tab group asks first when a process
-in it is still running.
+## Settings and themes
+
+Settings live in the app's user defaults (`com.tinylittleapps.armadale`,
+i.e. `~/Library/Preferences/com.tinylittleapps.armadale.plist`), through the
+typed `Preferences` store: default profile and directory,
+`confirmClosingRunningSession` (default `true`: closing a pane, tab or tab
+group with a running process asks first), font name and size (⌘= / ⌘- / ⌘0
+change the stored size), theme choice, cursor, renderer, and the Settings
+window's position and tab. Profiles are not preferences: they are saved
+with the layout in `state.json`.
+
+Imported themes are JSON files in `<state dir>/themes/<name>.json`
+(`~/Library/Application Support/Armadale/themes/` by default). Import reads
+a Ghostty theme file (`palette = N=#rrggbb`, `background`, `foreground`,
+`cursor-color`, `selection-background`, `selection-foreground`); importing
+a file with the same name replaces the earlier one. To remove an imported
+theme, delete its JSON file (it falls back to the default theme).
+
+To keep test or debugging runs away from your real settings, point the app
+at another defaults suite:
+
+```sh
+ARMADALE_DEFAULTS_SUITE=armadale-dev ARMADALE_STATE_DIR=/tmp/armadale-dev \
+  ~/Library/Developer/Xcode/DerivedData/Armadale-*/Build/Products/Debug/Armadale.app/Contents/MacOS/Armadale
+# or: … Armadale -ArmadaleDefaultsSuite armadale-dev
+defaults delete armadale-dev   # afterwards
+```
+
+AppKit itself (open panels, the font panel) still writes a few window and
+panel keys to the standard domain of the app's bundle identifier; a fully
+isolated run needs a copy of the app with another bundle identifier.
+`ArmadaleAppTests` never use the app's domain: each test that writes makes
+its own suite, named by an absolute path inside a fresh temporary folder
+(CFPreferences then keeps the plist there, not in `~/Library/Preferences`),
+and removes the folder at the end.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `Armadale/` | AppKit app: lifecycle, menus (the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` |
+| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog` and `AppSettings` (`Support/`) |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `LocalZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
-| `Packages/TerminalSurface` | Renderer protocol and appearance types |
+| `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
 | `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase) |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |

@@ -1,6 +1,7 @@
 import AppKit
 import ArmadaleSessions
 import SwiftUI
+import TerminalSurface
 
 /// One pane: the session's terminal view filling it, and the *Session
 /// Ended* placeholder over it once the session is over.
@@ -12,6 +13,12 @@ import SwiftUI
 @MainActor
 final class PaneView: NSView {
     let controller: SessionController
+    /// Where the terminal's appearance comes from.
+    let settings: AppSettings
+    /// The renderer of the surface shown (``SurfaceFactory/id``).
+    private(set) var rendererID: String
+    /// The renderer the surface is replaced by at the next attach, if any.
+    private(set) var pendingRendererID: String?
     /// Asked to close this pane (the placeholder's Close Pane button).
     var onClosePane: (() -> Void)?
     /// The placeholder's Retry button on an unavailable session.
@@ -33,7 +40,7 @@ final class PaneView: NSView {
     private var placeholder: NSHostingView<SessionPlaceholderView>?
     private let focusOverlay = PassThroughView()
     private var stateObservation: Task<Void, Never>?
-    private var fontObservation: Task<Void, Never>?
+    private var appearanceObservation: Task<Void, Never>?
 
     /// Space between the pane's edge and the text, filled with the theme's
     /// background. The bottom and sides are deep enough that the first glyph
@@ -41,24 +48,66 @@ final class PaneView: NSView {
     /// is collapsed.
     private static let padding = NSEdgeInsets(top: 4, left: 10, bottom: 10, right: 10)
 
-    init(controller: SessionController) {
+    init(controller: SessionController, settings: AppSettings, rendererID: String) {
         self.controller = controller
+        self.settings = settings
+        self.rendererID = rendererID
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         wantsLayer = true
-        let terminal = controller.surface.view
-        let padding = Self.padding
-        terminal.frame = NSRect(
-            x: padding.left, y: padding.bottom,
-            width: bounds.width - padding.left - padding.right,
-            height: bounds.height - padding.top - padding.bottom)
-        terminal.autoresizingMask = [.width, .height]
-        addSubview(terminal)
+        addTerminalView(controller.surface.view)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
         focusOverlay.wantsLayer = true
         addSubview(focusOverlay)
         observeState()
-        observeFontSize()
+        observeAppearance()
+    }
+
+    private var terminalFrame: NSRect {
+        let padding = Self.padding
+        return NSRect(
+            x: padding.left, y: padding.bottom,
+            width: max(bounds.width - padding.left - padding.right, 0),
+            height: max(bounds.height - padding.top - padding.bottom, 0))
+    }
+
+    /// Puts a terminal view at the bottom of the pane, inside the padding.
+    private func addTerminalView(_ terminal: NSView) {
+        terminal.frame = terminalFrame
+        terminal.autoresizingMask = [.width, .height]
+        addSubview(terminal, positioned: .below, relativeTo: subviews.first)
+    }
+
+    /// The renderer changed: the surface is replaced by one from `rendererID`
+    /// the next time the session attaches (``SessionController/replaceSurfaceOnNextAttach(_:)``),
+    /// never under a live terminal. Choosing the current renderer again
+    /// cancels a pending replacement.
+    func useRenderer(_ factory: SurfaceFactory) {
+        guard factory.id != rendererID else {
+            pendingRendererID = nil
+            controller.replaceSurfaceOnNextAttach(nil)
+            return
+        }
+        pendingRendererID = factory.id
+        let settings = settings
+        controller.replaceSurfaceOnNextAttach {
+            // The pane applies its own appearance once the surface is in.
+            factory.makeSurface(appearance: settings.terminalAppearance(for: NSApp.effectiveAppearance))
+        }
+    }
+
+    /// The controller replaced its surface: show the new one where the old
+    /// one was, keeping keyboard focus.
+    func surfaceWasReplaced(_ old: any TerminalSurface) {
+        let hadFocus = window.map { $0.firstResponder === old.view } ?? false
+        old.view.removeFromSuperview()
+        addTerminalView(controller.surface.view)
+        if let pendingRendererID {
+            rendererID = pendingRendererID
+            self.pendingRendererID = nil
+        }
+        applyAppearance()
+        if hadFocus { focusTerminal() }
     }
 
     @available(*, unavailable)
@@ -68,7 +117,7 @@ final class PaneView: NSView {
 
     isolated deinit {
         stateObservation?.cancel()
-        fontObservation?.cancel()
+        appearanceObservation?.cancel()
     }
 
     /// Makes the terminal the window's first responder.
@@ -119,7 +168,7 @@ final class PaneView: NSView {
 
     private func applyAppearance() {
         updateFocusOverlay()
-        let appearance = TerminalPreferences.shared.terminalAppearance(for: effectiveAppearance)
+        let appearance = settings.terminalAppearance(for: effectiveAppearance)
         controller.surface.apply(appearance)
         let background = appearance.theme.background
         layer?.backgroundColor = CGColor(
@@ -137,15 +186,16 @@ final class PaneView: NSView {
         }
     }
 
-    /// ⌘= / ⌘- / ⌘0 apply to every pane, shown or not.
-    private func observeFontSize() {
-        let preferences = TerminalPreferences.shared
-        fontObservation = Task { [weak self] in
-            var last: Double?
-            for await size in Observations({ preferences.fontSize }) {
+    /// Every appearance setting (font, size from ⌘= / ⌘- / ⌘0, theme,
+    /// cursor) applies at once to every pane, shown or not.
+    private func observeAppearance() {
+        let settings = settings
+        appearanceObservation = Task { [weak self] in
+            var last: AppSettings.AppearanceChange?
+            for await change in Observations({ settings.appearanceChange }) {
                 guard let self else { return }
-                if last != nil, last != size { self.applyAppearance() }
-                last = size
+                if last != nil, last != change { self.applyAppearance() }
+                last = change
             }
         }
     }

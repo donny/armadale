@@ -175,6 +175,14 @@ Built-in profiles ship for **Shell**, **Claude Code** (`claude`), and
 **Codex** (`codex`). Users can add their own in Settings. An SSH session is
 not a profile: it is any profile with a `.remote(host)` location.
 
+*Step 5:* a session still records the `LaunchSpec` it was created with, so
+a running session is unaffected by later profile edits, but **Respawn uses
+the profile as it is at respawn time** (`AppModel.launchForRespawn(of:)`,
+asked by `SessionController` through its delegate), falling back to the
+recorded launch when the profile has been deleted. Built-in profiles
+(`Profile.isBuiltIn`) cannot be deleted, and only their name and icon can
+be changed; duplicating one gives a fully editable copy.
+
 Layout operations live in `PaneLayout` as pure functions with unit tests:
 `split(pane, axis, newPane)`, `remove(pane)` (collapses the parent),
 `neighbor(of:direction:)`, `resize(pane, delta)`, `swap`, `equalize` (weighted
@@ -206,7 +214,13 @@ A single `@MainActor @Observable final class AppModel` owns `[Workspace]`,
 `moveFocus(_:)` (unzooms), `resizeFocusedPane(toward:by:)` (ignored while
 zoomed), `equalizePanes`, `toggleZoom` (only with more than one pane) and
 `setSplitRatios(_:for:)` (divider drags; ignored unless the layout still has
-that shape). Every mutation goes through it, which is what makes the
+that shape). Step 5 added the profile intents `newProfile`,
+`duplicateProfile`, `updateProfile` (cleans up blank names, icons and
+programs; for built-ins takes only name and icon) and `deleteProfile`
+(refused for built-ins), plus `launchForRespawn(of:)`. The default
+profile and directory are not model state: they are preferences
+(section 8) that the app copies into `defaultProfileID` /
+`defaultWorkingDirectory`. Every mutation goes through it, which is what makes the
 sidebar and tab bar trivially consistent across windows and what triggers
 persistence.
 
@@ -451,7 +465,8 @@ replay and is accepted.
   ends up in the same ended state.
 - **Respawn**: kills the old session (always: a pane that looks ended may
   still be alive, and a not-found kill is harmless), creates a new session
-  with the same `launch`, directory and location, and rebinds the pane to
+  with the same directory and location and the profile's current launch
+  (step 5; the old `launch` if the profile was deleted), and rebinds the pane to
   it. The old session ID is retired and its zmx log removed. Close Pane
   likewise always kills. The
   surface is fully reset first (RIS, scrollback cleared), so modes a dead
@@ -552,6 +567,21 @@ without touching sessions or layout.
 - A second implementation (libghostty, or a Metal grid renderer) only needs to
   satisfy the protocol. The renderer is chosen in Settings and applied to new
   surfaces; existing surfaces are rebuilt on the next attach.
+  *Implementation (step 5):* `SurfaceRegistry` (in `TerminalSurface`) holds
+  `SurfaceFactory`s keyed by a persisted identifier (`swiftterm` is the
+  only one and the default; an unknown identifier resolves to the default).
+  The app's `SurfaceRegistry.standard` registers them, and
+  `SessionRegistry` makes every new surface through the factory named by
+  the `rendererID` preference. When that preference changes, each existing
+  pane calls `SessionController.replaceSurfaceOnNextAttach(_:)`; the
+  controller swaps the surface at the start of its next connect (Respawn,
+  Reconnect, an automatic reattach; a relaunch makes new surfaces anyway),
+  before anything is fed to it or its size is taken, and tells its
+  delegate, which puts the new view in the pane. A live terminal is never
+  torn down, and an ended pane keeps showing its last screen until then.
+  Choosing the pane's current renderer again cancels the replacement.
+  `TerminalTheme` gained an optional `selectionForeground` (from Ghostty
+  themes); SwiftTerm cannot recolour selected text and ignores it.
 - Surface views are owned by the session controller, not by the layout. Tab
   switches and pane moves reparent the view; they never recreate it, so no
   terminal state is lost and no replay is needed.
@@ -807,10 +837,85 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   (handled by the hosting view, SwiftUI has no gesture for it) and the close
   button close it with the ⌘W confirmation; the context menu has Rename,
   Close, Close Other Tabs.
-- Settings is an `NSWindowController` hosting a SwiftUI `TabView`:
+- Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (default profile, default directory, confirm‑on‑close),
   **Appearance** (font, size, theme, cursor, renderer), **Profiles**,
   **Hosts**, **Shortcuts** (read‑only table in v1).
+  *Implementation (step 5):* `SettingsWindowController` (one instance,
+  owned by the app delegate, opened by ⌘,) hosts an `NSTabViewController`
+  with `tabStyle = .toolbar` whose items are `NSHostingController`s of the
+  SwiftUI tab views, rather than a SwiftUI `TabView`: outside a SwiftUI
+  `Settings` scene a `TabView` does not produce the standard toolbar of
+  settings tabs, and `NSTabViewController` does. The window
+  (`toolbarStyle = .preference`) resizes to each tab, keeping its top
+  edge, and remembers its position and last tab in preferences (not with
+  `setFrameAutosaveName`, which would write to the standard defaults even
+  when a test suite is in use).
+  - **Preferences** (`Settings/Preferences.swift`) is a typed,
+    `@Observable` store over an injected `UserDefaults`; the app's is the
+    standard domain, or the suite named by `ARMADALE_DEFAULTS_SUITE` /
+    `-ArmadaleDefaultsSuite <name>`. It holds the default profile and
+    directory (empty = home, `~` expanded), `confirmClosingRunningSession`
+    (same key as step 4), font name and size (6–48, stored; ⌘= / ⌘- / ⌘0
+    write through it), the theme choice (one theme, or a light and a dark
+    one that follow the system appearance), cursor shape and blink, the
+    renderer, and the Settings window's position and tab. Profiles stay in
+    the model (`state.json`).
+  - `AppSettings` bundles `Preferences`, `ThemeCatalog` and the
+    `SurfaceRegistry` and turns them into a `TerminalAppearance` for a
+    light or dark view. Each `PaneView` observes it, so every appearance
+    change, including a re-imported user theme, applies to all panes at
+    once, shown or not.
+  - `ThemeCatalog` (`Support/ThemeCatalog.swift`) holds the built-in
+    themes as data (Armadale Light/Dark, Solarized Light/Dark, Dracula,
+    Nord, One Dark, Gruvbox Dark; IDs `builtin.*`) and user themes stored
+    as JSON in `<state dir>/themes/<name>.json` (IDs `user.<name>`). Import
+    reads a Ghostty theme file with `GhosttyTheme.parse` (a pure function
+    in `TerminalSurface`, next to `TerminalTheme`; it uses only
+    Foundation): `palette = N=#hex`, `background`, `foreground`,
+    `cursor-color`, `selection-background`, `selection-foreground`;
+    comments, quotes and missing `#` are accepted, bad lines are reported,
+    other keys ignored. Importing the same name again replaces it. An
+    unknown theme ID falls back to Armadale Light or Dark.
+  - Appearance offers a popup of installed fixed-pitch families (regular
+    face, SF Mono first) plus the system font panel, a size stepper, the
+    theme pickers with a preview, Import Ghostty Theme…, cursor shape and
+    blink, and the renderer picker.
+  - Profiles: list with add / duplicate / delete (built-ins cannot be
+    deleted) and an editor (name, SF Symbol icon with preview, kind,
+    program, arguments one per line, environment table); edits go through
+    the `AppModel` intents. File › New Tab with Profile and the tab bar's
+    "+" context menu open a tab with any profile.
+  - Hosts is a placeholder until step 6.
+  - Shortcuts is generated from the menu bar `MainMenu` builds
+    (`ShortcutTable`): every item with a key equivalent, hidden alternates
+    folded into their visible item, numbered runs collapsed
+    (⌘1…⌘8), so it cannot drift from the real bindings. Only items
+    `MainMenu` created are listed (it gives each an `armadale.menu.*`
+    identifier); what AppKit adds later, the Services menu's contents and
+    the Window menu's tiling commands (🌐⌃C Center, …), is not Armadale's
+    and is left out. The Globe modifier is shown as 🌐.
+  - The window is titled "Settings" whatever the tab, and ⌘W (File ›
+    Close Pane, which only workspace windows otherwise handle) closes it.
+  - A profile's environment variables must have a non-empty name without
+    `=`, spaces or NUL, and may not start with `ARMADALE_` or `ZMX_`
+    (`Profile.environmentNameProblem`); the editor shows why a row will not
+    be saved and `updateProfile` drops it. `LaunchResolver` applies the
+    same rule and removes every `ZMX_*` variable after merging, so nothing
+    from a profile reaches the session runtime.
+  - Re-applying the appearance (every tab switch, every theme change)
+    does not reset the cursor: the surface only pushes the cursor style
+    when the preference changed, so a program's own DECSCUSR choice
+    (vim's insert-mode bar) stays.
+  - A deleted default profile resets the preference to the shell.
+    Ghostty import also accepts the basic X11 colour names (black … white,
+    bright/light variants, grey), meaning the default palette's entries;
+    the default palette is the light one when the background is light
+    (luminance > 0.5). A rejected file reports its bad lines. User theme
+    IDs are lower-case and matched case-insensitively; Appearance ›
+    Remove deletes an imported theme, and choices using it fall back to
+    the defaults. A font picked in the font panel that is not fixed-pitch
+    is refused with a message.
 
 ### App lifecycle
 
@@ -883,12 +988,14 @@ Rebinding is out of scope for v1; the table is exposed read‑only in Settings.
 *Step 4 notes.* Every row is an `NSMenuItem` key equivalent (built in
 `App/MainMenu.swift`, which is the shortcut table until Settings shows it),
 so the shortcuts appear in the menus and work whatever has focus, and keys
-not bound there reach the terminal. ⌃Tab / ⌃⇧Tab and ⌘+ are hidden
+not bound there reach the terminal (since step 5, Settings › Shortcuts
+is generated from these menu items). ⌃Tab / ⌃⇧Tab and ⌘+ are hidden
 alternates (`allowsKeyEquivalentWhenHidden`) of ⇧⌘] / ⇧⌘[ and ⌘=. ⌘9 goes
 to the last tab, ⇧⌘9 to the ninth tab group. ⌃⌘ arrows move the nearest
 divider by 5 % of its split (`moveDivider`). ⌘= / ⌘- / ⌘0 change the font
-size of every pane, in memory, until Settings (step 5) stores it. ⌘, is
-present but disabled until Settings exists. Commands also in the menus
+size of every pane; since step 5 the size is the stored Appearance
+setting, so it persists across launches. ⌘, opens Settings (step 5).
+Commands also in the menus
 without a default key: Close Tab, Close Tab Group, Rename Workspace / Tab
 Group / Tab, Delete Workspace.
 
@@ -898,8 +1005,9 @@ Group / Tab, Delete Workspace.
 
 A pane is "just a shell" by default. The agent profiles only add:
 
-- a launch program (`claude`, `codex`) and arguments, respawn‑safe because the
-  resolved `LaunchSpec` is stored on the session;
+- a launch program (`claude`, `codex`) and arguments; the resolved
+  `LaunchSpec` is stored on the session, and a respawn takes the profile
+  as it is then (falling back to the stored launch if the profile is gone);
 - an **attention** rule: a bell (BEL) or an OSC 9 / OSC 777 notification in
   an unfocused pane sets the tab's attention state, shows a badge on the Dock
   icon count, and optionally posts a `UNUserNotification`. Claude Code and
@@ -925,16 +1033,18 @@ armadale/
 │   ├── Tabs/                        TabBarView, StatusGlyph (SwiftUI)
 │   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
 │   ├── Sessions/                    SessionRegistry (controllers per session), SessionStatus / CloseRisk
-│   ├── Settings/                    SettingsWindowController + SwiftUI tabs
+│   ├── Settings/                    SettingsWindowController, Preferences, ShortcutTable, SwiftUI tabs
+│   │                                (General, Appearance, Profiles, Hosts, Shortcuts)
 │   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements
-│   └── Support/                     DefaultTheme (ThemeCatalog in step 5), TerminalPreferences,
-│                                    HierarchyDragItem, TextPrompt; the shortcut table is App/MainMenu
+│   └── Support/                     ThemeCatalog (built-in + user themes), AppSettings
+│                                    (+ SurfaceRegistry.standard), HierarchyDragItem, TextPrompt;
+│                                    the shortcut table's source is App/MainMenu
 ├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/
 │   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations   (no AppKit)
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, backends, SSHTransport, SessionController,
 │   │                                LaunchResolver, HelperLocator; Sources/ctty-exec (helper source)
-│   ├── TerminalSurface/             protocol + appearance types
+│   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, notarize.sh
@@ -945,7 +1055,10 @@ armadale/
   Testing and run in a few seconds without a UI.
 - `ArmadaleAppTests` (step 4) tests the app target's own code: the split
   tree view with real SwiftTerm surfaces, the close-confirmation rule, and
-  window controller lifetime. It is unhosted: it compiles the app's sources
+  window controller lifetime; since step 5 also `Preferences` (each test
+  in its own defaults suite, removed afterwards), `ThemeCatalog`, the
+  shortcut table, settings reaching existing panes, the renderer switch
+  and the Settings window. It is unhosted: it compiles the app's sources
   (all but `main.swift`) into the test bundle, so the app never launches, no
   window is shown, no state file is touched, and an inert backend starts no
   process.

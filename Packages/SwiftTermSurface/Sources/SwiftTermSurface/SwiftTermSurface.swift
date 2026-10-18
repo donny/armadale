@@ -15,8 +15,13 @@ public final class SwiftTermSurface: TerminalSurface {
 
     private let terminalView: TerminalView
     private let bridge: DelegateBridge
-    private var appearance: TerminalAppearance
+    /// The appearance last applied.
+    public private(set) var appearance: TerminalAppearance
     private var oscObservation: TerminalOscObservation?
+    /// The cursor style last pushed to the terminal. Re-applying the same
+    /// appearance (a tab switch, a theme change) must not override the
+    /// style the program chose with DECSCUSR, e.g. vim's insert-mode bar.
+    private var appliedCursor: TerminalCursorStyle?
 
     /// Creates a surface with `appearance` applied.
     public init(appearance: TerminalAppearance = .default) {
@@ -30,6 +35,15 @@ public final class SwiftTermSurface: TerminalSurface {
     }
 
     public var view: NSView { terminalView }
+
+    /// Identifier of this renderer in a ``SurfaceRegistry`` (and in
+    /// preferences).
+    public static let rendererID = "swiftterm"
+
+    /// The factory that registers this renderer.
+    public static var factory: SurfaceFactory {
+        SurfaceFactory(id: rendererID, displayName: "SwiftTerm") { SwiftTermSurface(appearance: $0) }
+    }
 
     /// Grid size with SwiftTerm's own cell dimensions. SwiftTerm does not
     /// expose its cell size directly, but `getOptimalFrameSize()` is exactly
@@ -74,7 +88,23 @@ public final class SwiftTermSurface: TerminalSurface {
         terminalView.nativeBackgroundColor = Self.nsColor(theme.background)
         terminalView.caretColor = Self.nsColor(theme.cursor)
         terminalView.selectedTextBackgroundColor = Self.nsColor(theme.selection)
-        terminalView.setCursorStyle(Self.swiftTermCursor(appearance.cursor))
+        if appliedCursor != appearance.cursor {
+            appliedCursor = appearance.cursor
+            terminalView.setCursorStyle(Self.swiftTermCursor(appearance.cursor))
+        }
+    }
+
+    /// The terminal's current cursor style, as DECSCUSR's parameter
+    /// (1/2 block, 3/4 underline, 5/6 bar; odd blinks). Internal, for tests.
+    var cursorStyleParameter: Int {
+        switch terminalView.terminalStateSnapshot().cursorStyle {
+        case .blinkBlock: 1
+        case .steadyBlock: 2
+        case .blinkUnderline: 3
+        case .steadyUnderline: 4
+        case .blinkBar: 5
+        case .steadyBar: 6
+        }
     }
 
     public func clearScrollback() {

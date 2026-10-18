@@ -143,7 +143,9 @@ public enum Location: Codable, Sendable, Hashable {
 }
 
 /// The fully resolved command a session was created with. Stored on the
-/// session so a respawn reproduces it even if the profile later changes.
+/// session, so editing a profile never changes a running session; a
+/// respawn takes the profile as it is then, and this launch only if the
+/// profile was deleted (``AppModel/launchForRespawn(of:)``).
 public struct LaunchSpec: Codable, Sendable, Hashable {
     /// Executable to run; `nil` means the user's login shell.
     public var program: String?
@@ -342,4 +344,29 @@ extension Profile {
 
     /// Profiles that ship with Armadale, in menu order.
     public static let builtIns: [Profile] = [.shell, .claudeCode, .codex]
+
+    /// Prefixes of environment variables that only Armadale sets: its own
+    /// (`ARMADALE_SESSION_ID`) and its session runtime's. A profile can
+    /// never set them; they would reach, or misdirect, the session helper.
+    public static let reservedEnvironmentPrefixes = ["ARMADALE_", "ZMX_"]
+
+    /// Why `name` cannot be one of a profile's environment variables, or
+    /// `nil` if it can: it must be non-empty, contain no `=` or NUL, and not
+    /// be reserved (``reservedEnvironmentPrefixes``).
+    public static func environmentNameProblem(_ name: String) -> String? {
+        if name.isEmpty { return "A variable needs a name." }
+        if name.contains("=") { return "A variable name can’t contain “=”." }
+        if name.contains("\0") { return "A variable name can’t contain a null character." }
+        if name.contains(where: \.isWhitespace) { return "A variable name can’t contain spaces." }
+        if reservedEnvironmentPrefixes.contains(where: { name.hasPrefix($0) }) {
+            return "“\(name)” is set by Armadale itself and can’t be changed here."
+        }
+        return nil
+    }
+
+    /// Whether this is one of the ``builtIns``. Built-in profiles cannot be
+    /// deleted, and only their name and icon can be changed.
+    public var isBuiltIn: Bool {
+        Profile.builtIns.contains { $0.id == id }
+    }
 }

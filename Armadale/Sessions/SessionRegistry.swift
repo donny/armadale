@@ -2,7 +2,6 @@ import AppKit
 import ArmadaleCore
 import ArmadaleSessions
 import Observation
-import SwiftTermSurface
 import TerminalSurface
 
 /// What runs the app's (local) sessions.
@@ -31,6 +30,8 @@ struct SessionRuntimeSetup {
 @Observable
 final class SessionRegistry {
     @ObservationIgnored private let model: AppModel
+    /// Preferences, themes and renderers for every pane.
+    @ObservationIgnored let settings: AppSettings
     @ObservationIgnored private var runtime: SessionRuntimeSetup
     @ObservationIgnored private var policy: RestorePolicy
     /// Shown in window subtitles while sessions do not outlive the app.
@@ -62,14 +63,16 @@ final class SessionRegistry {
     @ObservationIgnored private var knownSessionIDs: Set<SessionID>
     @ObservationIgnored private var finishedSessionIDs: Set<SessionID> = []
     @ObservationIgnored private var pruneTask: Task<Void, Never>?
+    @ObservationIgnored private var rendererTask: Task<Void, Never>?
 
     static let persistenceWarningText = "Sessions won’t survive quitting"
 
     /// The backend new sessions use.
     var backend: any PersistenceBackend { runtime.backend }
 
-    init(model: AppModel, runtime: SessionRuntimeSetup, restoredSessionIDs: Set<SessionID>) {
+    init(model: AppModel, runtime: SessionRuntimeSetup, restoredSessionIDs: Set<SessionID>, settings: AppSettings) {
         self.model = model
+        self.settings = settings
         self.runtime = runtime
         self.policy = RestorePolicy(backendIsPersistent: runtime.isPersistent)
         self.restoredSessionIDs = restoredSessionIDs
@@ -81,6 +84,7 @@ final class SessionRegistry {
         liveProbe = Self.probe(runtime.backend)
         awaitProbe()
         observeRemovedSessions()
+        observeRenderer()
     }
 
     private static func probe(_ backend: any PersistenceBackend) -> Task<Set<SessionID>?, Never> {
@@ -106,15 +110,17 @@ final class SessionRegistry {
     func paneView(for sessionID: SessionID) -> PaneView? {
         if let pane = panes[sessionID] { return pane }
         guard let session = model.session(sessionID) else { return nil }
+        let settings = settings
+        let factory = settings.surfaceFactory
         let controller = SessionController(
             session: session,
             backend: runtime.backend,
             makeSurface: {
-                SwiftTermSurface(appearance: TerminalPreferences.shared.terminalAppearance(for: NSApp.effectiveAppearance))
+                factory.makeSurface(appearance: settings.terminalAppearance(for: NSApp.effectiveAppearance))
             },
             makeOutputFilter: runtime.makeOutputFilter)
         controller.delegate = self
-        let pane = PaneView(controller: controller)
+        let pane = PaneView(controller: controller, settings: settings, rendererID: factory.id)
         pane.titleProvider = { [weak self, weak controller] in
             guard let self, let controller else { return "Shell" }
             return self.displayName(of: controller.session)
@@ -283,6 +289,23 @@ final class SessionRegistry {
         return model.profile(session.profileID)?.name ?? "Shell"
     }
 
+    /// A renderer change applies to new panes at once and to existing ones
+    /// at their next attach (DESIGN §5): live terminals are never rebuilt.
+    private func observeRenderer() {
+        let preferences = settings.preferences
+        rendererTask = Task { [weak self] in
+            var last: String?
+            for await id in Observations({ preferences.rendererID }) {
+                guard let self else { return }
+                if last != nil, last != id {
+                    let factory = self.settings.surfaces.factory(for: id)
+                    for pane in self.panes.values { pane.useRenderer(factory) }
+                }
+                last = id
+            }
+        }
+    }
+
     /// Sessions can leave the model through any intent (closing a tab,
     /// deleting a workspace); end them too.
     private func observeRemovedSessions() {
@@ -325,6 +348,14 @@ extension SessionRegistry: SessionControllerDelegate {
         restoredSessionIDs.remove(old)
         model.replaceSession(old, with: new)
         onSessionRetired?(old)
+    }
+
+    func sessionController(_ controller: SessionController, launchForRespawning session: Session) -> LaunchSpec? {
+        model.launchForRespawn(of: session)
+    }
+
+    func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {
+        panes.values.first { $0.controller === controller }?.surfaceWasReplaced(old)
     }
 
     func sessionControllerDidRingBell(_ controller: SessionController) {

@@ -62,6 +62,8 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
 }
 
 /// A real ``PaneView`` over a never-started session, with a counting surface.
+/// Its settings are only read, so their defaults suite never touches the
+/// disk (see ``TestDefaults``) and needs no cleanup.
 @MainActor
 func makeCountingPane() -> (PaneView, CountingSurface) {
     let session = Session(profileID: Profile.shell.id, launch: LaunchSpec(), workingDirectory: "/")
@@ -72,5 +74,55 @@ func makeCountingPane() -> (PaneView, CountingSurface) {
         return made
     })
     // `makeSurface` runs synchronously in the initializer.
-    return (PaneView(controller: controller), surface ?? CountingSurface())
+    return (PaneView(controller: controller, settings: .forTesting(), rendererID: "counting"), surface ?? CountingSurface())
+}
+
+extension AppSettings {
+    /// Settings for tests: preferences in a private defaults suite kept in
+    /// a temporary folder (removed again by ``removeTestDefaults()``), never
+    /// in ~/Library/Preferences; built-in themes only; the standard renderers.
+    @MainActor
+    static func forTesting(surfaces: SurfaceRegistry = .standard) -> AppSettings {
+        let suite = TestDefaults()
+        return AppSettings(
+            preferences: Preferences(defaults: suite.defaults, suiteName: suite.name),
+            themes: ThemeCatalog(directory: nil),
+            surfaces: surfaces)
+    }
+
+    /// Deletes the private defaults suite of a ``forTesting(surfaces:)`` instance.
+    @MainActor
+    func removeTestDefaults() {
+        guard let name = preferences.suiteName else { return }
+        TestDefaults.remove(name: name, defaults: preferences.defaults)
+    }
+}
+
+/// A UserDefaults suite for one test. Its name is an absolute path, which
+/// CFPreferences uses as the plist's location: the file lives in its own
+/// temporary folder, so nothing is ever written to ~/Library/Preferences
+/// (where cfprefsd would recreate an empty plist after the test removed it).
+/// The folder is not created here: reading creates nothing, and cfprefsd
+/// creates it on the first write, so a test that only reads leaves nothing
+/// behind; a test that writes calls ``remove()``.
+struct TestDefaults {
+    let name: String
+    let defaults: UserDefaults
+
+    init() {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("armadale-test-defaults-\(UUID().uuidString)", isDirectory: true)
+        name = folder.appendingPathComponent("preferences").path
+        defaults = UserDefaults(suiteName: name) ?? UserDefaults()
+    }
+
+    func remove() { Self.remove(name: name, defaults: defaults) }
+
+    /// Clears the suite and removes its temporary folder.
+    static func remove(name: String, defaults: UserDefaults) {
+        let folder = URL(fileURLWithPath: name).deletingLastPathComponent()
+        guard folder.lastPathComponent.hasPrefix("armadale-test-defaults-") else { return }
+        defaults.removePersistentDomain(forName: name)
+        try? FileManager.default.removeItem(at: folder)
+    }
 }

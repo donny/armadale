@@ -6,9 +6,29 @@ import ArmadaleCore
 /// whatever has keyboard focus; keys that are not bound here reach the
 /// terminal. Workspace commands are nil-targeted and land on the key
 /// window's ``WorkspaceWindowController``; app-wide ones on ``AppDelegate``.
+///
+/// This is also the shortcut table: Settings › Shortcuts is generated from
+/// the menu this builds (``ShortcutTable``), so the two cannot disagree.
 @MainActor
 enum MainMenu {
-    static func make() -> NSMenu {
+    /// Identifier of File › New Tab with Profile, whose items are filled in
+    /// by `profileMenuDelegate` each time it opens.
+    static let newTabWithProfileIdentifier = NSUserInterfaceItemIdentifier("newTabWithProfile")
+
+    /// Prefix of the identifier given to every item this builds. AppKit adds
+    /// items of its own later (the Services menu's contents, the Window
+    /// menu's tiling commands); the shortcut table lists only ours.
+    static let ownItemPrefix = "armadale.menu."
+
+    /// Whether `item` was created by ``make(profileMenuDelegate:installsSpecialMenus:)``.
+    static func isOwnItem(_ item: NSMenuItem) -> Bool {
+        item.identifier?.rawValue.hasPrefix(ownItemPrefix) ?? false
+    }
+
+    /// The main menu. With `installsSpecialMenus`, the Services, Window
+    /// and Help menus are registered with `NSApp` (pass `false` to only
+    /// read the menu, e.g. in tests).
+    static func make(profileMenuDelegate: (any NSMenuDelegate)? = nil, installsSpecialMenus: Bool = true) -> NSMenu {
         let appName = ProcessInfo.processInfo.processName
         let main = NSMenu()
 
@@ -17,12 +37,11 @@ enum MainMenu {
         app.addItem(withTitle: "About \(appName)",
                     action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
-        // Settings arrive in step 5; the item is there so ⌘, is reserved.
         app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
         app.addItem(.separator())
         let services = NSMenu(title: "Services")
         app.addItem(withTitle: "Services", action: nil, keyEquivalent: "").submenu = services
-        NSApp.servicesMenu = services
+        if installsSpecialMenus { NSApp.servicesMenu = services }
         app.addItem(.separator())
         app.addItem(withTitle: "Hide \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "Hide Others",
@@ -38,6 +57,10 @@ enum MainMenu {
         file.addItem(withTitle: "New Tab Group", action: #selector(WorkspaceWindowController.newTabGroup(_:)),
                      keyEquivalent: "n").keyEquivalentModifierMask = [.command, .shift]
         file.addItem(withTitle: "New Tab", action: #selector(WorkspaceWindowController.newTab(_:)), keyEquivalent: "t")
+        let profiles = NSMenu(title: "New Tab with Profile")
+        profiles.identifier = newTabWithProfileIdentifier
+        profiles.delegate = profileMenuDelegate
+        file.addItem(withTitle: "New Tab with Profile", action: nil, keyEquivalent: "").submenu = profiles
         file.addItem(.separator())
         file.addItem(withTitle: "Close Pane", action: #selector(WorkspaceWindowController.closePane(_:)),
                      keyEquivalent: "w")
@@ -172,14 +195,39 @@ enum MainMenu {
         window.addItem(.separator())
         window.addItem(withTitle: "Bring All to Front",
                        action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
-        NSApp.windowsMenu = window
+        if installsSpecialMenus { NSApp.windowsMenu = window }
 
         // Help
         let help = submenu("Help", in: main)
         help.addItem(withTitle: "\(appName) Help", action: #selector(NSApplication.showHelp(_:)), keyEquivalent: "?")
-        NSApp.helpMenu = help
+        if installsSpecialMenus { NSApp.helpMenu = help }
 
+        markOwnItems(in: main, path: "")
         return main
+    }
+
+    /// Gives every item built so far an ``ownItemPrefix`` identifier.
+    private static func markOwnItems(in menu: NSMenu, path: String) {
+        for (index, item) in menu.items.enumerated() {
+            let itemPath = path.isEmpty ? "\(index)" : "\(path).\(index)"
+            // AppKit defaults an item's identifier to its action's name; ours
+            // replaces it (nothing relies on that default).
+            item.identifier = NSUserInterfaceItemIdentifier(ownItemPrefix + itemPath)
+            if let submenu = item.submenu { markOwnItems(in: submenu, path: itemPath) }
+        }
+    }
+
+    /// Fills File › New Tab with Profile with one item per profile.
+    static func fillProfileMenu(_ menu: NSMenu, profiles: [Profile], defaultProfile: ProfileID) {
+        menu.removeAllItems()
+        for profile in profiles {
+            let item = menu.addItem(
+                withTitle: profile.name, action: #selector(WorkspaceWindowController.newTabWithProfile(_:)),
+                keyEquivalent: "")
+            item.representedObject = profile.id.raw
+            item.image = NSImage(systemSymbolName: profile.icon, accessibilityDescription: nil)
+            item.state = profile.id == defaultProfile ? .on : .off
+        }
     }
 
     // MARK: Directions

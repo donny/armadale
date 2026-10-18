@@ -161,8 +161,13 @@ public struct LaunchResolver: Sendable {
         if environment["PATH", default: ""].isEmpty {
             environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         }
-        environment.merge(session.launch.environment) { _, profile in profile }
-        return environment
+        // The profile's variables win, except names it may not set at all
+        // (Armadale's own and the session runtime's, or malformed ones).
+        let profile = session.launch.environment.filter { Profile.environmentNameProblem($0.key) == nil }
+        environment.merge(profile) { _, profile in profile }
+        // Scrubbed after the merge too: no runtime variable reaches a
+        // session, whatever it came from.
+        return environment.filter { !$0.key.hasPrefix("ZMX_") }
     }
 
     /// `LANG` for the user's locale, e.g. `en_AU.UTF-8`, if the system has

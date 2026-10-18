@@ -8,9 +8,6 @@ import ArmadaleCore
 /// by the ``SessionRegistry``.
 @MainActor
 final class WorkspaceActions {
-    /// UserDefaults key: ask before closing a pane whose process is running.
-    static let confirmClosingRunningSessionKey = "confirmClosingRunningSession"
-
     let model: AppModel
     let registry: SessionRegistry
     let workspaceID: WorkspaceID
@@ -45,10 +42,11 @@ final class WorkspaceActions {
 
     // MARK: Creating
 
-    /// A new tab in `group`, or in this workspace's selected group.
-    func newTab(in group: TabGroupID? = nil) {
+    /// A new tab in `group`, or in this workspace's selected group, with
+    /// `profile` (else the default profile).
+    func newTab(in group: TabGroupID? = nil, profile: ProfileID? = nil) {
         if let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID {
-            model.newTab(in: group)
+            model.newTab(in: group, profile: profile)
             showIfElsewhere(model.workspaceID(containing: group))
         } else {
             model.newTabGroup(in: workspaceID)
@@ -177,7 +175,8 @@ final class WorkspaceActions {
 
     private func confirmClose(sessions: [SessionID], subject: Subject, perform: @escaping @MainActor () -> Void) {
         let risk = registry.closeRisk(of: sessions)
-        let wantsConfirmation = UserDefaults.standard.bool(forKey: Self.confirmClosingRunningSessionKey)
+        let preferences = registry.settings.preferences
+        let wantsConfirmation = preferences.confirmClosingRunningSession
         guard risk.unreachable || (risk.mayBeRunning && wantsConfirmation) else { return perform() }
 
         let alert = NSAlert()
@@ -207,7 +206,7 @@ final class WorkspaceActions {
         alert.addButton(withTitle: "Cancel")
         present(alert) { response, alert in
             if alert.suppressionButton?.state == .on {
-                UserDefaults.standard.set(false, forKey: Self.confirmClosingRunningSessionKey)
+                preferences.confirmClosingRunningSession = false
             }
             guard response == .alertFirstButtonReturn else { return }
             perform()

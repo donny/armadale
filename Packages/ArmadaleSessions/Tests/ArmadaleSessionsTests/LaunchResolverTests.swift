@@ -82,6 +82,22 @@ struct LaunchResolverTests {
         #expect(environment["EDITOR"] == "vim")
     }
 
+    /// A profile cannot hand the session runtime's variables (or Armadale's
+    /// own) to a session, nor a malformed name.
+    @Test func profileCannotSetReservedOrMalformedVariables() {
+        let launch = LaunchSpec(environment: [
+            "ZMX_SESSION": "other", "ZMX_SESSION_PREFIX": "x", "ZMX_DIR": "/tmp/elsewhere",
+            "ZMX_NO_DETACH_KEY": "0", "ARMADALE_SESSION_ID": "forged", "A=B": "c", "": "empty", "OK": "1",
+        ])
+        let s = session(launch)
+        let environment = resolver().resolve(s).environment
+        #expect(environment.keys.allSatisfy { !$0.hasPrefix("ZMX_") }, "\(environment.keys.sorted())")
+        #expect(environment["ARMADALE_SESSION_ID"] == s.id.raw)
+        #expect(environment["A=B"] == nil)
+        #expect(environment[""] == nil)
+        #expect(environment["OK"] == "1")
+    }
+
     @Test func missingDirectoryFallsBackToHomeAndTildeExpands() {
         #expect(resolver().resolve(session(directory: "/gone")).workingDirectory == "/Users/me")
         #expect(resolver().resolve(session(directory: "~")).workingDirectory == "/Users/me")

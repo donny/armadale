@@ -537,6 +537,92 @@ public final class AppModel {
         didChange()
     }
 
+    // MARK: Profiles
+
+    /// Adds a new profile (a login shell named "New Profile", made unique)
+    /// at the end of the list and returns its ID.
+    @discardableResult
+    public func newProfile() -> ProfileID {
+        let profile = Profile(name: uniqueProfileName("New Profile"), kind: .shell, icon: "terminal")
+        profiles.append(profile)
+        didChange()
+        return profile.id
+    }
+
+    /// Adds a copy of a profile (built-in or not) right after it, named
+    /// "<name> Copy", with a new ID. The copy is never built-in, so all of
+    /// it can be edited. Returns `nil` if `id` is unknown.
+    @discardableResult
+    public func duplicateProfile(_ id: ProfileID) -> ProfileID? {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return nil }
+        let source = profiles[index]
+        let copy = Profile(
+            name: uniqueProfileName("\(source.name) Copy"), kind: source.kind, program: source.program,
+            arguments: source.arguments, environment: source.environment, icon: source.icon)
+        profiles.insert(copy, at: index + 1)
+        didChange()
+        return copy.id
+    }
+
+    /// Replaces the stored profile with the same ID by `profile`, cleaned up:
+    /// a blank name becomes "Untitled", a blank icon "terminal", a blank
+    /// program `nil` (the login shell), and environment entries whose names
+    /// are not allowed (``Profile/environmentNameProblem(_:)``: empty,
+    /// containing `=`, reserved) are dropped. For a built-in profile only the name and icon are
+    /// taken; its kind, program, arguments and environment stay as shipped.
+    /// Sessions already created keep their launch until they are respawned.
+    public func updateProfile(_ profile: Profile) {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        var updated = profiles[index]
+        let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let icon = profile.icon.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.name = name.isEmpty ? "Untitled" : name
+        updated.icon = icon.isEmpty ? "terminal" : icon
+        if !updated.isBuiltIn {
+            updated.kind = profile.kind
+            let program = profile.program?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            updated.program = program.isEmpty ? nil : program
+            updated.arguments = profile.arguments
+            var environment: [String: String] = [:]
+            for (key, value) in profile.environment {
+                let name = key.trimmingCharacters(in: .whitespaces)
+                if Profile.environmentNameProblem(name) == nil { environment[name] = value }
+            }
+            updated.environment = environment
+        }
+        guard updated != profiles[index] else { return }
+        profiles[index] = updated
+        didChange()
+    }
+
+    /// Deletes a profile. Built-in profiles cannot be deleted (returns
+    /// false). Sessions created from it keep running and keep their launch;
+    /// a respawn then reuses that launch. If it was ``defaultProfileID``,
+    /// the default goes back to the shell.
+    @discardableResult
+    public func deleteProfile(_ id: ProfileID) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }), !profiles[index].isBuiltIn else { return false }
+        profiles.remove(at: index)
+        if defaultProfileID == id { defaultProfileID = Profile.shell.id }
+        didChange()
+        return true
+    }
+
+    /// The launch a respawn of `session` uses: its profile as it is now,
+    /// or, if the profile was deleted, the launch the session was created
+    /// with.
+    public func launchForRespawn(of session: Session) -> LaunchSpec {
+        profile(session.profileID)?.launchSpec ?? session.launch
+    }
+
+    private func uniqueProfileName(_ base: String) -> String {
+        let names = Set(profiles.map(\.name))
+        guard names.contains(base) else { return base }
+        var n = 2
+        while names.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
     // MARK: - Internals
 
     private struct TabGroupPath { var workspace: Int; var tabGroup: Int }

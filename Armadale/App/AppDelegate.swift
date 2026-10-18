@@ -1,12 +1,18 @@
 import AppKit
 import ArmadaleCore
 import ArmadaleSessions
+import Observation
 
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     let model: AppModel
+    /// Preferences, themes and renderers.
+    let settings: AppSettings
+    private var settingsWindowController: SettingsWindowController?
+    private var preferencesTask: Task<Void, Never>?
+    private var profilesTask: Task<Void, Never>?
     /// Session controllers for every pane shown so far.
     private let registry: SessionRegistry
     private let stateURL: URL
@@ -88,18 +94,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if case .loaded(_, isFirstLaunch: false) = result { self.stateLoadedCleanly = true } else { self.stateLoadedCleanly = false }
         self.canSave = result.allowsSaving
         self.loadReport = report
-        self.model = AppModel(state: state)
+        self.settings = AppSettings.shared
+        self.model = AppModel(state: state, defaultWorkingDirectory: settings.preferences.resolvedWorkingDirectory())
+        model.defaultProfileID = settings.preferences.defaultProfileID
         let sessions = Self.makeSessionBackend(for: state.sessions)
         self.zmxRuntime = sessions.runtime
         self.sessionSetupFailure = sessions.failure
         self.registry = SessionRegistry(
             model: model,
             runtime: sessions.setup,
-            restoredSessionIDs: Set(state.sessions.map(\.id)))
+            restoredSessionIDs: Set(state.sessions.map(\.id)),
+            settings: settings)
         self.saver = StateSaver(url: url)
-        UserDefaults.standard.register(defaults: [WorkspaceActions.confirmClosingRunningSessionKey: true])
         super.init()
         wireRegistry()
+        followGeneralPreferences()
+    }
+
+    /// The default profile and directory live in preferences; the model
+    /// uses them for every new tab, tab group and workspace. A deleted
+    /// default profile resets the preference to the shell.
+    private func followGeneralPreferences() {
+        let preferences = settings.preferences
+        let model = model
+        profilesTask = Task {
+            for await ids in Observations({ model.profiles.map(\.id) }) {
+                preferences.reconcileDefaultProfile(with: ids)
+            }
+        }
+        preferencesTask = Task {
+            for await (profile, _) in Observations({ (preferences.defaultProfileID, preferences.defaultWorkingDirectory) }) {
+                model.defaultProfileID = profile
+                model.defaultWorkingDirectory = preferences.resolvedWorkingDirectory()
+            }
+        }
     }
 
     private func wireRegistry() {
@@ -203,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.mainMenu = MainMenu.make()
+        NSApp.mainMenu = MainMenu.make(profileMenuDelegate: self)
         handleTerminationSignal()
 
         if let report = loadReport, report.isFatal {
@@ -300,35 +328,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         openWindow(for: id, cascadingFrom: reference)
     }
 
-    /// ⌘, is reserved for Settings, which arrive in step 5.
+    /// Armadale › Settings… (⌘,): the one Settings window.
     @objc func showSettings(_ sender: Any?) {
-        NSSound.beep()
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController(model: model, settings: settings) {
+                NSApp.mainMenu ?? MainMenu.make(installsSpecialMenus: false)
+            }
+        }
+        settingsWindowController?.show()
+        NSApp.activate()
     }
 
-    /// View › Bigger (⌘=): every pane, for this run.
+    /// View › Bigger (⌘=): every pane; stored like the Settings font size.
     @objc func increaseFontSize(_ sender: Any?) {
-        TerminalPreferences.shared.increaseFontSize()
+        settings.preferences.increaseFontSize()
     }
 
     /// View › Smaller (⌘-).
     @objc func decreaseFontSize(_ sender: Any?) {
-        TerminalPreferences.shared.decreaseFontSize()
+        settings.preferences.decreaseFontSize()
     }
 
     /// View › Actual Size (⌘0).
     @objc func resetFontSize(_ sender: Any?) {
-        TerminalPreferences.shared.resetFontSize()
+        settings.preferences.resetFontSize()
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        let preferences = TerminalPreferences.shared
+        let preferences = settings.preferences
         switch menuItem.action {
         case #selector(increaseFontSize(_:)): return preferences.canIncreaseFontSize
         case #selector(decreaseFontSize(_:)): return preferences.canDecreaseFontSize
-        case #selector(resetFontSize(_:)): return preferences.fontSize != TerminalPreferences.defaultFontSize
-        case #selector(showSettings(_:)): return false
+        case #selector(resetFontSize(_:)): return preferences.fontSize != Preferences.defaultFontSize
         default: return true
         }
+    }
+
+    /// File › New Tab with Profile is filled in each time it opens.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.identifier == MainMenu.newTabWithProfileIdentifier else { return }
+        MainMenu.fillProfileMenu(menu, profiles: model.profiles, defaultProfile: model.defaultProfileID)
     }
 
     // MARK: Windows
