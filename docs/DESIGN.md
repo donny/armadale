@@ -9,8 +9,8 @@ implemented, reviewed and committed on `main`; step 8 (Ship) has not been
 started. This document is the contract the code was built against and was
 kept in step with it: paragraphs marked *Step N* or *Implementation (step N)*
 record what that step built and where it deviated from the original plan.
-For the hand-off to the next session (process, rules, open items) see
-`AGENTS.md` at the repository root.
+Current status, next steps and open items are in `HANDOFF.md` at the
+repository root; the rules for working in the repository are in `AGENTS.md`.
 
 | Decision | Choice |
 |---|---|
@@ -1557,7 +1557,8 @@ armadale/
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh
 │                                    (notarize.sh arrives with step 8)
 ├── docs/DESIGN.md
-└── AGENTS.md                        hand-off for the next session (status, process, rules)
+├── AGENTS.md                        how to work in this repository (process, rules, test hosts)
+└── HANDOFF.md                       where development stopped (status, next step, open items)
 ```
 
 - `ArmadaleCore` and the layout operations are fully unit‑tested with Swift
@@ -1618,7 +1619,7 @@ on `main`. Steps 1–7 are done: d0c4587, 93019d8, f6cedbb, 76a4e4e,
 8. **Ship** — notarization pipeline, crash reporting decision, update
    mechanism decision (Sparkle is the obvious candidate). *Not started.*
    Needs the owner's Developer ID team identifier and decisions on crash
-   reporting and updates; see `AGENTS.md`.
+   reporting and updates; see `HANDOFF.md`.
 
 ---
 

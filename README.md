@@ -15,7 +15,8 @@ Steps 1–7 of the build order in [docs/DESIGN.md](docs/DESIGN.md) section 12
 are implemented and committed on `main` (October 2026). Step 8 (Ship:
 Developer ID signing, notarization, crash reporting and an update
 mechanism) has not been started, so the app runs from a local build only.
-A hand-off for the next working session (process, rules, open items) is in
+Where development stopped, what is next and the open items are in
+[HANDOFF.md](HANDOFF.md); the rules for working in the repository are in
 [AGENTS.md](AGENTS.md).
 
 What works today:
