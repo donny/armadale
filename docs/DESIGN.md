@@ -4,6 +4,14 @@ Armadale is a native macOS terminal for running and supervising a fleet of
 persistent agent sessions. Sessions survive app restarts, live locally or on
 SSH hosts, and are organised as **Workspace → Tab Group → Tab → Pane**.
 
+**Status (October 18, 2026).** Steps 1–7 of the build order (section 12) are
+implemented, reviewed and committed on `main`; step 8 (Ship) has not been
+started. This document is the contract the code was built against and was
+kept in step with it: paragraphs marked *Step N* or *Implementation (step N)*
+record what that step built and where it deviated from the original plan.
+For the hand-off to the next session (process, rules, open items) see
+`AGENTS.md` at the repository root.
+
 | Decision | Choice |
 |---|---|
 | UI stack | AppKit app lifecycle and windows; SwiftUI for chrome (sidebar, tab bar, settings, placeholders); AppKit for split containers and terminal views |
@@ -1546,8 +1554,10 @@ armadale/
 │   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
-├── scripts/                         fetch-zmx.sh, zmx.lock, notarize.sh
-└── docs/DESIGN.md
+├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh
+│                                    (notarize.sh arrives with step 8)
+├── docs/DESIGN.md
+└── AGENTS.md                        hand-off for the next session (status, process, rules)
 ```
 
 - `ArmadaleCore` and the layout operations are fully unit‑tested with Swift
@@ -1576,11 +1586,19 @@ armadale/
 - No hosted CI: GitHub Actions is disabled for this repository. The full
   build and test command is run locally before every commit (see README).
 - Signing: hardened runtime, no sandbox entitlement, `zmx` helper signed as
-  part of the bundle, notarization via `notarytool` in `scripts/notarize.sh`.
+  part of the bundle. Today `project.yml` signs to run locally with an
+  empty `DEVELOPMENT_TEAM`; Developer ID signing and notarization via
+  `notarytool` (`scripts/notarize.sh`) are step 8 and not yet written.
 
 ---
 
 ## 12. Build order
+
+Each step was built by an implementer agent, reviewed by a separate
+reviewer agent (code reading plus live keystroke checks of the running
+app), fixed, verified with the full build and test command, and committed
+on `main`. Steps 1–7 are done: d0c4587, 93019d8, f6cedbb, 76a4e4e,
+4d3ab86, 7302a12, dac547f (October 16–18, 2026). Step 8 is open.
 
 1. **Skeleton** — XcodeGen project, packages, `ArmadaleCore` model,
    `PaneLayout` operations with tests, `StateStore` with migrations.
@@ -1598,7 +1616,9 @@ armadale/
    disconnected state and auto‑reconnect, Hosts settings.
 7. **Agents** — Claude / Codex profiles, attention badges, notifications.
 8. **Ship** — notarization pipeline, crash reporting decision, update
-   mechanism decision (Sparkle is the obvious candidate).
+   mechanism decision (Sparkle is the obvious candidate). *Not started.*
+   Needs the owner's Developer ID team identifier and decisions on crash
+   reporting and updates; see `AGENTS.md`.
 
 ---
 

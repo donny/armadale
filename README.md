@@ -9,55 +9,50 @@ splits and SwiftUI for chrome. Terminal rendering sits behind a pluggable
 persistence comes from a private, bundled `zmx` daemon. Layout is stored as
 versioned JSON in `~/Library/Application Support/Armadale/`.
 
-Status: step 7 (agents). A pane whose program rings the bell or sends a
-desktop notification sequence (OSC 9 or OSC 777) while you aren't looking
-at it *needs attention*: its tab shows ◐ and a purple tint, the sidebar
-counts such panes per tab group and workspace, the Dock icon shows the
-total, and Armadale can post a macOS notification (Settings › General ›
-Notifications; clicking one brings the pane forward). Looking at the pane
-(its window key, its tab selected, the pane focused, Armadale active)
-clears it. **Window › Next Pane Needing Attention** (⌃⌘A) cycles through
-them across windows; **Clear All Attention** clears them. Claude Code
-profiles start it with a setting that makes it signal the pane (a
-per-profile toggle); Codex does so by default; see
-[Notifications and agents](#notifications-and-agents).
+## Status
 
-Step 6 (remote): **Settings › Hosts** adds SSH hosts (a
-destination such as `user@host` or a name from your SSH configuration,
-optionally a port, identity file, SSH config file and remote folder), with
-Test Connection and Deploy Now. **File › New Tab on Host** (or the "On Host"
-section of the tab bar "+" right-click menu) opens a session on a host that
-keeps running there, like a local one: Armadale installs its private
-persistence helper in `~/.armadale` on the host the first time, quitting
-leaves the session running, and a relaunch reattaches it. A lost connection
-shows *Reconnecting…* and is retried by itself (1 s, 2 s, 4 s … every 30 s,
-for up to 5 minutes); a session is only shown as ended when the host says it
-is gone. Remote tabs carry a small host badge. See docs/DESIGN.md section 6.
+Steps 1–7 of the build order in [docs/DESIGN.md](docs/DESIGN.md) section 12
+are implemented and committed on `main` (October 2026). Step 8 (Ship:
+Developer ID signing, notarization, crash reporting and an update
+mechanism) has not been started, so the app runs from a local build only.
+A hand-off for the next working session (process, rules, open items) is in
+[AGENTS.md](AGENTS.md).
 
-Step 5 (settings): **Armadale › Settings…** (⌘,) has General
-(default profile and directory, close confirmation), Appearance (font,
-size, theme with separate light and dark choices, Ghostty theme import,
-cursor, renderer), Profiles (add, duplicate, delete and edit launch
-profiles), Hosts and a
-read-only Shortcuts table generated from the menus. Appearance changes
-apply to every open pane at once; **File › New Tab with Profile** (or a
-right-click on the tab bar's "+") opens a tab with any profile.
+What works today:
 
-Step 4 (hierarchy): each workspace is a window with a sidebar
-listing every workspace, its tab groups and tabs (with status glyphs), a tab
-bar for the selected tab group, and the selected tab's split panes. Splits
-(⌘D / ⇧⌘D), focus (⌥⌘ arrows), resize (⌃⌘ arrows, or drag a divider), zoom
-(⇧⌘↩), equalize (⌃⌘=), tabs (⌘T, ⌘1…⌘9, ⌃Tab), tab groups (⇧⌘N, ⇧⌘1…⇧⌘9)
-and workspaces (⌘N) work from the menus and the keyboard; tabs and tab groups
-can be renamed, reordered by dragging, and a tab dragged onto a sidebar tab
-group moves there. Closing a window keeps its workspace in the sidebar, from
-where it reopens. Sessions persist as in step 3: quitting Armadale leaves
-them running, and a relaunch restores the windows, layouts and selections and
-reattaches every visible pane, replaying its screen and scrollback. A
-session whose program exited shows *Session Ended* with Respawn / Close
-Pane, and **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended pane
-of the window's workspace. The full shortcut table is in
-[docs/DESIGN.md](docs/DESIGN.md) section 9.
+- **Hierarchy.** Each workspace is a window with a sidebar listing every
+  workspace, its tab groups and tabs (with status glyphs), a tab bar for the
+  selected tab group, and the selected tab's split panes. Splits (⌘D /
+  ⇧⌘D), focus (⌥⌘ arrows), resize (⌃⌘ arrows or divider drag), zoom (⇧⌘↩),
+  equalize (⌃⌘=), tabs (⌘T, ⌘1…⌘9, ⌃Tab), tab groups (⇧⌘N, ⇧⌘1…⇧⌘9) and
+  workspaces (⌘N) work from the menus and keyboard; tabs and groups can be
+  renamed and reordered by dragging, and a tab dragged onto a sidebar tab
+  group moves there. Closing a window keeps its workspace in the sidebar.
+  The full shortcut table is in docs/DESIGN.md section 9 and in Settings.
+- **Persistence.** Quitting Armadale leaves sessions running; a relaunch
+  restores windows, layouts and selections and reattaches every visible
+  pane, replaying its screen and scrollback. A session whose program exited
+  shows *Session Ended* with Respawn / Close Pane; **Workspace › Respawn All
+  Ended** (⌥⌘R) respawns every ended pane of a workspace.
+- **Settings** (⌘,): General (default profile and directory, close
+  confirmation, notifications), Appearance (font, size, light and dark
+  themes, Ghostty theme import, cursor, renderer), Profiles, Hosts, and a
+  read-only Shortcuts table generated from the menus. **File › New Tab with
+  Profile** opens a tab with any profile.
+- **Remote hosts.** **Settings › Hosts** adds SSH hosts (destination, port,
+  identity file, SSH config file, remote folder) with Test Connection and
+  Deploy Now. **File › New Tab on Host** opens a session that keeps running
+  on the host: Armadale installs its private persistence helper under
+  `~/.armadale` there on first use, quitting leaves the session running, a
+  relaunch reattaches it, and a lost connection shows *Reconnecting…* and
+  retries by itself for up to five minutes. See docs/DESIGN.md section 6.
+- **Agents and attention.** A pane whose program rings the bell or sends a
+  notification sequence (OSC 9 / OSC 777) while you aren't looking at it
+  shows ◐ on its tab, is counted in the sidebar and on the Dock icon, and
+  can post a macOS notification that brings the pane forward when clicked.
+  **Window › Next Pane Needing Attention** (⌃⌘A) cycles through them. The
+  Claude Code and Codex profiles are set up so both agents signal their
+  pane; see [Notifications and agents](#notifications-and-agents).
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
