@@ -20,6 +20,12 @@ reviewed and committed on `main`:
 | 6 Remote | 7302a12 | `SSHTransport`, deployment, `RemoteZmxBackend`, reconnect, Hosts tab |
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
 
+The app icon ("Panes": a graphite tile with three panes, the top-right
+one lit coral) was added after step 7: `scripts/render-app-icon.swift`
+generates the Icon Composer document, the asset catalog rasters and
+`docs/icon/AppIcon.svg` from one geometric description. Concept and
+refinement pages used to choose it are not in the repository.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings). The working tree was clean and nothing was running when work
@@ -87,6 +93,8 @@ Agents
   agent profiles".
 
 Shipping (step 8)
+- The app icon's lit coral (`#F26B4A`) should become the in-app attention
+  colour (Dock badge, status glyphs); today those use their own colours.
 - `DEVELOPMENT_TEAM` empty; signing is "sign to run locally".
 - No `scripts/notarize.sh`, no crash reporting, no updater.
 

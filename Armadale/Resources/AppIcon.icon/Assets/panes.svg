@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Idle panes layer -->
+  <rect x="168" y="168" width="320" height="688" rx="64" fill="#4E5666"/>
+  <rect x="536" y="536" width="320" height="320" rx="64" fill="#4E5666"/>
+</svg>

@@ -1538,7 +1538,8 @@ armadale/
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
 │   ├── Settings/                    SettingsWindowController, Preferences, ShortcutTable, SwiftUI tabs
 │   │                                (General, Appearance, Profiles, Hosts, Shortcuts)
-│   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements,
+│   ├── Resources/                   AppIcon.icon (Icon Composer document), Assets.xcassets
+│   │                                (AppIcon rasters), Info.plist, Armadale.entitlements,
 │   │                                armadale-notify (helper for agent hooks → Contents/Resources)
 │   └── Support/                     ThemeCatalog (built-in + user themes), AppSettings
 │                                    (+ SurfaceRegistry.standard), HierarchyDragItem, TextPrompt,
@@ -1554,9 +1555,9 @@ armadale/
 │   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
-├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh
-│                                    (notarize.sh arrives with step 8)
-├── docs/DESIGN.md
+├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
+│                                    render-app-icon.swift (notarize.sh arrives with step 8)
+├── docs/                            DESIGN.md, icon/AppIcon.svg (generated master vector)
 ├── AGENTS.md                        how to work in this repository (process, rules, test hosts)
 └── HANDOFF.md                       where development stopped (status, next step, open items)
 ```
@@ -1586,6 +1587,23 @@ armadale/
   `ARMADALE_TEST_SSH_HOST` is set (README).
 - No hosted CI: GitHub Actions is disabled for this repository. The full
   build and test command is run locally before every commit (see README).
+- App icon: "Panes", chosen from six concepts and ten shape variants in
+  October 2026. A graphite tile (`#1E2228`) holding three panes, one tall
+  on the left and two square on the right in `#4E5666`, with the top-right
+  pane lit in the attention coral `#F26B4A`; pane corners are concentric
+  with the tile's (radius 64 at inset 168 on the 1024 grid, tile radius
+  232). No cursor, sparkle or network glyph, by decision. The icon is
+  generated, never drawn by hand: `scripts/render-app-icon.swift` holds
+  the geometry and palette and writes `Resources/AppIcon.icon` (two
+  layers, idle panes and the lit pane, over an automatic gradient of the
+  ground colour; macOS 26 and later render it with the system shape,
+  depth and dark/tinted variants), the `AppIcon` set in `Assets.xcassets`
+  (16–1024 px rasters on the classic 824-in-1024 grid with a baked
+  shadow, for everything else) and `docs/icon/AppIcon.svg`. Change the
+  script and rerun it; do not edit the generated files.
+  `ASSETCATALOG_COMPILER_APPICON_NAME` is `AppIcon` in `project.yml`. The
+  lit coral is meant to become the in-app attention colour as well; today
+  the badge and status glyphs use their own colours (open item).
 - Signing: hardened runtime, no sandbox entitlement, `zmx` helper signed as
   part of the bundle. Today `project.yml` signs to run locally with an
   empty `DEVELOPMENT_TEAM`; Developer ID signing and notarization via
