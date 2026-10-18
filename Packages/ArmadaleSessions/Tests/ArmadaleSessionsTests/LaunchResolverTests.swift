@@ -46,6 +46,10 @@ struct LaunchResolverTests {
             "TMUX": "/tmp/tmux", "GHOSTTY_RESOURCES_DIR": "/g", "DYLD_LIBRARY_PATH": "/d", "SHLVL": "3",
             "ARMADALE_STATE_DIR": "/s", "__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0", "SSH_AUTH_SOCK": "/agent",
             "TERMINFO": "/ghostty/terminfo", "COLORFGBG": "15;0", "XPC_SERVICE_NAME": "application.com.mitchellh.ghostty",
+            "CLAUDECODE": "1", "CLAUDE_CODE_CHILD_SESSION": "1", "CLAUDE_CODE_MESSAGING_TOKEN": "secret",
+            "CLAUDE_CODE_SESSION_ID": "abc", "CLAUDE_PID": "42", "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AI_AGENT": "claude-code", "CLAUDE_EFFORT": "high", "TRACEPARENT": "00-abc-def-01",
+            "CLAUDE_CODE_INVOKED_SKILLS": "x", "ANTHROPIC_API_KEY": "sk-test", "CLAUDE_CONFIG_DIR": "/c",
         ]).resolve(s).environment
         #expect(environment["TERM"] == "xterm-256color")
         #expect(environment["COLORTERM"] == "truecolor")
@@ -55,13 +59,19 @@ struct LaunchResolverTests {
         #expect(environment["PWD"] == "/work")
         #expect(environment["LANG"] == "en_AU.UTF-8")
         for removed in ["ZMX_SESSION", "ZMX_SESSION_PREFIX", "TMUX", "GHOSTTY_RESOURCES_DIR", "DYLD_LIBRARY_PATH",
-                        "SHLVL", "ARMADALE_STATE_DIR", "TERMINFO", "COLORFGBG", "XPC_SERVICE_NAME"] {
+                        "SHLVL", "ARMADALE_STATE_DIR", "TERMINFO", "COLORFGBG", "XPC_SERVICE_NAME",
+                        "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_TOKEN",
+                        "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "AI_AGENT", "CLAUDE_EFFORT", "TRACEPARENT",
+                        "CLAUDE_CODE_INVOKED_SKILLS"] {
             #expect(environment[removed] == nil, "\(removed) should be removed")
         }
         // The app's own environment is otherwise passed on.
         #expect(environment["__CF_USER_TEXT_ENCODING"] == "0x1F5:0x0:0x0")
         #expect(environment["SSH_AUTH_SOCK"] == "/agent")
         #expect(environment["PATH"] == "/usr/bin:/bin")
+        #expect(environment["CLAUDE_CODE_USE_BEDROCK"] == "1", "a user's own Claude Code setting is kept")
+        #expect(environment["ANTHROPIC_API_KEY"] == "sk-test")
+        #expect(environment["CLAUDE_CONFIG_DIR"] == "/c")
     }
 
     @Test func existingLangIsKeptAndUnknownLocaleFallsBack() {

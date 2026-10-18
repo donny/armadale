@@ -56,7 +56,7 @@ Each tab row carries a status glyph:
 | State | Meaning |
 |---|---|
 | ● running | at least one pane's process is alive |
-| ◐ attention | a pane rang the bell or emitted a notification while unfocused |
+| ◐ attention | a pane rang the bell or emitted a notification while unfocused (step 7; precedence below) |
 | ○ ended | all panes have exited |
 | ⚠ disconnected | remote host unreachable; sessions may still be alive there |
 
@@ -67,7 +67,27 @@ whose session the launch probe did not find alive) and *unavailable* (the
 persistent runtime could not be set up). A pane not shown yet whose session
 the probe found alive counts as running. A tab shows the most important
 state of its panes: disconnected, unavailable, running, starting, and ended
-only when all have ended. *Attention* arrives with step 7.
+only when all have ended.
+
+*Step 7:* ◐ attention (SF Symbol `circle.lefthalf.filled`, purple) is shown
+by a pane whose program rang the bell or sent a desktop notification
+sequence while nobody was looking at it (section 10). The final precedence,
+most important first (`SessionStatus.precedence`, unit-tested), is:
+
+1. ⚠ disconnected
+2. ⚠ unavailable
+3. ◐ attention
+4. ● running
+5. starting
+6. ○ ended (only when every pane has ended)
+
+A session needing attention shows ◐ whatever its state, except disconnected
+or unavailable, which matter more (it may be gone); an ended one still
+shows ◐ (it rang before it exited). The glyph is for display only: close
+confirmation (`CloseRisk`) looks at the underlying state. Tabs needing
+attention also get a purple tint in the tab bar and a semibold title in the
+sidebar, and workspace and tab group rows show how many of their panes need
+attention.
 
 The current workspace's row is emphasised (accent icon, semibold), the
 window's selected tab group is the selected row, and a closed workspace is
@@ -183,6 +203,25 @@ asked by `SessionController` through its delegate), falling back to the
 recorded launch when the profile has been deleted. Built-in profiles
 (`Profile.isBuiltIn`) cannot be deleted, and only their name and icon can
 be changed; duplicating one gives a fully editable copy.
+
+*Step 7:* `Profile.attentionIntegration` (Bool, on by default; state saved
+without it decodes as on) adds the agent's `AgentIntegration.launchArguments`
+in front of the profile's own arguments at launch (`Profile.launchArguments`,
+used by `launchSpec`): for Claude Code `--settings
+{"preferredNotifChannel":"ghostty"}`, for Codex nothing (section 10). The
+built-ins' own arguments are empty and fixed; the toggle is the user's, also
+on a built-in (`updateProfile` takes it with the name and icon, a duplicate
+copies it). A saved built-in takes what it runs (kind, program, arguments,
+environment) from the running version of Armadale and keeps its saved name,
+icon and toggle (`Profile.refreshingBuiltIn`, applied by `AppModel.init`),
+so a newer Armadale's launch reaches profiles saved by an older one.
+`AppModel.onSessionsRemoved` is called synchronously, inside the intent,
+with the sessions that left the model (closed, or retired by a respawn);
+the attention center uses it.
+`Profile.isAgent` is the "Only for agent profiles" filter. `AppModel` gained
+the lookups `place(of:)` (workspace, tab group, tab and pane showing a
+session), `focusedSessionID(in:)`, `sessionOrder` (every pane's session in
+sidebar order) and `sessionIDs(ofTabGroup:)`.
 
 Layout operations live in `PaneLayout` as pure functions with unit tests:
 `split(pane, axis, newPane)`, `remove(pane)` (collapses the parent),
@@ -506,7 +545,19 @@ whatever Armadale itself was started from: `ZMX_SESSION*`, `TMUX`, `STY`,
 `TERM_SESSION_ID`, `ITERM_*`, `KITTY_*`, `GHOSTTY_*`, `WEZTERM_*`,
 `ALACRITTY_*`, `LC_TERMINAL*`, `VTE_VERSION`, `WINDOWID`, `SHLVL`,
 `OLDPWD`, `TERMINFO`, `COLORFGBG`, `XPC_SERVICE_NAME`, `DYLD_*` and other
-Xcode launch variables, and Armadale's own
+Xcode launch variables, the markers of a Claude Code session Armadale was
+started from (step 7: `CLAUDECODE`, `CLAUDE_PID`,
+`CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`,
+`CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`,
+`CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SESSION_ATTENDED`,
+`CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_INVOKED_SKILLS`, `CLAUDE_EFFORT`,
+`AI_AGENT`, `TRACEPARENT`, the variables Claude Code 2.1.292 sets for its
+own children, seen live when Armadale was opened from a Claude Code shell:
+a `claude` in a pane then took itself for that session's child, stopped
+saving its transcript, and got its messaging token. The rule is narrow:
+only names that identify the launching session, listed exactly; a user's
+own configuration such as `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR` or
+`CLAUDE_CODE_USE_BEDROCK` is passed on), and Armadale's own
 `ARMADALE_*` (for example `ARMADALE_STATE_DIR`). `PWD` is set to the
 working directory, and a working directory that no longer exists falls back
 to the home directory. This is done by `LaunchResolver`. Because the
@@ -888,8 +939,11 @@ which `LocalZmxBackend` and `RemoteZmxBackend` both use.
   pipe (uploads), with `F_SETNOSIGPIPE` so a command that exits early
   cannot kill the app.
 - `SessionController` (`@MainActor`) is the per‑session glue: owns the
-  surface, the `ProcessHandle`, the state machine, the attention flag, and
-  forwards title / cwd / bell to `AppModel` through a delegate. An optional
+  surface, the `ProcessHandle`, the state machine, and forwards title / cwd
+  / bell / notifications through a delegate (the registry, which records
+  them in `AppModel` and, since step 7, passes bells and notifications to
+  the app's `AttentionCenter`; attention is kept there, per session, not in
+  the controller, so it outlives views and needs the app's focus). An optional
   `OutputFilter`, made fresh for each attach, rewrites output before it
   reaches the surface. It is the identity for ephemeral sessions; zmx uses
   it to strip the RIS sequence at end of stream. The filter's `finish()`
@@ -1004,8 +1058,36 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   (handled by the hosting view, SwiftUI has no gesture for it) and the close
   button close it with the ⌘W confirmation; the context menu has Rename,
   Close, Close Other Tabs.
+- *Attention (step 7).* An app-level `AttentionCenter`
+  (`Sessions/AttentionCenter.swift`, `@Observable`) owns the pure
+  `AttentionTracker` (section 10). The registry forwards every bell and
+  notification sequence to it; the tab bar, the sidebar and the Dock badge
+  read it. The app delegate keeps its `isAppActive` (application
+  did-become/resign-active) and `keyWorkspaceID` (window did-become/
+  resign-key, mapped to the window's workspace; nil for Settings or no
+  window) current. The tab bar tints a tab needing attention (purple fill
+  and border) and shows ◐; the sidebar shows ◐ and a semibold title on the
+  tab row and a purple count capsule (`AttentionCount`) on the tab group and
+  workspace rows. The Dock badge (`NSApp.dockTile.badgeLabel`) is the total,
+  nil when zero (`AttentionBadge.label`). Window titles are unchanged.
+  Notifications go through `NotificationService` (`UserNotificationService`
+  in the app, a fake in tests); the app delegate is the
+  `UNUserNotificationCenterDelegate`, set in
+  `applicationWillFinishLaunching` (no permission is asked then): a click
+  reveals the session from `userInfo["armadale.sessionID"]`
+  (`AttentionCenter.reveal`: select its group and tab, focus its pane, bring
+  its window forward, opening it if closed), or only activates the app if
+  the session is gone; banners also show while Armadale is active (the pane
+  is elsewhere), unless the session is looked at by the time the banner
+  would appear (`willPresent` asks `AttentionCenter.shouldPresent`). When a
+  session's attention clears (looked at, Clear All, closed), its delivered
+  notification is removed. A sheet (a rename prompt) takes key status from
+  its window; the key workspace is resolved through `sheetParent`
+  (`AppDelegate.sheetOwner(of:)`), so the focused pane under a sheet is
+  still looked at.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
-  **General** (default profile, default directory, confirm‑on‑close),
+  **General** (default profile, default directory, notifications (step
+  7), confirm‑on‑close),
   **Appearance** (font, size, theme, cursor, renderer), **Profiles**,
   **Hosts**, **Shortcuts** (read‑only table in v1).
   *Implementation (step 5):* `SettingsWindowController` (one instance,
@@ -1051,7 +1133,22 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   - Profiles: list with add / duplicate / delete (built-ins cannot be
     deleted) and an editor (name, SF Symbol icon with preview, kind,
     program, arguments one per line, environment table); edits go through
-    the `AppModel` intents. File › New Tab with Profile and the tab bar's
+    the `AppModel` intents. *Step 7:* a Claude Code or Codex profile has an
+    **Attention** section. For Claude Code it is the toggle "Signal
+    attention when Claude Code needs input (sets the notification channel
+    for this session)" (`attentionIntegration`, editable on the built-in
+    too) with text saying plainly that it overrides the user's own
+    `preferredNotifChannel`, `notifications_disabled` included, for
+    sessions started from that profile, and that turning it off keeps their
+    own. For Codex it says no arguments are needed and why. **Configure…**
+    opens a sheet with the exact optional settings to add to the agent's own
+    file (the Claude `Stop` hook; Codex's `notify` and
+    `tui.notification_method = "osc9"`), pointing at the bundled helper,
+    with Copy. Armadale never edits those files.
+  - General › Notifications (step 7): "Notify when an unfocused pane needs
+    attention" (`notifyOnAttention`, default on), "Only for agent profiles"
+    (`notifyOnlyForAgents`, default on), "Play sound"
+    (`notificationPlaysSound`, default off). File › New Tab with Profile and the tab bar's
     "+" context menu open a tab with any profile.
   - **Hosts** (step 6, `Settings/HostsSettingsView.swift`): a list with
     add / remove and an editor like Profiles: name, destination (`user@host`
@@ -1172,6 +1269,7 @@ bindings are marked ✱.
 | ⌘= / ⌘- / ⌘0 | Font size up / down / reset |
 | ⌘C / ⌘V | Copy / paste |
 | ⌃⌘S ✱ | Toggle sidebar |
+| ⌃⌘A ✱ | Next pane needing attention (step 7) |
 | ⌘, | Settings |
 
 Rebinding is out of scope for v1; the table is exposed read‑only in Settings.
@@ -1188,7 +1286,16 @@ size of every pane; since step 5 the size is the stored Appearance
 setting, so it persists across launches. ⌘, opens Settings (step 5).
 Commands also in the menus
 without a default key: Close Tab, Close Tab Group, Rename Workspace / Tab
-Group / Tab, Delete Workspace.
+Group / Tab, Delete Workspace, and (step 7) Window › Clear All Attention.
+
+*Step 7:* Window › Next Pane Needing Attention is ⌃⌘A. It is free in this
+table, in Ghostty's macOS defaults (checked against `src/config/Config.zig`:
+Ghostty binds ⌃⌘ only with arrows, `=`, `f`, `[`, `]` and ⇧⌃⌘J) and in
+macOS's own shortcuts. It goes to the next session needing attention after
+the key window's focused pane, in sidebar order across every workspace,
+wrapping around: its window comes forward (opened if closed), its tab group
+and tab are selected and its pane focused, which clears it. Disabled when
+nothing needs attention.
 
 ---
 
@@ -1201,14 +1308,209 @@ A pane is "just a shell" by default. The agent profiles only add:
   as it is then (falling back to the stored launch if the profile is gone);
 - an **attention** rule: a bell (BEL) or an OSC 9 / OSC 777 notification in
   an unfocused pane sets the tab's attention state, shows a badge on the Dock
-  icon count, and optionally posts a `UNUserNotification`. Claude Code and
-  Codex both ring the bell on completion when configured to.
+  icon count, and optionally posts a `UNUserNotification`.
 - The sidebar's "running / ended / attention" glyphs make a dozen agents
   scannable at a glance.
 
 Richer status (idle vs. working vs. waiting for approval) would need
 agent‑specific hooks and is explicitly left out of v1; the profile model has
 room for it.
+
+### Step 7: what was built
+
+**Attention rule** (`AttentionTracker` in `ArmadaleCore/Attention.swift`,
+pure, unit-tested). A session is *looked at* exactly when Armadale is the
+active app **and** the session is in the focused pane of the selected tab
+of the key window's workspace (`AttentionFocus`). A signal from a session
+that is looked at does nothing; from any other session (another pane of the
+same tab, another tab, another window, any window while the app is in the
+background, any pane while Settings is key) it sets attention. Signals are
+BEL and the desktop notification sequences OSC 9 (`9;body`, except `9;4;…`
+progress) and OSC 777 (`777;notify;title;body`), as parsed by the surface;
+title changes (OSC 0/2) are not signals. Being looked at clears it (the app
+coming back with that pane focused, a tab switch to it, a click into the
+pane, a notification click, Next Pane Needing Attention). Attention lives
+in memory for the app's lifetime: it survives tab switches and closing and
+reopening windows, is not saved, and is forgotten synchronously when its
+session leaves the model (closed, or retired by a respawn;
+`AppModel.onSessionsRemoved`), so no count or badge can stick; a signal from
+a session no longer in the model (a bell still in flight from a closed
+pane) is ignored. Window › Clear All Attention clears everything. Counts are sessions (panes), per tab group, per
+workspace and in total (the Dock badge).
+
+SwiftTerm delivers bells and titles to the main thread through its event
+queue and lets at most one bell through per 100 ms per view; OSC 9/777 are
+observed passively and hop to the main actor. None of this depends on the
+pane being on screen.
+
+**Notifications** (`NotificationService`, `UserNotificationService`,
+`NotificationPolicy`). A signal that sets attention may post a notification:
+only when "Notify when an unfocused pane needs attention" is on, only for
+sessions whose profile is `.agent` while "Only for agent profiles" is on,
+and at most one per session per 2 s (later signals in that window are
+dropped; each session's notification also replaces its previous one in
+Notification Center). Title: the OSC 777 title when the program gave one,
+else the session's title, else its profile's name. Subtitle: "Workspace /
+Tab group". Body: the OSC body, else "Finished" (a bell, or no text).
+"Play sound" adds the default sound. Permission (alert, sound, badge) is
+requested the first time in a run that a session needs attention (once per
+run, whatever the notification settings, because the Dock badge needs it),
+or when a notification would be posted; never at launch. A denied
+permission drops notifications (logged once). A banner is not presented if
+the session is looked at by the time it would appear, and a session's
+delivered notification is removed when its attention clears. On macOS 27 an app registered with UserNotifications only
+shows its Dock badge while its "Badge application icon" setting is on, so
+the badge needs that permission too; it is set again when permission
+arrives. (Verified live: a plain process's `NSDockTile` badge shows without
+any permission; Armadale's did not until the setting was on.) A
+notification prompt that is still on screen when the app quits is withdrawn
+by macOS and counts as a denial; turning notifications on later is done in
+System Settings › Notifications › Armadale.
+
+### What the agents offer (researched, not assumed)
+
+**Claude Code 2.1.292** (sources: `claude --help`; the shipped bundle's
+JavaScript read with `strings` from
+`/opt/homebrew/Caskroom/claude-code/2.1.292/claude`; the docs at
+code.claude.com/docs/en/terminal-config ("Get a terminal bell or
+notification"), /settings (precedence: managed, then command line
+`--settings`, then local, project, user) and /settings-reference
+(`preferredNotifChannel`)):
+
+- Terminal notifications go through the setting `preferredNotifChannel`:
+  `auto` (default), `iterm2` (OSC 9 with "title: message"),
+  `iterm2_with_bell`, `kitty` (OSC 99), `ghostty` (OSC 777
+  `notify;<title>;<message>`, title "Claude Code"), `terminal_bell` (BEL),
+  `notifications_disabled`. `auto` picks a method only when `TERM_PROGRAM`
+  is Apple_Terminal (bell, if that profile's bell is off), iTerm.app, kitty
+  or ghostty; in any other terminal, Armadale included, it sends nothing.
+- It notifies when it has waited for input for `messageIdleNotifThresholdMs`
+  (60 000 ms by default; a key of the global config `~/.claude.json`, with
+  no command-line form), on permission prompts (after a short delay), and on
+  sign-in and usage-limit events. There is no terminal signal the moment a
+  turn ends.
+- `--settings <file-or-json>` loads settings for one session, above the
+  user's own files (below managed settings), and `preferredNotifChannel` is
+  read from it. **A Claude Code profile with "Signal attention when Claude
+  Code needs input" on (the default, also for the built-in;
+  `Profile.attentionIntegration`) is started with
+  `--settings {"preferredNotifChannel":"ghostty"}`** in front of its own
+  arguments; no user file is touched. This overrides the user's own channel
+  for sessions started from that profile, `notifications_disabled`
+  included; turning the toggle off (Settings › Profiles) keeps theirs.
+- Hooks (`hooks.Stop`, `hooks.Notification`, … in settings) run commands;
+  `Stop` fires when Claude finishes responding. Verified live: Claude Code
+  runs hook commands in a session of their own **without a controlling
+  terminal** (`/dev/tty`: "Device not configured"), while `claude` itself
+  is on the pane's terminal. The helper below handles that.
+
+**Codex 0.163.0** (sources: `codex --help` (`-c key=value` overrides
+`config.toml` with TOML values); the binary's strings; the source at tag
+`rust-v0.163.0`: `codex-rs/config/src/types.rs` (`Notifications` defaults
+to enabled, `NotificationMethod` `auto|osc9|bel` defaults to `auto`,
+`NotificationCondition` `unfocused|always` defaults to `unfocused`),
+`codex-rs/tui/src/notifications/{mod,osc9,bel}.rs`, `codex-rs/tui/src/tui.rs`;
+the docs at learn.chatgpt.com/docs/config-file/config-advanced and
+config-reference):
+
+- The TUI notifies on turn completion (`agent-turn-complete`; the message
+  is a preview of the response or "Agent turn complete") and on approval
+  requests, plan-mode prompts and questions, while `tui.notifications` is
+  on (the default: `codex-rs/config/src/types.rs` 715–719).
+- **The built-in profile passes nothing, and needs nothing.** What the
+  defaults do in Armadale, from the source at `rust-v0.163.0`:
+  - Method: `TERM_PROGRAM=Armadale` is not a terminal Codex knows, so it is
+    `TerminalName::Unknown` (`codex-rs/terminal-detection/src/lib.rs`
+    257–261, 377 ff.); `auto` (`types.rs` 721–728) uses OSC 9 only for
+    Ghostty, iTerm2, Kitty, Warp and WezTerm and otherwise **BEL**
+    (`codex-rs/tui/src/notifications/mod.rs` 22–26, 53–61; `bel.rs` writes
+    `\x07`).
+  - Condition: `unfocused` by default (`types.rs` 742–746);
+    `should_emit_notification` emits only when the terminal is not focused
+    (`codex-rs/tui/src/tui.rs` 117–121, used by `Tui::notify` 1018–1020).
+    The TUI starts out assuming focused (`tui.rs` 752), turns on focus
+    reporting, DECSET 1004 (`EnableFocusChange`, `tui.rs` 262), and
+    tracks `FocusGained` / `FocusLost` (`codex-rs/tui/src/tui/event_stream.rs`
+    305–313).
+  - Armadale **does** answer focus reporting: SwiftTerm (v1.99.0) reports
+    the current state as soon as 1004 is set (`Terminal.swift`, case 1004
+    of DECSET, ~6638: "Report the current state right away"), and again
+    whenever its view becomes or stops being first responder, its window
+    becomes or stops being key, or it moves to or out of a window
+    (`Mac/MacTerminalView.swift` 973, 1016–1060, 1766–1780). Focused there
+    means first responder in the key window, which is Armadale's "looked at"
+    rule (a background app has no key window; a pane of another tab is out
+    of the window). zmx replays `ESC[?1004h` to a reattaching client
+    (checked with zmx 0.8.1: a session that had enabled it, attached again,
+    received it in the replay), so this survives a relaunch.
+  - So Codex rings BEL on turn completion and approval requests exactly
+    when its pane is not looked at, which is when Armadale sets attention.
+    (Not run against a real Codex turn, which would use the user's
+    account; derived from the source above.)
+- Command-line overrides (`-c tui.notification_method=…`) were tried and
+  dropped: Codex 0.163.0 then runs "without the shared background server"
+  (a warning on every launch, and no `codex agents` or remote control).
+  `tui.notification_method = "osc9"` (the message text instead of a plain
+  bell) is offered as an optional user setting in the Configure… sheet.
+- `notify = ["program", …]` in `~/.codex/config.toml` runs a command with a
+  JSON payload (`type`, `thread-id`, `turn-id`, `cwd`, `input-messages`,
+  `last-assistant-message`) appended as the last argument, on
+  `agent-turn-complete` only. It is a single command, so setting it on the
+  command line would replace the user's own `notify` (this Mac's user has
+  one for another tool): it is offered only as an optional hook.
+
+### The notify helper and how to enable the hooks
+
+`Contents/Resources/armadale-notify` (source `Armadale/Resources/`, POSIX
+`sh`): `armadale-notify [--bell] [TITLE [BODY]]` writes
+`ESC ] 777 ; notify ; TITLE ; BODY BEL` (or a BEL) to the pane's terminal:
+`/dev/tty` if it has a controlling terminal, else the terminal device of its
+nearest ancestor that has one (`ps -o tty=`; this is what makes it work
+from Claude Code hooks). TITLE becomes the notification's title and BODY
+its text. Inside tmux or screen running in a pane it writes to the
+multiplexer's terminal, which swallows the sequence (tmux would need
+passthrough and DCS wrapping), so it cannot reach the Armadale pane from
+there; a bell rung inside tmux reaches it only if tmux passes bells on. Arguments starting with `{` (Codex's JSON payload)
+are ignored; control characters are removed, and `;` in the title becomes
+`,`; the body defaults to "Finished". It does nothing outside an Armadale
+session (`TERM_PROGRAM` is not `Armadale` and `ARMADALE_SESSION_ID` is
+unset), so a hook in global agent settings stays quiet in other terminals,
+and it always exits 0. Tested on a real pseudo-terminal (`script`), also
+with the helper detached into a session of its own (`setsid`), and live
+from a Claude Code `SessionStart` hook passed with `--settings`.
+
+The Profiles editor's **Configure…** shows the exact text with the
+helper's real path. For an app in `/Applications`:
+
+```json
+// ~/.claude/settings.json: attention the moment Claude stops
+{ "hooks": { "Stop": [ { "hooks": [ { "type": "command",
+  "command": "'/Applications/Armadale.app/Contents/Resources/armadale-notify' 'Claude Code' 'Finished'" } ] } ] } }
+```
+
+```toml
+# ~/.codex/config.toml, optional. notify goes at the top, before any
+# [table], and replaces any notify you already have.
+notify = ["/Applications/Armadale.app/Contents/Resources/armadale-notify", "Codex", "Turn complete"]
+
+# The message text instead of a plain bell (in your [tui] table).
+[tui]
+notification_method = "osc9"
+```
+
+Remote sessions get the same profile arguments (they work on any host);
+the helper exists only on this Mac.
+
+**Not supported:** tmux or screen inside a pane hide the helper's sequence
+(above).
+
+**Next Pane Needing Attention** (⌃⌘A) and **Clear All Attention** are in the
+Window menu (section 9).
+
+**Not built:** per-agent status beyond attention; changing the agents'
+idle threshold; posting while the pane is looked at; a notification for a
+session whose profile was deleted under "Only for agent profiles" (it is
+not known to be an agent).
 
 ---
 
@@ -1224,16 +1526,20 @@ armadale/
 │   ├── Tabs/                        TabBarView, StatusGlyph, HostBadge (SwiftUI)
 │   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
 │   ├── Sessions/                    SessionRegistry (controllers per session, a backend per host,
-│   │                                RemoteSessionSupport), SessionStatus / CloseRisk
+│   │                                RemoteSessionSupport), SessionStatus / CloseRisk,
+│   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
 │   ├── Settings/                    SettingsWindowController, Preferences, ShortcutTable, SwiftUI tabs
 │   │                                (General, Appearance, Profiles, Hosts, Shortcuts)
-│   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements
+│   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements,
+│   │                                armadale-notify (helper for agent hooks → Contents/Resources)
 │   └── Support/                     ThemeCatalog (built-in + user themes), AppSettings
-│                                    (+ SurfaceRegistry.standard), HierarchyDragItem, TextPrompt;
+│                                    (+ SurfaceRegistry.standard), HierarchyDragItem, TextPrompt,
+│                                    UserNotificationService;
 │                                    the shortcut table's source is App/MainMenu
 ├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/
-│   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations   (no AppKit)
+│   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations,
+│   │                                AttentionTracker, AgentIntegration              (no AppKit)
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
 │   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
 │   │                                SessionController, LaunchResolver, HelperLocator; Sources/ctty-exec
@@ -1251,7 +1557,10 @@ armadale/
   window controller lifetime; since step 5 also `Preferences` (each test
   in its own defaults suite, removed afterwards), `ThemeCatalog`, the
   shortcut table, settings reaching existing panes, the renderer switch
-  and the Settings window. It is unhosted: it compiles the app's sources
+  and the Settings window; since step 7 the attention center (with a fake
+  notification service), status precedence, notification policy, bells
+  and OSC 9/777 fed to real surfaces reaching it, and the notify helper on
+  a pseudo-terminal. It is unhosted: it compiles the app's sources
   (all but `main.swift`) into the test bundle, so the app never launches, no
   window is shown, no state file is touched, and an inert backend starts no
   process.
@@ -1353,5 +1662,18 @@ armadale/
   would hang the attach until its timeout.
 - **Remote floods**: the zmx client's unbounded buffer (section 7) is on
   the host; Armadale cannot see or bound it.
+- **Agent integrations drift.** What section 10 relies on was read from
+  Claude Code 2.1.292 (the `--settings` argument and its
+  `preferredNotifChannel` values) and Codex 0.163.0 (its defaults: BEL in an
+  unknown terminal, only while unfocused). A later version may rename
+  channel values, change the defaults, or start hooks differently; section
+  10 records the sources and lines to check again. The notify helper only
+  relies on a terminal device somewhere up the process tree.
+- **Environment scrubbing** (section 4) removes an exact list of
+  variables that identify the session Armadale was started from (other
+  terminals, Claude Code 2.1.292's own child markers). It never removes
+  configuration a user may rely on (API keys, config directories, provider
+  switches); a new agent version adding markers would need adding to the
+  list.
 - **Team ID** is not yet set; `project.yml` carries an empty placeholder.
   The bundle identifier is `com.tinylittleapps.armadale`.

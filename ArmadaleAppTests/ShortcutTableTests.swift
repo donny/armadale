@@ -42,6 +42,7 @@ struct ShortcutTableTests {
         #expect(shortcut("Toggle Sidebar") == "⌃⌘S")
         #expect(shortcut("Respawn All Ended") == "⌥⌘R")
         #expect(shortcut("Redo") == "⇧⌘Z")
+        #expect(shortcut("Next Pane Needing Attention") == "⌃⌘A")
     }
 
     @Test func everyRowIsInAMenuAndHiddenAlternatesAreNotRowsOfTheirOwn() {

@@ -2,7 +2,8 @@ import AppKit
 import ArmadaleCore
 import SwiftUI
 
-/// Settings › General: default profile, default directory, close confirmation.
+/// Settings › General: default profile, default directory, notifications,
+/// close confirmation.
 struct GeneralSettingsView: View {
     let model: AppModel
     @Bindable var preferences: Preferences
@@ -29,6 +30,19 @@ struct GeneralSettingsView: View {
                 }
             } footer: {
                 Text("New tabs, tab groups and windows (⌘T, ⇧⌘N, ⌘N) use this profile and start in this directory. Splitting a pane keeps the pane’s own profile and directory.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Notify when an unfocused pane needs attention", isOn: $preferences.notifyOnAttention)
+                Toggle("Only for agent profiles", isOn: $preferences.notifyOnlyForAgents)
+                    .disabled(!preferences.notifyOnAttention)
+                Toggle("Play sound", isOn: $preferences.notificationPlaysSound)
+                    .disabled(!preferences.notifyOnAttention)
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("A pane needs attention when its program rings the bell or posts a notification while you aren’t looking at it. Its tab shows ◐, and the Dock icon counts them. Armadale asks for permission to show notifications the first time it has one to show.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

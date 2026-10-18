@@ -102,7 +102,12 @@ private struct ProfileEditor: View {
         }
     }
 
+    @State private var isShowingHook = false
+
     private var isBuiltIn: Bool { draft.isBuiltIn }
+
+    /// How this profile's agent signals the terminal, if Armadale knows.
+    private var integration: AgentIntegration? { draft.agentIntegration }
 
     var body: some View {
         Form {
@@ -149,6 +154,23 @@ private struct ProfileEditor: View {
             }
             .disabled(isBuiltIn)
 
+            if let integration {
+                Section {
+                    if let toggleTitle = integration.toggleTitle {
+                        Toggle(toggleTitle, isOn: $draft.attentionIntegration)
+                    }
+                    Text(integration.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    LabeledContent("Optional settings") {
+                        Button("Configure…") { isShowingHook = true }
+                    }
+                } header: {
+                    Text("Attention")
+                }
+            }
+
             Section {
                 ForEach($environment) { $row in
                     VStack(alignment: .leading, spacing: 4) {
@@ -188,6 +210,9 @@ private struct ProfileEditor: View {
             .disabled(isBuiltIn)
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $isShowingHook) {
+            if let integration { AgentHookSheet(integration: integration) }
+        }
         .onChange(of: draft) { commit() }
         .onChange(of: argumentsText) { commit() }
         .onChange(of: environment) { commit() }
@@ -268,5 +293,55 @@ private enum KindChoice: String, CaseIterable, Identifiable {
         case .codex: .agent(.codex)
         case .otherAgent: .agent(.other(agentName))
         }
+    }
+}
+
+/// Settings › Profiles › Configure…: the optional hook that makes an agent
+/// signal its pane through Armadale's notify helper, as exact text to add
+/// to the agent's own settings. Armadale never edits those files itself.
+private struct AgentHookSheet: View {
+    let integration: AgentIntegration
+    @Environment(\.dismiss) private var dismiss
+
+    /// The helper in this copy of the app.
+    private var helperPath: String {
+        Bundle.main.url(forResource: AgentIntegration.notifyHelperName, withExtension: nil)?.path
+            ?? "/Applications/Armadale.app/Contents/Resources/\(AgentIntegration.notifyHelperName)"
+    }
+
+    var body: some View {
+        let snippet = integration.hookSnippet(helperPath: helperPath)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Optional Agent Settings")
+                .font(.headline)
+            Text(integration.hookSummary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Add this to \(integration.hookFile):")
+            ScrollView {
+                Text(snippet)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+            .frame(minHeight: 70, maxHeight: 160)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+            Text("The helper writes a notification sequence to the agent’s terminal and does nothing outside Armadale. If you move Armadale, update the path.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(snippet, forType: .string)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
     }
 }

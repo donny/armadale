@@ -29,6 +29,9 @@ final class Preferences {
         static let rendererID = "rendererID"
         static let settingsWindowTopLeft = "settingsWindowTopLeft"
         static let settingsTab = "settingsTab"
+        static let notifyOnAttention = "notifyOnAttention"
+        static let notifyOnlyForAgents = "notifyOnlyForAgents"
+        static let notificationPlaysSound = "notificationPlaysSound"
     }
 
     static let fontSizeRange: ClosedRange<Double> = 6...48
@@ -52,6 +55,9 @@ final class Preferences {
     private var storedCursorShape: TerminalCursorStyle.Shape
     private var storedCursorBlinks: Bool
     private var storedRendererID: String
+    private var storedNotifyOnAttention: Bool
+    private var storedNotifyOnlyForAgents: Bool
+    private var storedNotificationPlaysSound: Bool
 
     init(defaults: UserDefaults, suiteName: String? = nil) {
         self.defaults = defaults
@@ -68,6 +74,9 @@ final class Preferences {
         storedCursorShape = defaults.string(forKey: Key.cursorShape).flatMap(TerminalCursorStyle.Shape.init(rawValue:)) ?? .block
         storedCursorBlinks = defaults.object(forKey: Key.cursorBlinks) as? Bool ?? true
         storedRendererID = defaults.string(forKey: Key.rendererID) ?? SwiftTermSurface.rendererID
+        storedNotifyOnAttention = defaults.object(forKey: Key.notifyOnAttention) as? Bool ?? true
+        storedNotifyOnlyForAgents = defaults.object(forKey: Key.notifyOnlyForAgents) as? Bool ?? true
+        storedNotificationPlaysSound = defaults.object(forKey: Key.notificationPlaysSound) as? Bool ?? false
     }
 
     // MARK: General
@@ -107,6 +116,27 @@ final class Preferences {
     var confirmClosingRunningSession: Bool {
         get { storedConfirmClosing }
         set { storedConfirmClosing = newValue; defaults.set(newValue, forKey: Key.confirmClosingRunningSession) }
+    }
+
+    // MARK: Notifications (DESIGN §10)
+
+    /// Post a desktop notification when a pane nobody is looking at rings
+    /// the bell or posts a notification.
+    var notifyOnAttention: Bool {
+        get { storedNotifyOnAttention }
+        set { storedNotifyOnAttention = newValue; defaults.set(newValue, forKey: Key.notifyOnAttention) }
+    }
+
+    /// Only for sessions whose profile is an agent (Claude Code, Codex, …).
+    var notifyOnlyForAgents: Bool {
+        get { storedNotifyOnlyForAgents }
+        set { storedNotifyOnlyForAgents = newValue; defaults.set(newValue, forKey: Key.notifyOnlyForAgents) }
+    }
+
+    /// Notifications play the default sound.
+    var notificationPlaysSound: Bool {
+        get { storedNotificationPlaysSound }
+        set { storedNotificationPlaysSound = newValue; defaults.set(newValue, forKey: Key.notificationPlaysSound) }
     }
 
     // MARK: Appearance

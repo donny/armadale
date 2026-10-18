@@ -199,6 +199,13 @@ enum MainMenu {
             item.tag = number
         }
         window.addItem(.separator())
+        // ⌃⌘A: free in DESIGN §9, in Ghostty's macOS defaults and in macOS.
+        window.addItem(withTitle: "Next Pane Needing Attention",
+                       action: #selector(AppDelegate.showNextPaneNeedingAttention(_:)), keyEquivalent: "a")
+            .keyEquivalentModifierMask = [.command, .control]
+        window.addItem(withTitle: "Clear All Attention",
+                       action: #selector(AppDelegate.clearAllAttention(_:)), keyEquivalent: "")
+        window.addItem(.separator())
         window.addItem(withTitle: "Bring All to Front",
                        action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         if installsSpecialMenus { NSApp.windowsMenu = window }

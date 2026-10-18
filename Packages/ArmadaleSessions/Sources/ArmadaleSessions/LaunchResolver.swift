@@ -94,6 +94,18 @@ public struct LaunchResolver: Sendable {
         "TMUX", "TMUX_PANE", "STY", "ALACRITTY_WINDOW_ID", "ALACRITTY_SOCKET", "ALACRITTY_LOG",
         "TERMINFO", "COLORFGBG", "XPC_SERVICE_NAME",
         "SHLVL", "OLDPWD", "_", "OS_ACTIVITY_DT_MODE", "NSUnbufferedIO",
+        // The Claude Code session Armadale was started from (`open -a
+        // Armadale` in one of its shells), as Claude Code 2.1.292 sets them
+        // for its own children (seen live). With them a `claude` in a pane
+        // takes itself for that session's child (it stops saving its
+        // transcript) and gets its messaging socket and token. Only these
+        // session-identifying names: a user's own configuration
+        // (ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR, CLAUDE_CODE_USE_BEDROCK, …)
+        // is passed on.
+        "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_INVOKED_SKILLS",
+        "CLAUDE_EFFORT", "AI_AGENT", "TRACEPARENT",
     ]
     static let removedPrefixes = [
         "DYLD_", "__XPC_DYLD_", "__XCODE_", "ITERM_", "KITTY_", "GHOSTTY_", "WEZTERM_", "ARMADALE_",

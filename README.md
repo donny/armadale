@@ -9,7 +9,20 @@ splits and SwiftUI for chrome. Terminal rendering sits behind a pluggable
 persistence comes from a private, bundled `zmx` daemon. Layout is stored as
 versioned JSON in `~/Library/Application Support/Armadale/`.
 
-Status: step 6 (remote). **Settings › Hosts** adds SSH hosts (a
+Status: step 7 (agents). A pane whose program rings the bell or sends a
+desktop notification sequence (OSC 9 or OSC 777) while you aren't looking
+at it *needs attention*: its tab shows ◐ and a purple tint, the sidebar
+counts such panes per tab group and workspace, the Dock icon shows the
+total, and Armadale can post a macOS notification (Settings › General ›
+Notifications; clicking one brings the pane forward). Looking at the pane
+(its window key, its tab selected, the pane focused, Armadale active)
+clears it. **Window › Next Pane Needing Attention** (⌃⌘A) cycles through
+them across windows; **Clear All Attention** clears them. Claude Code
+profiles start it with a setting that makes it signal the pane (a
+per-profile toggle); Codex does so by default; see
+[Notifications and agents](#notifications-and-agents).
+
+Step 6 (remote): **Settings › Hosts** adds SSH hosts (a
 destination such as `user@host` or a name from your SSH configuration,
 optionally a port, identity file, SSH config file and remote folder), with
 Test Connection and Deploy Now. **File › New Tab on Host** (or the "On Host"
@@ -75,7 +88,9 @@ xcodebuild -project Armadale.xcodeproj -scheme Armadale \
 `ArmadaleAppTests` tests the app target's own code (split tree view with
 real SwiftTerm surfaces, close-confirmation rule, window controller
 lifetime, preferences, themes, the shortcut table, settings applied to
-open panes, the renderer switch, the Settings window). It is unhosted: the app's sources are compiled into the bundle,
+open panes, the renderer switch, the Settings window, attention and
+notifications with a fake notification service, and the `armadale-notify`
+helper on a pseudo-terminal). It is unhosted: the app's sources are compiled into the bundle,
 so the app never launches, no window appears and no process is started.
 
 `ArmadaleSessions` tests spawn real processes on PTYs (zsh and bare
@@ -231,12 +246,72 @@ When you check PTY behaviour by hand, use zsh or a bare program, never
 `/bin/sh`. macOS's `/bin/sh` is bash, which acquires the controlling
 terminal itself and so hides a broken spawn.
 
+## Notifications and agents
+
+Notifications (Settings › General): "Notify when an unfocused pane needs
+attention" (on), "Only for agent profiles" (on: only Claude Code, Codex and
+other agent-kind profiles), "Play sound" (off). macOS asks for permission
+the first time a pane needs attention (or a notification is posted), never
+at launch. The Dock badge also depends on that permission: on macOS 27 it
+shows only while System Settings › Notifications › Armadale › "Badge
+application icon" is on. If the permission prompt is dismissed (or
+Armadale quits while it is on screen), turn notifications on there. A
+banner is skipped if you are already looking at that pane, and a pane's
+notification is removed from Notification Center once you look at it.
+
+Making agents signal their pane (details, sources and line numbers in
+docs/DESIGN.md section 10):
+
+- **Claude Code**: by itself it sends nothing in terminals it doesn't
+  recognise. A Claude Code profile with **"Signal attention when Claude
+  Code needs input"** on (Settings › Profiles; on by default, also for the
+  built-in) runs `claude --settings '{"preferredNotifChannel":"ghostty"}'`,
+  so Claude Code sends OSC 777 when it has waited a minute for input or
+  asks for permission. **This overrides your own `preferredNotifChannel`,
+  including `notifications_disabled`, for every session started from that
+  profile**; your settings files are not changed. To keep your own channel,
+  turn the toggle off for that profile (new sessions and respawns then
+  start without the argument). For a signal the moment Claude stops, add a
+  `Stop` hook to `~/.claude/settings.json` (Settings › Profiles › Claude
+  Code › Configure… shows it with the right path and a Copy button):
+
+  ```json
+  { "hooks": { "Stop": [ { "hooks": [ { "type": "command",
+    "command": "'/Applications/Armadale.app/Contents/Resources/armadale-notify' 'Claude Code' 'Finished'" } ] } ] } }
+  ```
+
+- **Codex** needs nothing: in a terminal it doesn't recognise its defaults
+  ring the bell when a turn completes or it asks for approval, and only
+  while its terminal reports itself unfocused. Armadale reports focus
+  (focus reporting, DECSET 1004), so Codex rings exactly when you aren't
+  looking at its pane. (Passing `-c tui.…` overrides on the command line
+  makes Codex run without its shared background server, so the profile
+  doesn't.) Optional, in `~/.codex/config.toml`: the message text instead
+  of a plain bell, and the helper after every turn (`notify` goes at the
+  top, before any `[table]`, and replaces any `notify` you already have):
+
+  ```toml
+  notify = ["/Applications/Armadale.app/Contents/Resources/armadale-notify", "Codex", "Turn complete"]
+
+  [tui]
+  notification_method = "osc9"
+  ```
+
+- **Anything else**: ring the bell (`printf '\a'`), or run
+  `armadale-notify [--bell] [TITLE [BODY]]` from inside a pane, e.g.
+  `make; …/armadale-notify Build Done` posts a notification titled "Build"
+  saying "Done". The helper writes to the pane's terminal even when its
+  output is piped or it has no controlling terminal (as in Claude Code
+  hooks), and does nothing outside Armadale. It cannot reach the pane from
+  inside tmux or screen, which swallow the sequence.
+
 ## Settings and themes
 
 Settings live in the app's user defaults (`com.tinylittleapps.armadale`,
 i.e. `~/Library/Preferences/com.tinylittleapps.armadale.plist`), through the
-typed `Preferences` store: default profile and directory,
-`confirmClosingRunningSession` (default `true`: closing a pane, tab or tab
+typed `Preferences` store: default profile and directory, the three
+notification settings (`notifyOnAttention`, `notifyOnlyForAgents`,
+`notificationPlaysSound`), `confirmClosingRunningSession` (default `true`: closing a pane, tab or tab
 group with a running process asks first), font name and size (⌘= / ⌘- / ⌘0
 change the stored size), theme choice, cursor, renderer, and the Settings
 window's position and tab. Profiles are not preferences: they are saved
@@ -272,8 +347,8 @@ and removes the folder at the end.
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog` and `AppSettings` (`Support/`) |
-| `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `StateStore`, migrations (no AppKit) |
+| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), `AttentionCenter`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog`, `AppSettings` and `UserNotificationService` (`Support/`), `Resources/armadale-notify` |
+| `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `AttentionTracker`, `AgentIntegration`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |

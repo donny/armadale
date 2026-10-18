@@ -2,6 +2,7 @@ import AppKit
 import ArmadaleCore
 import ArmadaleSessions
 import Observation
+import UserNotifications
 
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
@@ -15,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var profilesTask: Task<Void, Never>?
     /// Session controllers for every pane shown so far.
     private let registry: SessionRegistry
+    /// Which sessions need attention; the Dock badge and notifications.
+    private let attention: AttentionCenter
+    private let notifications: UserNotificationService
+    private var focusObservers: [any NSObjectProtocol] = []
     private let stateURL: URL
     private let saver: StateSaver
     /// False when the state on disk must not be overwritten (written by a
@@ -106,9 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             restoredSessionIDs: Set(state.sessions.map(\.id)),
             settings: settings,
             remote: Self.makeRemoteSupport(cttyExec: sessions.cttyExec))
+        let notifications = UserNotificationService()
+        self.notifications = notifications
+        self.attention = AttentionCenter(
+            model: model, preferences: settings.preferences, notifications: notifications)
         self.saver = StateSaver(url: url)
         super.init()
         wireRegistry()
+        wireAttention()
         followGeneralPreferences()
     }
 
@@ -147,6 +157,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         registry.onRuntimeVersionRecorded = { [weak self] in
             self?.saveNow()
         }
+    }
+
+    /// The Dock badge follows the attention total; a revealed session's
+    /// window comes forward.
+    private func wireAttention() {
+        registry.attention = attention
+        attention.onBadgeChange = { label in
+            NSApp.dockTile.badgeLabel = label
+        }
+        attention.showWorkspace = { [weak self] id in
+            self?.showWorkspace(id)
+        }
+        // A badge set before macOS allowed one is not shown: set it again.
+        notifications.onAuthorized = { [weak self] in
+            guard let self else { return }
+            NSApp.dockTile.badgeLabel = AttentionBadge.label(total: self.attention.total)
+        }
+    }
+
+    /// Keeps ``AttentionCenter/isAppActive`` and
+    /// ``AttentionCenter/keyWorkspaceID`` current, so a bell in the pane
+    /// being looked at never sets attention, and looking at a pane clears it.
+    private func observeFocus() {
+        let center = NotificationCenter.default
+        let update: @MainActor (Notification.Name, NSWindow?) -> Void = { [weak self] name, window in
+            guard let self else { return }
+            self.attention.isAppActive = NSApp.isActive
+            if name == NSWindow.didResignKeyNotification {
+                // Key moves to another window next (did-become-key follows);
+                // nil until then. NSApp.keyWindow still covers a sheet of
+                // the same window taking over.
+                if let window, self.workspaceID(of: window) == self.attention.keyWorkspaceID {
+                    self.attention.keyWorkspaceID = NSApp.keyWindow.flatMap { $0 === window ? nil : self.workspaceID(of: $0) }
+                }
+            } else {
+                self.attention.keyWorkspaceID = NSApp.keyWindow.flatMap { self.workspaceID(of: $0) }
+            }
+        }
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+                     NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            focusObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { notification in
+                let name = notification.name
+                let window = notification.object as? NSWindow
+                MainActor.assumeIsolated {
+                    update(name, window)
+                }
+            })
+        }
+        attention.isAppActive = NSApp.isActive
+        attention.keyWorkspaceID = NSApp.keyWindow.flatMap { workspaceID(of: $0) }
+    }
+
+    /// The workspace of `window`, or of the window it is a sheet of (a
+    /// rename sheet takes key status from its window, whose focused pane is
+    /// still the one being looked at).
+    private func workspaceID(of window: NSWindow) -> WorkspaceID? {
+        let owner = Self.sheetOwner(of: window)
+        return windowControllers.first { $0.value.window === owner }?.key
+    }
+
+    /// The window a sheet (or a sheet of a sheet) is attached to; `window`
+    /// itself if it is not a sheet.
+    static func sheetOwner(of window: NSWindow) -> NSWindow {
+        var owner = window
+        while let parent = owner.sheetParent { owner = parent }
+        return owner
     }
 
     /// Writes the state at once instead of after the debounce.
@@ -248,9 +324,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // MARK: NSApplicationDelegate
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before launching finishes, so a click on a notification that
+        // launched the app is delivered. Setting the delegate asks for no
+        // permission; that happens when the first notification is posted.
+        UNUserNotificationCenter.current().delegate = self
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.make(profileMenuDelegate: self)
         handleTerminationSignal()
+        observeFocus()
 
         if let report = loadReport, report.isFatal {
             // Do not open windows or save anything: the file on disk wins.
@@ -387,9 +471,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         settings.preferences.resetFontSize()
     }
 
+    /// Window › Next Pane Needing Attention (⌃⌘A): the next session
+    /// needing attention after the key window's focused pane, in sidebar
+    /// order across every window; its window comes forward, its tab group
+    /// and tab are selected and its pane focused, which clears it.
+    @objc func showNextPaneNeedingAttention(_ sender: Any?) {
+        attention.revealNext()
+    }
+
+    /// Window › Clear All Attention.
+    @objc func clearAllAttention(_ sender: Any?) {
+        attention.clearAll()
+    }
+
+    /// A click on a notification: the session's pane, if it still exists;
+    /// otherwise just the app.
+    fileprivate func openNotification(for session: SessionID?) {
+        if let session, attention.reveal(session) { return }
+        NSApp.activate()
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let preferences = settings.preferences
         switch menuItem.action {
+        case #selector(showNextPaneNeedingAttention(_:)): return attention.nextSession != nil
+        case #selector(clearAllAttention(_:)): return attention.total > 0
         case #selector(increaseFontSize(_:)): return preferences.canIncreaseFontSize
         case #selector(decreaseFontSize(_:)): return preferences.canDecreaseFontSize
         case #selector(resetFontSize(_:)): return preferences.fontSize != Preferences.defaultFontSize
@@ -516,5 +622,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 saver.schedule(model.persistedState)
             }
         }
+    }
+}
+
+// MARK: - Notifications
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    /// Clicking a notification brings its session forward (routed by the
+    /// session ID in `userInfo`; a session that no longer exists only
+    /// activates the app).
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let session = AttentionNotification.sessionID(fromUserInfo: response.notification.request.content.userInfo)
+        Task { @MainActor in
+            self.openNotification(for: session)
+        }
+        completionHandler()
+    }
+
+    /// Shown while Armadale is active too (the pane is elsewhere, another
+    /// tab or window, which is why it was posted), unless the user is
+    /// looking at that session by the time it would appear.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        let session = AttentionNotification.sessionID(fromUserInfo: notification.request.content.userInfo)
+        let present = await MainActor.run { self.attention.shouldPresent(session) }
+        return present ? [.banner, .list, .sound] : []
     }
 }

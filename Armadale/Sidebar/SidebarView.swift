@@ -9,7 +9,8 @@ enum SidebarItem: Hashable {
 }
 
 /// The app-global sidebar (DESIGN §1): every workspace, its tab groups, and
-/// their tabs, the same in every window. The current window's workspace
+/// their tabs, the same in every window. Workspace and tab group rows count
+/// their panes needing attention; a tab needing attention shows ◐. The current window's workspace
 /// starts expanded and is shown in bold; its selected tab group is the
 /// highlighted row. Clicking another workspace brings its window to front
 /// (or opens it); clicking a tab group or tab selects it. Double-click
@@ -48,6 +49,7 @@ struct SidebarView: View {
                             TabGroupRow(
                                 group: group,
                                 isSelected: group.id == workspace.selectedTabGroupID,
+                                attentionCount: registry.attention?.count(in: model.sessionIDs(ofTabGroup: group.id)) ?? 0,
                                 actions: actions)
                                 .tag(SidebarItem.tabGroup(group.id))
                         }
@@ -55,7 +57,8 @@ struct SidebarView: View {
                 } label: {
                     WorkspaceRow(
                         workspace: workspace,
-                        isCurrent: workspace.id == currentWorkspaceID)
+                        isCurrent: workspace.id == currentWorkspaceID,
+                        attentionCount: registry.attention?.count(in: model.sessionIDs(in: workspace.id)) ?? 0)
                         .tag(SidebarItem.workspace(workspace.id))
                 }
             }
@@ -153,24 +156,32 @@ struct SidebarView: View {
 private struct WorkspaceRow: View {
     let workspace: Workspace
     let isCurrent: Bool
+    /// Panes of the workspace needing attention.
+    let attentionCount: Int
 
     var body: some View {
         let isOpen = workspace.window?.isOpen ?? false
-        Label {
-            Text(workspace.name)
-                .font(.body.weight(isCurrent ? .semibold : .regular))
-                .foregroundStyle(isOpen || isCurrent ? .primary : .secondary)
-        } icon: {
-            Image(systemName: isOpen ? "macwindow" : "macwindow.badge.plus")
-                .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
-        }
+        HStack {
+            Label {
+                Text(workspace.name)
+                    .font(.body.weight(isCurrent ? .semibold : .regular))
+                    .foregroundStyle(isOpen || isCurrent ? .primary : .secondary)
+            } icon: {
+                Image(systemName: isOpen ? "macwindow" : "macwindow.badge.plus")
+                    .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
+            }
             .help(isCurrent ? "This window" : (isOpen ? "Show this workspace’s window" : "Open this workspace"))
+            Spacer(minLength: 4)
+            AttentionCount(count: attentionCount)
+        }
     }
 }
 
 private struct TabGroupRow: View {
     let group: TabGroup
     let isSelected: Bool
+    /// Panes of the group needing attention.
+    let attentionCount: Int
     let actions: WorkspaceActions
     @State private var isTargeted = false
 
@@ -178,6 +189,7 @@ private struct TabGroupRow: View {
         HStack {
             Label(group.name, systemImage: isSelected ? "folder.fill" : "folder")
             Spacer(minLength: 4)
+            AttentionCount(count: attentionCount)
             Text("\(group.tabs.count)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -203,12 +215,14 @@ private struct TabRow: View {
 
     var body: some View {
         let sessions = tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
+        let status = registry.glyphStatus(of: sessions)
         HStack(spacing: 6) {
-            StatusGlyph(status: registry.status(of: sessions))
+            StatusGlyph(status: status)
             Label(model.displayTitle(for: tab), systemImage: icon)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(isSelected ? .primary : .secondary)
+                .foregroundStyle(isSelected || status == .attention ? .primary : .secondary)
+                .fontWeight(status == .attention ? .semibold : nil)
             HostBadge(
                 hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions),
                 showsName: true)

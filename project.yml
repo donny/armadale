@@ -34,6 +34,12 @@ targets:
     platform: macOS
     sources:
       - path: Armadale
+        excludes:
+          - Resources/armadale-notify
+      # The notify helper agents' hooks can run (docs/DESIGN.md section 10):
+      # Contents/Resources/armadale-notify, a POSIX sh script (executable).
+      - path: Armadale/Resources/armadale-notify
+        buildPhase: resources
     info:
       path: Armadale/Resources/Info.plist
       properties:

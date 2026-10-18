@@ -177,13 +177,17 @@ public final class SwiftTermSurface: TerminalSurface {
 
     // MARK: Conversions
 
-    /// Parses OSC 9 (`9;body`, excluding `9;4;…` progress reports) and
-    /// OSC 777 (`777;notify;title;body`).
+    /// Parses OSC 9 (`9;text`) and OSC 777 (`777;notify;title;body`).
+    /// ConEmu's OSC 9 extensions are not notifications: their payload is a
+    /// number, alone or before a `;` (`9;4;st;pr` progress, `9;9;path`
+    /// working directory, `9;1;ms` sleep, …), so such payloads and empty
+    /// ones are ignored; only plain text is a notification.
     nonisolated static func notification(from code: Int, payload: [UInt8]) -> (title: String, body: String)? {
         let text = String(decoding: payload, as: UTF8.self)
         switch code {
         case 9:
-            if text.hasPrefix("4;") { return nil } // ConEmu progress, not a notification
+            let first = text.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            if text.isEmpty || (!first.isEmpty && first.allSatisfy({ $0.isASCII && $0.isNumber })) { return nil }
             return ("", text)
         case 777:
             let parts = text.split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false)

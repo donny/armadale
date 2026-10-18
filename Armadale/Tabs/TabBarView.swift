@@ -33,8 +33,9 @@ final class TabBarHostingView: NSHostingView<TabBarView> {
 /// The tab bar's coordinate space, which ``TabFrameStore`` frames are in.
 private let tabBarCoordinateSpace = "TabBar"
 
-/// The tabs of the window's selected tab group (DESIGN §8): status glyph,
-/// title, ⌘N badge, close button on hover, and "+" for a new tab. Click
+/// The tabs of the window's selected tab group (DESIGN §8): status glyph
+/// (◐ and a tinted background when a pane needs attention), title, ⌘N
+/// badge, close button on hover, and "+" for a new tab. Click
 /// selects, drag reorders (or drops the tab on a sidebar tab group), the
 /// context menu renames or closes.
 struct TabBarView: View {
@@ -153,8 +154,10 @@ private struct TabItemView: View {
     var body: some View {
         let title = model.displayTitle(for: tab)
         let sessions = tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
+        let status = registry.glyphStatus(of: sessions)
+        let needsAttention = sessions.contains { registry.attention?.needsAttention($0) ?? false }
         HStack(spacing: 6) {
-            StatusGlyph(status: registry.status(of: sessions))
+            StatusGlyph(status: status)
             HostBadge(hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions))
             Text(title)
                 .lineLimit(1)
@@ -196,6 +199,13 @@ private struct TabItemView: View {
         .background {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color.primary.opacity(isSelected ? 0.11 : (isHovering ? 0.05 : 0)))
+            if needsAttention {
+                // A subtle highlight for a tab needing attention (DESIGN §8).
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(StatusGlyph.attentionColor.opacity(0.13))
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(StatusGlyph.attentionColor.opacity(0.35), lineWidth: 1)
+            }
         }
         .overlay(alignment: .leading) {
             if isTargeted {

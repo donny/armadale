@@ -367,6 +367,13 @@ public struct Profile: Identifiable, Codable, Sendable, Hashable {
     public var environment: [String: String]
     /// SF Symbol name.
     public var icon: String
+    /// For an agent Armadale knows (``AgentIntegration``): add the launch
+    /// arguments that make it signal its pane (Claude Code's
+    /// `--settings {"preferredNotifChannel":"ghostty"}`) in front of
+    /// ``arguments`` at launch. On by default, also for the built-in, whose
+    /// ``arguments`` stay fixed while this stays the user's choice. Saved
+    /// state without it decodes as on.
+    public var attentionIntegration: Bool
 
     public init(
         id: ProfileID = .generate(),
@@ -375,7 +382,8 @@ public struct Profile: Identifiable, Codable, Sendable, Hashable {
         program: String? = nil,
         arguments: [String] = [],
         environment: [String: String] = [:],
-        icon: String
+        icon: String,
+        attentionIntegration: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -384,11 +392,42 @@ public struct Profile: Identifiable, Codable, Sendable, Hashable {
         self.arguments = arguments
         self.environment = environment
         self.icon = icon
+        self.attentionIntegration = attentionIntegration
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, kind, program, arguments, environment, icon, attentionIntegration
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(ProfileID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        program = try container.decodeIfPresent(String.self, forKey: .program)
+        arguments = try container.decode([String].self, forKey: .arguments)
+        environment = try container.decode([String: String].self, forKey: .environment)
+        icon = try container.decode(String.self, forKey: .icon)
+        // Added in step 7; profiles saved before it get the default.
+        attentionIntegration = try container.decodeIfPresent(Bool.self, forKey: .attentionIntegration) ?? true
+    }
+
+    /// How this profile's agent signals its pane, if Armadale knows.
+    public var agentIntegration: AgentIntegration? {
+        guard case .agent(let flavor) = kind else { return nil }
+        return AgentIntegration.for(flavor)
+    }
+
+    /// The arguments a session started from this profile gets: the agent
+    /// integration's (when ``attentionIntegration`` is on), then ``arguments``.
+    public var launchArguments: [String] {
+        guard attentionIntegration, let integration = agentIntegration else { return arguments }
+        return integration.launchArguments + arguments
     }
 
     /// The launch spec a new session created from this profile records.
     public var launchSpec: LaunchSpec {
-        LaunchSpec(program: program, arguments: arguments, environment: environment)
+        LaunchSpec(program: program, arguments: launchArguments, environment: environment)
     }
 }
 
@@ -396,11 +435,13 @@ extension Profile {
     /// The user's login shell.
     public static let shell = Profile(
         id: ProfileID(raw: "builtin.shell"), name: "Shell", kind: .shell, icon: "terminal")
-    /// Claude Code (`claude`).
+    /// Claude Code (`claude`). Its launch gets ``AgentIntegration/claudeCode``'s
+    /// arguments while ``attentionIntegration`` is on (the default).
     public static let claudeCode = Profile(
         id: ProfileID(raw: "builtin.claude-code"), name: "Claude Code", kind: .agent(.claudeCode),
         program: "claude", icon: "sparkle")
-    /// Codex (`codex`).
+    /// Codex (`codex`), with no arguments: its defaults already ring the
+    /// bell in an unfocused Armadale pane (``AgentIntegration/codex``).
     public static let codex = Profile(
         id: ProfileID(raw: "builtin.codex"), name: "Codex", kind: .agent(.codex),
         program: "codex", icon: "chevron.left.forwardslash.chevron.right")
@@ -425,6 +466,13 @@ extension Profile {
             return "“\(name)” is set by Armadale itself and can’t be changed here."
         }
         return nil
+    }
+
+    /// Whether the profile runs a coding agent (the "Only for agent
+    /// profiles" notification filter).
+    public var isAgent: Bool {
+        if case .agent = kind { return true }
+        return false
     }
 
     /// Whether this is one of the ``builtIns``. Built-in profiles cannot be

@@ -1,0 +1,84 @@
+#!/bin/sh
+# armadale-notify: tell the Armadale pane this runs in that it needs attention.
+#
+#   armadale-notify [--bell] [TITLE [BODY]]
+#
+# Writes a desktop-notification sequence (OSC 777 "notify", as Ghostty and
+# rxvt use it) to the pane's terminal, so it arrives even when stdout is a
+# pipe, as it is for agent hooks: the controlling terminal (/dev/tty) if it
+# has one, else the terminal of its nearest ancestor that has one. Claude
+# Code (2.1.292) runs hooks in a session of their own without a controlling
+# terminal, while `claude` itself is on the pane's. With --bell it writes a
+# BEL instead. Armadale then marks the pane as needing attention if
+# you are not looking at it, and may post a macOS notification
+# (docs/DESIGN.md section 10).
+#
+# Meant for agent hooks: a Claude Code "Stop" hook, or Codex's `notify`
+# command (whose JSON payload, the last argument, is ignored). Outside an
+# Armadale session (TERM_PROGRAM is not Armadale and ARMADALE_SESSION_ID is
+# unset) it does nothing, so a hook in your global agent settings stays
+# quiet in other terminals. It always exits 0, so a hook never fails.
+
+if [ "${TERM_PROGRAM:-}" != "Armadale" ] && [ -z "${ARMADALE_SESSION_ID:-}" ]; then
+    exit 0
+fi
+
+bell=0
+if [ "${1:-}" = "--bell" ]; then
+    bell=1
+    shift
+fi
+
+# Codex appends its JSON payload as the last argument: not a title or body.
+title=""
+body=""
+for argument in "$@"; do
+    case "$argument" in
+        "{"*) continue ;;
+    esac
+    if [ -z "$title" ]; then
+        title=$argument
+    elif [ -z "$body" ]; then
+        body=$argument
+    fi
+done
+
+# No control characters (they would end or corrupt the sequence); the title
+# can't contain ";" either, which separates it from the body.
+title=$(printf '%s' "$title" | LC_ALL=C tr -d '\000-\037\177' | tr ';' ',')
+body=$(printf '%s' "$body" | LC_ALL=C tr -d '\000-\037\177')
+[ -n "$body" ] || body="Finished"
+
+# The pane's terminal device: /dev/tty, or the nearest ancestor's terminal.
+terminal=""
+if ( : >/dev/tty ) 2>/dev/null; then
+    terminal=/dev/tty
+else
+    process=$PPID
+    hops=0
+    while [ -n "$process" ] && [ "$process" -gt 1 ] 2>/dev/null && [ "$hops" -lt 32 ]; do
+        name=$(ps -o tty= -p "$process" 2>/dev/null | tr -d ' ')
+        case "$name" in
+            "" | "?" | "??") ;;
+            *)
+                if [ -w "/dev/$name" ]; then
+                    terminal="/dev/$name"
+                    break
+                fi
+                ;;
+        esac
+        process=$(ps -o ppid= -p "$process" 2>/dev/null | tr -d ' ')
+        hops=$((hops + 1))
+    done
+fi
+[ -n "$terminal" ] || exit 0
+
+{
+    if [ "$bell" = 1 ]; then
+        printf '\007'
+    else
+        printf '\033]777;notify;%s;%s\007' "$title" "$body"
+    fi
+} 2>/dev/null >"$terminal"
+
+exit 0

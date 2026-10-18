@@ -25,7 +25,13 @@ private final class RecordingDelegate: TerminalSurfaceDelegate {
 struct SwiftTermSurfaceTests {
     @Test func notificationParsing() {
         #expect(SwiftTermSurface.notification(from: 9, payload: Array("done".utf8))! == ("", "done"))
-        #expect(SwiftTermSurface.notification(from: 9, payload: Array("4;1;50".utf8)) == nil)
+        #expect(SwiftTermSurface.notification(from: 9, payload: Array("4;1;50".utf8)) == nil, "ConEmu progress")
+        #expect(SwiftTermSurface.notification(from: 9, payload: Array("9;/Users/me/repo".utf8)) == nil, "ConEmu cwd")
+        #expect(SwiftTermSurface.notification(from: 9, payload: Array("1;500".utf8)) == nil, "ConEmu sleep")
+        #expect(SwiftTermSurface.notification(from: 9, payload: Array("12".utf8)) == nil, "ConEmu prompt mark")
+        #expect(SwiftTermSurface.notification(from: 9, payload: []) == nil)
+        #expect(SwiftTermSurface.notification(from: 9, payload: Array("3 tests failed; see log".utf8))! == ("", "3 tests failed; see log"))
+        #expect(SwiftTermSurface.notification(from: 9, payload: Array("Claude Code: Done".utf8))! == ("", "Claude Code: Done"))
         #expect(SwiftTermSurface.notification(from: 777, payload: Array("notify;Build;ok;really".utf8))! == ("Build", "ok;really"))
         #expect(SwiftTermSurface.notification(from: 777, payload: Array("other;x".utf8)) == nil)
         #expect(SwiftTermSurface.notification(from: 2, payload: []) == nil)

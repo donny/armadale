@@ -73,6 +73,10 @@ final class SessionRegistry {
     @ObservationIgnored var onSessionRetired: ((SessionID) -> Void)?
     /// A create recorded the runtime version on a session: worth saving now.
     @ObservationIgnored var onRuntimeVersionRecorded: (() -> Void)?
+    /// Receives bells and notifications from every session (DESIGN §10);
+    /// the status glyphs show its attention. `nil` in tests that do not
+    /// need it.
+    @ObservationIgnored var attention: AttentionCenter?
     /// Sessions recorded by an earlier run of the app. They are attached to,
     /// never created: a session that is gone must show as ended, not be
     /// silently replaced by a fresh shell.
@@ -427,6 +431,18 @@ final class SessionRegistry {
         SessionStatus.summary(of: sessionIDs.map { status(of: $0) })
     }
 
+    /// What a session's glyph shows: its status, or attention
+    /// (``SessionStatus/withAttention(_:)``).
+    func glyphStatus(of sessionID: SessionID) -> SessionStatus {
+        status(of: sessionID).withAttention(attention?.needsAttention(sessionID) ?? false)
+    }
+
+    /// The glyph of several sessions (a tab's panes), by
+    /// ``SessionStatus/precedence``.
+    func glyphStatus(of sessionIDs: [SessionID]) -> SessionStatus {
+        SessionStatus.summary(of: sessionIDs.map { glyphStatus(of: $0) })
+    }
+
     /// Whether closing these sessions needs a confirmation (``CloseRisk``).
     func closeRisk(of sessionIDs: [SessionID]) -> CloseRisk {
         CloseRisk.assess(sessionIDs.map { id in
@@ -639,9 +655,14 @@ extension SessionRegistry: SessionControllerDelegate {
     }
 
     func sessionControllerDidRingBell(_ controller: SessionController) {
-        if !NSApp.isActive {
+        attention?.signal(.bell, from: controller.session.id)
+        if NSApp?.isActive == false {
             NSApp.requestUserAttention(.informationalRequest)
         }
+    }
+
+    func sessionController(_ controller: SessionController, didReceiveNotification title: String, body: String) {
+        attention?.signal(.notification(title: title, body: body), from: controller.session.id)
     }
 
     func sessionController(_ controller: SessionController, didActivateLink link: String) {

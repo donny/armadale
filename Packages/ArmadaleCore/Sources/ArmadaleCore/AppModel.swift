@@ -36,14 +36,23 @@ public final class AppModel {
     @ObservationIgnored public var defaultWorkingDirectory: String
     /// Profile used when an intent does not name one.
     @ObservationIgnored public var defaultProfileID: ProfileID = Profile.shell.id
+    /// Called synchronously, inside the intent, with the sessions that just
+    /// left the model (closed, or retired by a respawn), so state kept per
+    /// session elsewhere (attention, the Dock badge) never outlives them.
+    @ObservationIgnored public var onSessionsRemoved: ((Set<SessionID>) -> Void)?
 
     /// Creates a model from persisted state. Built-in profiles missing from
-    /// `state` are added back so they can always be resolved.
+    /// `state` are added back so they can always be resolved, and saved
+    /// built-ins take what they run (kind, program, arguments, environment)
+    /// from this version of Armadale, keeping only their saved name and
+    /// icon: those are the only parts of a built-in the user can change, so
+    /// a newer Armadale's launch (step 7: the agents' notification
+    /// arguments) reaches profiles saved by an older one.
     public init(state: PersistedState = .empty, defaultWorkingDirectory: String = NSHomeDirectory()) {
         self.workspaces = state.workspaces
         self.sessions = state.sessions
         self.hosts = state.hosts
-        var profiles = state.profiles
+        var profiles = state.profiles.map(Profile.refreshingBuiltIn)
         for builtIn in Profile.builtIns where !profiles.contains(where: { $0.id == builtIn.id }) {
             profiles.append(builtIn)
         }
@@ -119,6 +128,51 @@ public final class AppModel {
         guard let path = path(ofTab: id) else { return [] }
         let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
         return tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
+    }
+
+    /// Where `session` is shown: the first pane bound to it, with its tab,
+    /// tab group and workspace; `nil` if no pane shows it (closed, retired).
+    public func place(of session: SessionID) -> SessionPlace? {
+        for workspace in workspaces {
+            for group in workspace.tabGroups {
+                for tab in group.tabs {
+                    if let pane = tab.layout.leaves().first(where: { tab.pane($0)?.sessionID == session }) {
+                        return SessionPlace(workspace: workspace.id, tabGroup: group.id, tab: tab.id, pane: pane)
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The session of the focused pane of `workspace`'s selected tab: the
+    /// one its window shows with keyboard focus.
+    public func focusedSessionID(in workspace: WorkspaceID) -> SessionID? {
+        guard let tab = selectedTab(in: workspace) else { return nil }
+        return tab.pane(tab.focusedPaneID)?.sessionID
+    }
+
+    /// Every pane's session in sidebar order (workspaces, tab groups, tabs,
+    /// then each tab's panes in layout order), without repeats.
+    public var sessionOrder: [SessionID] {
+        var seen: Set<SessionID> = []
+        var order: [SessionID] = []
+        for workspace in workspaces {
+            for group in workspace.tabGroups {
+                for tab in group.tabs {
+                    for pane in tab.layout.leaves() {
+                        if let id = tab.pane(pane)?.sessionID, seen.insert(id).inserted { order.append(id) }
+                    }
+                }
+            }
+        }
+        return order
+    }
+
+    /// The sessions of every pane in a tab group, in order.
+    public func sessionIDs(ofTabGroup id: TabGroupID) -> [SessionID] {
+        guard let group = tabGroup(id) else { return [] }
+        return group.tabs.flatMap { tab in tab.layout.leaves().compactMap { tab.pane($0)?.sessionID } }
     }
 
     /// The title shown for `tab`: its custom title, else the focused
@@ -524,6 +578,7 @@ public final class AppModel {
               !sessions.contains(where: { $0.id == new.id })
         else { return }
         sessions[index] = new
+        onSessionsRemoved?([old])
         for w in workspaces.indices {
             for g in workspaces[w].tabGroups.indices {
                 for t in workspaces[w].tabGroups[g].tabs.indices {
@@ -558,7 +613,8 @@ public final class AppModel {
         let source = profiles[index]
         let copy = Profile(
             name: uniqueProfileName("\(source.name) Copy"), kind: source.kind, program: source.program,
-            arguments: source.arguments, environment: source.environment, icon: source.icon)
+            arguments: source.arguments, environment: source.environment, icon: source.icon,
+            attentionIntegration: source.attentionIntegration)
         profiles.insert(copy, at: index + 1)
         didChange()
         return copy.id
@@ -569,7 +625,8 @@ public final class AppModel {
     /// program `nil` (the login shell), and environment entries whose names
     /// are not allowed (``Profile/environmentNameProblem(_:)``: empty,
     /// containing `=`, reserved) are dropped. For a built-in profile only the name and icon are
-    /// taken; its kind, program, arguments and environment stay as shipped.
+    /// taken (and the attention toggle, ``Profile/attentionIntegration``);
+    /// its kind, program, arguments and environment stay as shipped.
     /// Sessions already created keep their launch until they are respawned.
     public func updateProfile(_ profile: Profile) {
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
@@ -578,6 +635,7 @@ public final class AppModel {
         let icon = profile.icon.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.name = name.isEmpty ? "Untitled" : name
         updated.icon = icon.isEmpty ? "terminal" : icon
+        updated.attentionIntegration = profile.attentionIntegration
         if !updated.isBuiltIn {
             updated.kind = profile.kind
             let program = profile.program?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -808,6 +866,7 @@ public final class AppModel {
 
     private func removeSessions(_ ids: Set<SessionID>) {
         sessions.removeAll { ids.contains($0.id) }
+        if !ids.isEmpty { onSessionsRemoved?(ids) }
     }
 
     private func makeSession(profile profileID: ProfileID, location: Location, workingDirectory: String?) -> Session {

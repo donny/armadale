@@ -12,14 +12,33 @@ enum SessionStatus: Sendable, Hashable {
     case disconnected
     /// The persistent runtime is unavailable in this run.
     case unavailable
+    /// It rang the bell or posted a notification while nobody was looking
+    /// (DESIGN §10). Only ever shown: ``withAttention(_:)`` makes it from
+    /// one of the others, and close confirmation never sees it.
+    case attention
 
-    /// The summary of several sessions (a tab's panes): a problem wins,
-    /// then running, then pending; ended only if every one has ended.
+    /// Precedence, most important first (DESIGN §1): a problem, then
+    /// attention, then running, then pending; ended only if every one has
+    /// ended.
+    static let precedence: [SessionStatus] = [.disconnected, .unavailable, .attention, .running, .pending, .ended]
+
+    /// The summary of several sessions (a tab's panes): the most important
+    /// status any of them has (``precedence``).
     static func summary(of statuses: [SessionStatus]) -> SessionStatus {
-        for candidate in [SessionStatus.disconnected, .unavailable, .running, .pending] where statuses.contains(candidate) {
+        for candidate in precedence where statuses.contains(candidate) {
             return candidate
         }
         return .ended
+    }
+
+    /// What a session needing attention shows: attention, unless it is
+    /// disconnected or unavailable, which matter more (it may be gone).
+    func withAttention(_ needsAttention: Bool) -> SessionStatus {
+        guard needsAttention else { return self }
+        switch self {
+        case .disconnected, .unavailable: return self
+        case .running, .pending, .ended, .attention: return .attention
+        }
     }
 }
 
@@ -48,7 +67,7 @@ struct CloseRisk: Equatable, Sendable {
     static func assess(_ items: [Item]) -> CloseRisk {
         let mayBeRunning = items.contains { item in
             switch item.status {
-            case .running, .disconnected: true
+            case .running, .disconnected, .attention: true
             case .pending: item.mayExist || item.isRunning
             case .ended, .unavailable: item.isRunning
             }
