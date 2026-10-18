@@ -53,7 +53,7 @@ struct EphemeralBackendTests {
     @Test func attachIsNeverPossible() async throws {
         let backend = try backend()
         let session = Session(profileID: Profile.shell.id, launch: LaunchSpec(), workingDirectory: "/")
-        await #expect(throws: BackendError.notPersistent) {
+        await #expect(throws: BackendError.notPersistent(reason: nil)) {
             _ = try await backend.attach(session, size: PTYSize(columns: 80, rows: 24))
         }
         await #expect(throws: BackendError.historyUnavailable(session.id)) {

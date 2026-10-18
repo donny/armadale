@@ -2,11 +2,11 @@ import Testing
 @testable import ArmadaleSessions
 
 /// How LocalZmxBackend reads a client's first output.
-@Suite("LocalZmxBackend.classify")
+@Suite("ZmxProtocol.classify")
 struct ClassifyTests {
     let name = "a-abcdefghijklmnop"
-    private func classify(_ text: String, attach: Bool = false) -> LocalZmxBackend.FirstOutput {
-        LocalZmxBackend.classify(Array(text.utf8), sessionName: name, wantsAttach: attach)
+    private func classify(_ text: String, attach: Bool = false) -> ZmxProtocol.FirstOutput {
+        ZmxProtocol.classify(Array(text.utf8), sessionName: name, wantsAttach: attach)
     }
 
     @Test func attachedToAnExistingSession() {
@@ -21,8 +21,8 @@ struct ClassifyTests {
         let created = Array("session \"\(name)\" created".utf8).count
         for cut in 0...bytes.count {
             let prefix = Array(bytes[..<cut])
-            let forAttach = LocalZmxBackend.classify(prefix, sessionName: name, wantsAttach: false)
-            let forCreate = LocalZmxBackend.classify(prefix, sessionName: name, wantsAttach: true)
+            let forAttach = ZmxProtocol.classify(prefix, sessionName: name, wantsAttach: false)
+            let forCreate = ZmxProtocol.classify(prefix, sessionName: name, wantsAttach: true)
             if cut < created {
                 // Not enough yet to tell: keep waiting.
                 #expect(forAttach == .undecided, "cut \(cut)")

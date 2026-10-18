@@ -179,9 +179,11 @@ final class PaneView: NSView {
     private func observeState() {
         let controller = controller
         stateObservation = Task { [weak self] in
-            let changes = Observations { PlaceholderState(state: controller.state, failure: controller.failure) }
+            let changes = Observations {
+                PlaceholderState(state: controller.state, failure: controller.failure, isReconnecting: controller.isReconnecting)
+            }
             for await change in changes {
-                self?.update(state: change.state, failure: change.failure)
+                self?.update(change)
             }
         }
     }
@@ -203,14 +205,16 @@ final class PaneView: NSView {
     private struct PlaceholderState: Equatable, Sendable {
         var state: SessionState
         var failure: String?
+        var isReconnecting: Bool
     }
 
-    private func update(state: SessionState, failure: String?) {
+    private func update(_ change: PlaceholderState) {
+        let failure = change.failure
         let kind: SessionPlaceholderView.Kind
-        switch state {
+        switch change.state {
         case .ended: kind = .ended
-        case .disconnected: kind = .disconnected
-        case .unavailable: kind = .unavailable
+        case .disconnected: kind = change.isReconnecting ? .reconnecting : .disconnected
+        case .unavailable(let reason): kind = reason == SessionRegistry.hostRemovedReason ? .hostRemoved : .unavailable
         case .detached, .attaching, .attached:
             placeholder?.removeFromSuperview()
             placeholder = nil
@@ -224,8 +228,8 @@ final class PaneView: NSView {
                 guard let self else { return }
                 switch kind {
                 case .ended: Task { await self.controller.respawn() }
-                case .disconnected: Task { await self.controller.reconnect() }
-                case .unavailable: self.onRetryPersistence?()
+                case .disconnected, .reconnecting: Task { await self.controller.reconnect() }
+                case .unavailable, .hostRemoved: self.onRetryPersistence?()
                 }
                 self.focusTerminal()
             },

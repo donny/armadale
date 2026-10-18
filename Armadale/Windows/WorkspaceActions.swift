@@ -53,6 +53,15 @@ final class WorkspaceActions {
         }
     }
 
+    /// File › New Tab on Host: a tab on `host` (in its home directory, with
+    /// the default profile) in `group`, or this workspace's selected group.
+    func newTab(onHost host: HostID, in group: TabGroupID? = nil) {
+        guard let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID ?? model.newTabGroup(in: workspaceID)
+        else { return }
+        model.newTab(in: group, onHost: host)
+        showIfElsewhere(model.workspaceID(containing: group))
+    }
+
     func newTabGroup(in workspace: WorkspaceID? = nil) {
         let target = workspace ?? workspaceID
         model.newTabGroup(in: target)

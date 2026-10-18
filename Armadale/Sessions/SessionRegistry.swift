@@ -4,6 +4,27 @@ import ArmadaleSessions
 import Observation
 import TerminalSurface
 
+/// How the app reaches SSH hosts (docs/DESIGN.md section 6): one shared
+/// transport, and what every host's ``RemoteZmxBackend`` is made with.
+struct RemoteSessionSupport {
+    var transport: any SSHTransport
+    /// `ctty-exec` for ssh clients; `nil` asks ``HelperLocator``.
+    var cttyExec: String?
+    var appVersion: String
+    /// How disconnected remote sessions are retried.
+    var reconnectSchedule = ReconnectSchedule()
+    /// The bundled zmx for a host's platform.
+    var binary: @Sendable (RemotePlatform) throws -> URL = { try HelperLocator.remoteZmx(for: $0) }
+
+    func makeBackend(for host: ArmadaleCore.Host) -> RemoteZmxBackend {
+        var configuration = RemoteZmxBackend.Configuration(host: host, transport: transport)
+        configuration.cttyExec = cttyExec
+        configuration.appVersion = appVersion
+        configuration.binary = binary
+        return RemoteZmxBackend(configuration: configuration)
+    }
+}
+
 /// What runs the app's (local) sessions.
 struct SessionRuntimeSetup {
     var backend: any PersistenceBackend
@@ -26,6 +47,14 @@ struct SessionRuntimeSetup {
 /// ended (restored, gone) or unavailable (restored persistent session while
 /// the persistent runtime could not be set up; left alone until
 /// ``retryPersistence()`` succeeds).
+///
+/// Remote sessions (step 6) use one ``RemoteZmxBackend`` per host, made
+/// when first needed and replaced when the host's settings change. Each
+/// host referenced by a restored session is probed in the background; until
+/// its answer arrives its sessions show as starting, and a host that does
+/// not answer leaves them disconnected (retried by schedule), never ended.
+/// A session whose host was removed is unavailable: left running, never
+/// killed.
 @MainActor
 @Observable
 final class SessionRegistry {
@@ -62,18 +91,35 @@ final class SessionRegistry {
     /// for good here (closed or retired by a respawn).
     @ObservationIgnored private var knownSessionIDs: Set<SessionID>
     @ObservationIgnored private var finishedSessionIDs: Set<SessionID> = []
+    /// Hosts of remote sessions as last observed: a session closed from
+    /// the model is gone from it by the time it is ended here.
+    @ObservationIgnored private var lastHosts: [SessionID: HostID] = [:]
     @ObservationIgnored private var pruneTask: Task<Void, Never>?
     @ObservationIgnored private var rendererTask: Task<Void, Never>?
+    @ObservationIgnored private var hostsTask: Task<Void, Never>?
+    /// SSH support; `nil` when remote sessions are off (tests).
+    @ObservationIgnored let remote: RemoteSessionSupport?
+    /// One backend per host, made on first use.
+    @ObservationIgnored private var remoteBackends: [HostID: RemoteZmxBackend] = [:]
+    /// Each host's live sessions, asked once per backend (in the background).
+    @ObservationIgnored private var remoteProbes: [HostID: Task<Set<SessionID>?, Never>] = [:]
+    /// The answers that have arrived (observed, like ``liveAtLaunch``); a
+    /// host whose probe failed has none.
+    private var remoteLive: [HostID: Set<SessionID>] = [:]
 
     static let persistenceWarningText = "Sessions won’t survive quitting"
 
     /// The backend new sessions use.
     var backend: any PersistenceBackend { runtime.backend }
 
-    init(model: AppModel, runtime: SessionRuntimeSetup, restoredSessionIDs: Set<SessionID>, settings: AppSettings) {
+    init(
+        model: AppModel, runtime: SessionRuntimeSetup, restoredSessionIDs: Set<SessionID>, settings: AppSettings,
+        remote: RemoteSessionSupport? = nil
+    ) {
         self.model = model
         self.settings = settings
         self.runtime = runtime
+        self.remote = remote
         self.policy = RestorePolicy(backendIsPersistent: runtime.isPersistent)
         self.restoredSessionIDs = restoredSessionIDs
         self.restoredPersistentIDs = Set(model.sessions.filter {
@@ -81,10 +127,18 @@ final class SessionRegistry {
         }.map(\.id))
         self.persistenceWarning = runtime.isPersistent ? nil : Self.persistenceWarningText
         self.knownSessionIDs = Set(model.sessions.map(\.id))
+        self.lastHosts = Dictionary(
+            model.sessions.compactMap { session in session.remoteHostID.map { (session.id, $0) } },
+            uniquingKeysWith: { first, _ in first })
         liveProbe = Self.probe(runtime.backend)
         awaitProbe()
         observeRemovedSessions()
         observeRenderer()
+        observeHosts()
+        // Hosts of restored sessions are asked in the background; nothing
+        // waits for them.
+        let hosts = Set(model.sessions.filter { restoredSessionIDs.contains($0.id) }.compactMap(\.remoteHostID))
+        for host in hosts.sorted() { _ = remoteProbe(for: host) }
     }
 
     private static func probe(_ backend: any PersistenceBackend) -> Task<Set<SessionID>?, Never> {
@@ -112,14 +166,22 @@ final class SessionRegistry {
         guard let session = model.session(sessionID) else { return nil }
         let settings = settings
         let factory = settings.surfaceFactory
+        let remoteBackend = session.remoteHostID.flatMap { remoteBackend(for: $0) }
+        var makeOutputFilter = runtime.makeOutputFilter
+        if session.remoteHostID != nil { makeOutputFilter = { ZmxOutputFilter() } }
         let controller = SessionController(
             session: session,
-            backend: runtime.backend,
+            backend: remoteBackend ?? runtime.backend,
             makeSurface: {
                 factory.makeSurface(appearance: settings.terminalAppearance(for: NSApp.effectiveAppearance))
             },
-            makeOutputFilter: runtime.makeOutputFilter)
+            makeOutputFilter: makeOutputFilter)
         controller.delegate = self
+        if session.remoteHostID != nil {
+            controller.reconnectSchedule = remote?.reconnectSchedule
+            // Never reached through the local backend.
+            if remoteBackend == nil { controller.markUnavailable(reason: unreachableHostReason(for: session)) }
+        }
         let pane = PaneView(controller: controller, settings: settings, rendererID: factory.id)
         pane.titleProvider = { [weak self, weak controller] in
             guard let self, let controller else { return "Shell" }
@@ -139,6 +201,10 @@ final class SessionRegistry {
     func startIfNeeded(_ sessionID: SessionID) {
         guard let controller = controller(for: sessionID), controller.state == .detached else { return }
         let restored = restoredSessionIDs.contains(sessionID)
+        if let host = controller.session.remoteHostID {
+            startRemote(controller, host: host, restored: restored)
+            return
+        }
         guard restored else {
             Task { await controller.start(.create) }
             return
@@ -151,6 +217,36 @@ final class SessionRegistry {
             case .create, .attach: await controller.start(.attach)
             case .markEnded: controller.markEnded()
             case .markUnavailable: controller.markUnavailable(reason: "Persistent sessions are unavailable.")
+            }
+        }
+    }
+
+    /// ``startIfNeeded(_:)`` for a session on `host`: created if new;
+    /// attached if restored and its host's probe did not find it gone. One
+    /// that was never persistent (a plain ssh shell) cannot be reattached.
+    private func startRemote(_ controller: SessionController, host: HostID, restored: Bool) {
+        guard remoteBackend(for: host) != nil else {
+            controller.markUnavailable(reason: unreachableHostReason(for: controller.session))
+            return
+        }
+        guard restored else {
+            Task { await controller.start(.create) }
+            return
+        }
+        guard RestorePolicy.isPersistent(controller.session) else {
+            controller.markEnded()
+            return
+        }
+        let probe = remoteProbe(for: host)
+        Task {
+            let live = await probe.value
+            guard controller.state == .detached else { return }
+            // An unanswered probe (host down) attaches anyway: the attach
+            // then fails as unreachable and is retried, never ended.
+            if let live, !live.contains(controller.session.id) {
+                controller.markEnded()
+            } else {
+                await controller.start(.attach)
             }
         }
     }
@@ -171,6 +267,16 @@ final class SessionRegistry {
                 if retires { self?.onSessionRetired?(sessionID) }
             }
         } else {
+            let session = model.session(sessionID)
+            if let host = session?.remoteHostID ?? lastHosts[sessionID] {
+                // A session on a removed host cannot be reached: left alone.
+                guard let backend = remoteBackend(for: host) else { return }
+                Task { [weak self] in
+                    try? await backend.kill(sessionID)
+                    self?.onSessionRetired?(sessionID)
+                }
+                return
+            }
             if wasRestored, !runtime.isPersistent, restoredPersistentIDs.contains(sessionID) {
                 return // unavailable: cannot be reached, never killed blindly
             }
@@ -196,7 +302,14 @@ final class SessionRegistry {
     /// and, if that works, attaches every unavailable session through it.
     /// Sessions created as plain PTY sessions meanwhile stay as they are.
     func retryPersistence() {
-        guard !runtime.isPersistent, let setup = setUpPersistentRuntime?(), setup.isPersistent else {
+        // Remote sessions only need their host back.
+        for pane in panes.values where pane.controller.state.isUnavailable {
+            guard let host = pane.controller.session.remoteHostID, let backend = remoteBackend(for: host) else { continue }
+            pane.controller.useBackend(backend, makeOutputFilter: { ZmxOutputFilter() })
+            startIfNeeded(pane.controller.session.id)
+        }
+        guard !runtime.isPersistent else { return }
+        guard let setup = setUpPersistentRuntime?(), setup.isPersistent else {
             NSLog("Armadale: persistent sessions are still unavailable")
             return
         }
@@ -205,7 +318,7 @@ final class SessionRegistry {
         persistenceWarning = nil
         liveProbe = Self.probe(setup.backend)
         awaitProbe()
-        for pane in panes.values where pane.controller.state.isUnavailable {
+        for pane in panes.values where pane.controller.state.isUnavailable && pane.controller.session.remoteHostID == nil {
             pane.controller.useBackend(setup.backend, makeOutputFilter: setup.makeOutputFilter)
             startIfNeeded(pane.controller.session.id)
         }
@@ -222,7 +335,13 @@ final class SessionRegistry {
             guard controller.state == .detached else { return false }
         }
         guard let session = model.session(sessionID) else { return false }
-        return policy.mayRespawnUnshown(session, restored: restoredSessionIDs.contains(sessionID), live: liveAtLaunch)
+        let restored = restoredSessionIDs.contains(sessionID)
+        if let host = session.remoteHostID {
+            guard restored, model.host(host) != nil else { return false }
+            guard RestorePolicy.isPersistent(session) else { return true }
+            return remoteLive[host].map { !$0.contains(sessionID) } ?? false
+        }
+        return policy.mayRespawnUnshown(session, restored: restored, live: liveAtLaunch)
     }
 
     /// Whether any pane of the workspace shows an ended session.
@@ -234,12 +353,40 @@ final class SessionRegistry {
     /// workspace's panes, including ones whose tab was not shown yet (the
     /// morning after a reboot). Disconnected and unavailable sessions are
     /// not ended and are left alone.
+    ///
+    /// Sessions on a host are only respawned once the host has answered a
+    /// fresh listing: one that cannot be reached right now is left alone
+    /// (its sessions may well be alive, and a respawn could not start
+    /// anyway).
     func respawnAllEnded(in workspaceID: WorkspaceID) {
+        var remoteCandidates: [HostID: [SessionID]] = [:]
         for sessionID in model.sessionIDs(in: workspaceID) where isEnded(sessionID) {
-            guard let controller = paneView(for: sessionID)?.controller else { continue }
-            controller.markEnded() // a pane never shown is still detached
-            Task { await controller.respawn() }
+            if let host = model.session(sessionID)?.remoteHostID {
+                remoteCandidates[host, default: []].append(sessionID)
+                continue
+            }
+            respawn(sessionID)
         }
+        for (host, candidates) in remoteCandidates {
+            guard let backend = remoteBackend(for: host) else { continue }
+            Task { [weak self] in
+                guard let live = try? await backend.liveSessions() else {
+                    NSLog("Armadale: not respawning sessions on an unreachable host")
+                    return
+                }
+                guard let self else { return }
+                self.remoteLive[host] = live
+                for sessionID in candidates where !live.contains(sessionID) && self.isEnded(sessionID) {
+                    self.respawn(sessionID)
+                }
+            }
+        }
+    }
+
+    private func respawn(_ sessionID: SessionID) {
+        guard let controller = paneView(for: sessionID)?.controller else { return }
+        controller.markEnded() // a pane never shown is still detached
+        Task { await controller.respawn() }
     }
 
     // MARK: Status
@@ -259,6 +406,14 @@ final class SessionRegistry {
         }
         guard let session = model.session(sessionID) else { return .ended }
         let restored = restoredSessionIDs.contains(sessionID)
+        if let host = session.remoteHostID {
+            guard model.host(host) != nil, remote != nil else { return .unavailable }
+            guard restored else { return .pending }
+            guard RestorePolicy.isPersistent(session) else { return .ended }
+            // Not probed yet, or the host did not answer: starting.
+            guard let live = remoteLive[host] else { return .pending }
+            return live.contains(sessionID) ? .running : .ended
+        }
         guard restored else { return .pending }
         switch policy.action(for: session, restored: true, live: liveAtLaunch) {
         case .markEnded: return .ended
@@ -280,6 +435,128 @@ final class SessionRegistry {
                 mayExist: restoredSessionIDs.contains(id) || panes[id].map { $0.controller.state != .detached } ?? false,
                 isRunning: panes[id]?.controller.isRunning ?? false)
         })
+    }
+
+    // MARK: Remote hosts
+
+    /// Why a remote session cannot be reached at all: its host was removed
+    /// (or remote sessions are off in this run).
+    static let hostRemovedReason = "The host this session runs on was removed from Settings › Hosts."
+
+    private func unreachableHostReason(for session: Session) -> String {
+        remote == nil ? "Remote sessions are not available in this run." : Self.hostRemovedReason
+    }
+
+    /// The backend for `host`, made on first use; `nil` if the host is gone
+    /// (or remote sessions are off).
+    func remoteBackend(for host: HostID) -> RemoteZmxBackend? {
+        guard let remote, let settings = model.host(host) else { return nil }
+        if let existing = remoteBackends[host], existing.host == settings { return existing }
+        let backend = remote.makeBackend(for: settings)
+        let versions = Dictionary(
+            model.sessions.filter { $0.remoteHostID == host }.compactMap { session in session.runtimeVersion.map { (session.id, $0) } },
+            uniquingKeysWith: { _, last in last })
+        Task { await backend.noteRuntimeVersions(versions) }
+        remoteBackends[host] = backend
+        return backend
+    }
+
+    /// The host's live-session probe, started on first use.
+    private func remoteProbe(for host: HostID) -> Task<Set<SessionID>?, Never> {
+        if let probe = remoteProbes[host] { return probe }
+        guard let backend = remoteBackend(for: host) else { return Task { nil } }
+        let probe = Self.probe(backend)
+        remoteProbes[host] = probe
+        Task { [weak self] in
+            if let live = await probe.value { self?.remoteLive[host] = live }
+        }
+        return probe
+    }
+
+    /// The hosts of some sessions (a tab's panes), in order, without repeats.
+    func hosts(of sessionIDs: [SessionID]) -> [ArmadaleCore.Host] {
+        var seen: Set<HostID> = []
+        return sessionIDs.compactMap { model.session($0)?.remoteHostID }.filter { seen.insert($0).inserted }.compactMap {
+            model.host($0)
+        }
+    }
+
+    /// Why one of these sessions will not survive quitting although it runs
+    /// on a host (it could not take the persistence helper), if any.
+    func persistenceNote(of sessionIDs: [SessionID]) -> String? {
+        sessionIDs.lazy.compactMap { self.panes[$0]?.controller.persistenceNote }.first
+    }
+
+    /// Settings › Hosts › Test Connection: what the host is, and whether
+    /// Armadale's helper is there. Throws when it cannot be reached.
+    func testConnection(to host: ArmadaleCore.Host) async throws -> String {
+        guard let remote else { throw BackendError.unreachable("Remote sessions are not available in this run.") }
+        do {
+            let probe = try await RemoteDeployer(host: host, transport: remote.transport).probe()
+            let system = probe.platform?.displayName ?? probe.uname
+            return probe.platform == nil
+                ? "Connected. \(host.displayName) runs \(system), which Armadale can’t keep sessions on."
+                : "Connected to \(system)." + (probe.isDeployed ? " The persistence helper is installed." : " The persistence helper will be installed when you first open a session there.")
+        } catch let failure as SSHFailure {
+            if case .needsInteraction = failure {
+                throw BackendError.unreachable(failure.message
+                    + " Armadale can’t answer prompts here: open a tab on this host to sign in, then test again.")
+            }
+            throw BackendError.unreachable(failure.message)
+        }
+    }
+
+    /// Settings › Hosts › Deploy Now.
+    func deployHelper(to host: ArmadaleCore.Host) async throws -> String {
+        guard let remote else { throw BackendError.unreachable("Remote sessions are not available in this run.") }
+        let deployer = RemoteDeployer(host: host, transport: remote.transport, binary: remote.binary)
+        do {
+            let deployment = try await deployer.deploy()
+            return "Installed the persistence helper " + (deployment.platform.map { "for \($0.displayName) " } ?? "")
+                + "in \(host.remoteDirectory) on \(host.displayName)."
+        } catch let failure as SSHFailure {
+            throw BackendError.unreachable(failure.message)
+        }
+    }
+
+    /// Host edits apply from each session's next connection: the host gets a
+    /// new backend and every controller of its sessions switches to it (a
+    /// live client keeps running; its next reattach, reconnect or retry
+    /// uses the new settings). A removed host's sessions are hung up and
+    /// become unavailable, with a backend that refuses everything, so
+    /// closing them later ends nothing on the host.
+    private func observeHosts() {
+        let model = model
+        hostsTask = Task { [weak self] in
+            for await hosts in Observations({ model.hosts }) {
+                guard let self else { return }
+                let current = Dictionary(hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                for (id, backend) in self.remoteBackends where current[id] != backend.host {
+                    self.remoteBackends[id] = nil
+                    self.remoteProbes[id] = nil
+                    self.remoteLive[id] = nil
+                    let replacement = self.remoteBackend(for: id)
+                    for pane in self.panes.values where pane.controller.session.remoteHostID == id {
+                        let controller = pane.controller
+                        if let replacement {
+                            controller.useBackend(replacement, makeOutputFilter: { ZmxOutputFilter() })
+                        } else {
+                            controller.detachAsUnavailable(
+                                reason: Self.hostRemovedReason, backend: UnavailableBackend(reason: Self.hostRemovedReason))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A workspace's window closed (or opened again): its remote sessions
+    /// stop (or resume) retrying lost connections by themselves.
+    func setWindowOpen(_ isOpen: Bool, for workspace: WorkspaceID) {
+        for id in model.sessionIDs(in: workspace) {
+            guard let controller = controller(for: id) else { continue }
+            if isOpen { controller.resumeAutomaticReconnect() } else { controller.pauseAutomaticReconnect() }
+        }
     }
 
     // MARK: Helpers
@@ -311,12 +588,15 @@ final class SessionRegistry {
     private func observeRemovedSessions() {
         let model = model
         pruneTask = Task { [weak self] in
-            for await ids in Observations({ Set(model.sessions.map(\.id)) }) {
+            for await sessions in Observations({ model.sessions.map { ($0.id, $0.remoteHostID) } }) {
                 guard let self else { return }
+                let ids = Set(sessions.map(\.0))
                 let removed = self.knownSessionIDs.subtracting(ids)
+                for (id, host) in sessions { if let host { self.lastHosts[id] = host } }
                 self.knownSessionIDs = ids
                 for id in removed {
                     self.close(id)
+                    self.lastHosts[id] = nil
                 }
             }
         }

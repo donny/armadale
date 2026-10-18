@@ -63,18 +63,43 @@ public enum HelperLocator {
     /// `Vendor/zmx/macos-<arch>/zmx` of the repository this file was built from.
     public static var vendoredZmx: URL {
         #if arch(arm64)
-        let platform = "macos-aarch64"
+        vendoredZmx(platform: "macos-aarch64")
         #else
-        let platform = "macos-x86_64"
+        vendoredZmx(platform: "macos-x86_64")
         #endif
+    }
+
+    /// `Vendor/zmx/<platform>/zmx` of the repository this file was built from.
+    public static func vendoredZmx(platform: String) -> URL {
         // Sources/ArmadaleSessions/HelperLocator.swift → repository root.
-        return URL(fileURLWithPath: #filePath)
+        URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // ArmadaleSessions
             .deletingLastPathComponent() // Sources
             .deletingLastPathComponent() // Packages/ArmadaleSessions
             .deletingLastPathComponent() // Packages
             .deletingLastPathComponent() // repository
             .appending(path: "Vendor/zmx/\(platform)/zmx")
+    }
+
+    /// The zmx binary Armadale deploys to a host of `platform`
+    /// (docs/DESIGN.md section 6), looked up in order:
+    /// 1. in the main bundle: `Contents/Resources/remote/zmx-<platform>` for
+    ///    Linux (data, copied there by scripts/embed-zmx.sh), the universal
+    ///    `Contents/Helpers/zmx` for macOS;
+    /// 2. `Vendor/zmx/<platform>/zmx` in the source tree (tests, and runs
+    ///    of a build without the bundled copies).
+    public static func remoteZmx(for platform: RemotePlatform, mainBundle: Bundle = .main) throws(NotFound) -> URL {
+        let bundled: URL = switch platform {
+        case .linuxAarch64, .linuxX86_64:
+            mainBundle.bundleURL.appending(path: "Contents/Resources/remote/zmx-\(platform.rawValue)")
+        case .macosAarch64, .macosX86_64:
+            mainBundle.bundleURL.appending(path: "Contents/Helpers/zmx")
+        }
+        let candidates = [bundled, vendoredZmx(platform: platform.rawValue)]
+        for candidate in candidates where FileManager.default.isReadableFile(atPath: candidate.path) {
+            return candidate
+        }
+        throw NotFound(name: "zmx for \(platform.rawValue)", searched: candidates.map(\.path))
     }
 
     static func locate(

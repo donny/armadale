@@ -196,6 +196,14 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+extension Session {
+    /// The host a remote session runs on; `nil` for a local one.
+    public var remoteHostID: HostID? {
+        if case .remote(let host) = location { return host }
+        return nil
+    }
+}
+
 /// An SSH target.
 public struct Host: Identifiable, Codable, Sendable, Hashable {
     public let id: HostID
@@ -205,8 +213,17 @@ public struct Host: Identifiable, Codable, Sendable, Hashable {
     public var sshDestination: String
     public var port: Int?
     public var identityFile: String?
-    /// Where Armadale keeps its helper and runtime files on the host.
+    /// An ssh configuration file passed as `ssh -F` instead of the user's
+    /// own `~/.ssh/config` (and the system one), e.g. the file
+    /// `limactl show-ssh --format=config` writes for a Lima VM. `nil` uses
+    /// the user's configuration.
+    public var sshConfigFile: String?
+    /// Where Armadale keeps its helper and runtime files on the host: an
+    /// absolute path, or one under the home directory (`~/…`).
     public var remoteDirectory: String
+
+    /// The default ``remoteDirectory``.
+    public static let defaultRemoteDirectory = "~/.armadale"
 
     public init(
         id: HostID = .generate(),
@@ -214,14 +231,60 @@ public struct Host: Identifiable, Codable, Sendable, Hashable {
         sshDestination: String,
         port: Int? = nil,
         identityFile: String? = nil,
-        remoteDirectory: String = "~/.armadale"
+        sshConfigFile: String? = nil,
+        remoteDirectory: String = Host.defaultRemoteDirectory
     ) {
         self.id = id
         self.name = name
         self.sshDestination = sshDestination
         self.port = port
         self.identityFile = identityFile
+        self.sshConfigFile = sshConfigFile
         self.remoteDirectory = remoteDirectory
+    }
+
+    /// The name shown for the host: its name, else its destination.
+    public var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? sshDestination : trimmed
+    }
+
+    /// Why `destination` cannot be used to reach a host, or `nil` if it
+    /// can: it must be non-empty, contain no whitespace or control
+    /// characters, and not start with `-` (ssh would read it as an option).
+    public static func destinationProblem(_ destination: String) -> String? {
+        if destination.isEmpty { return "Enter a destination, such as user@example.com or a name from your SSH configuration." }
+        if destination.hasPrefix("-") { return "A destination can’t start with “-”." }
+        if destination.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0) }) {
+            return "A destination can’t contain spaces."
+        }
+        return nil
+    }
+
+    /// Why `directory` cannot be the remote directory, or `nil` if it can.
+    /// Armadale creates it (private) and keeps everything there, so it must
+    /// be a folder of its own: `~/…` or an absolute path, at least two
+    /// levels deep (`~/.armadale`, `/opt/armadale`; never `~`, `/` or
+    /// `/opt`), without `.` or `..` components or control characters.
+    public static func remoteDirectoryProblem(_ directory: String) -> String? {
+        if directory.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
+            return "The folder can’t contain control characters."
+        }
+        let components: [Substring]
+        if directory.hasPrefix("~/") {
+            components = ["~"] + directory.dropFirst(2).split(separator: "/")
+        } else if directory.hasPrefix("/") {
+            components = directory.split(separator: "/")
+        } else {
+            return "Use a full path, or one in your home folder on the host (starting with “~/”)."
+        }
+        if components.contains(where: { $0 == "." || $0 == ".." }) {
+            return "The folder can’t contain “.” or “..”."
+        }
+        guard components.count >= 2 else {
+            return "Use a folder of Armadale’s own, such as ~/.armadale, not your home folder or a top-level folder."
+        }
+        return nil
     }
 }
 

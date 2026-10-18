@@ -209,6 +209,9 @@ private struct TabRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(isSelected ? .primary : .secondary)
+            HostBadge(
+                hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions),
+                showsName: true)
         }
     }
 

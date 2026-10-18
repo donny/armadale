@@ -40,7 +40,9 @@ public enum ExitResolution: Sendable, Hashable {
 /// Failures common to every ``PersistenceBackend``.
 public enum BackendError: Error, Sendable, Hashable, CustomStringConvertible {
     /// The backend cannot reattach: its sessions do not outlive the app.
-    case notPersistent
+    /// For a remote host, `reason` says why the host cannot keep sessions
+    /// (an unsupported system, a home directory that cannot be written).
+    case notPersistent(reason: String?)
     /// The session does not exist (any more).
     case noSuchSession(SessionID)
     /// The backend keeps no history for this session.
@@ -48,10 +50,21 @@ public enum BackendError: Error, Sendable, Hashable, CustomStringConvertible {
     /// The session runtime failed: a control command exited with an error
     /// or timed out, or a client could not be started.
     case runtimeFailure(String)
+    /// The session's host could not be reached (ssh could not connect, or
+    /// the connection was lost). The session may well still be running
+    /// there; nothing is known about it.
+    case unreachable(String)
+    /// The host refused the connection in a way retrying cannot fix: the
+    /// key was rejected, the host key changed, or signing in failed. The
+    /// session may be alive; the pane stays disconnected until the user
+    /// reconnects.
+    case authenticationFailed(String)
 
     public var description: String {
         switch self {
-        case .notPersistent: "Sessions of this kind do not survive quitting Armadale."
+        case .notPersistent(let reason?): reason
+        case .notPersistent(nil): "Sessions of this kind do not survive quitting Armadale."
+        case .unreachable(let message), .authenticationFailed(let message): message
         case .noSuchSession(let id): "Session \(id) does not exist."
         case .historyUnavailable(let id): "No history is kept for session \(id)."
         case .runtimeFailure(let message): message
@@ -110,11 +123,23 @@ public protocol ProcessHandle: AnyObject, Sendable {
     /// not report it (plain PTY processes, where backpressure works). The
     /// controller drops and reattaches a client whose footprint stays large.
     var clientFootprint: UInt64? { get }
+    /// Why this client's session will not outlive the app although its
+    /// backend is persistent (a remote host that could not take Armadale's
+    /// persistence helper, so the session is a plain ssh shell); `nil`
+    /// normally. Shown as a "not persistent" badge.
+    var persistenceNote: String? { get }
+    /// Set once the client has ended without ever connecting to its
+    /// session (an interactive sign-in that failed, was abandoned or timed
+    /// out): the controller then shows the reason and does not retry by
+    /// itself, instead of asking whether the session still exists.
+    var connectionFailure: String? { get }
 }
 
 extension ProcessHandle {
     public var runtimeVersion: String? { nil }
     public var clientFootprint: UInt64? { nil }
+    public var persistenceNote: String? { nil }
+    public var connectionFailure: String? { nil }
     public func hangUp() {
         Task { await terminate() }
     }

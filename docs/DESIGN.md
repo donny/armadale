@@ -157,6 +157,7 @@ struct Host: Identifiable, Codable, Sendable {   // SSH target
     var sshDestination: String             // user@host or ssh_config alias
     var port: Int?
     var identityFile: String?
+    var sshConfigFile: String?             // step 6: `ssh -F` instead of ~/.ssh/config
     var remoteDirectory: String            // default "~/.armadale"
 }
 
@@ -217,7 +218,13 @@ zoomed), `equalizePanes`, `toggleZoom` (only with more than one pane) and
 that shape). Step 5 added the profile intents `newProfile`,
 `duplicateProfile`, `updateProfile` (cleans up blank names, icons and
 programs; for built-ins takes only name and icon) and `deleteProfile`
-(refused for built-ins), plus `launchForRespawn(of:)`. The default
+(refused for built-ins), plus `launchForRespawn(of:)`. Step 6 added the
+host intents `addHost` (a blank name becomes a unique "New Host"),
+`updateHost` (trims everything; a port outside 1…65535 becomes the ssh
+default; a blank or relative remote directory becomes `~/.armadale`),
+`removeHost` (its sessions stay, see section 6), `sessionIDs(onHost:)` and
+`newTab(in:onHost:profile:)` (home directory on the host, default
+profile). The default
 profile and directory are not model state: they are preferences
 (section 8) that the app copies into `defaultProfileID` /
 `defaultWorkingDirectory`. Every mutation goes through it, which is what makes the
@@ -332,7 +339,11 @@ opened, otherwise the program's first output (a shell prompt, an agent's
 first screen) is laid out for the wrong width. Failures common to all
 backends are `BackendError` values (`notPersistent`, `noSuchSession`,
 `historyUnavailable`, and `runtimeFailure` for control commands that fail or
-time out and clients that cannot start).
+time out and clients that cannot start). Step 6 gave `notPersistent` a
+`reason` (why a host cannot keep sessions) and added `unreachable` (ssh
+could not connect or lost the connection: nothing is known about the
+session). `ProcessHandle.persistenceNote` says why a session will not
+survive although its backend is persistent (the plain-ssh fallback).
 
 Implementations:
 
@@ -473,9 +484,9 @@ replay and is accepted.
   program left on, such as the alternate screen or mouse reporting, do not
   carry over.
 - **Disconnected**, remote (step 6): the ssh transport died. Same
-  placeholder; Armadale also retries in the background with exponential
-  backoff (1 s → 30 s) until the host answers, then re-attaches
-  automatically.
+  placeholder, titled Reconnecting…; Armadale also retries in the
+  background with exponential backoff (1 s → 30 s, for up to 5 minutes)
+  until the host answers, then re-attaches automatically (section 6).
 - **Workspace › Respawn All Ended** exists for the morning‑after‑reboot case
   where every session is gone.
 
@@ -591,32 +602,186 @@ without touching sessions or layout.
 ## 6. Remote hosts
 
 A session with `.remote(host)` location uses the same zmx model on the host.
+*Implementation (step 6):* `SSHTransport`, `RemoteDeployer` and
+`RemoteZmxBackend` in `ArmadaleSessions`; the zmx session protocol of
+section 4 (create's double attach, attach-only through the sentinel,
+`ls --short`, `kill`) lives in one `ZmxSessionDriver`, parameterised by a
+`ZmxEndpoint` ("how to spawn a client", "how to run a control command"),
+which `LocalZmxBackend` and `RemoteZmxBackend` both use.
 
-- **Deployment**: on first use Armadale runs `ssh host 'uname -sm'`, picks the
-  matching bundled binary, and streams it to
-  `~/.armadale/bin/zmx-<ver>` on the host (`ssh host 'mkdir -p … && cat >
-  … && chmod +x …'`). Remote `ZMX_DIR` is `~/.armadale/run`. Version is
-  checked on each connection; a mismatch triggers a redeploy. If the host
-  cannot run it (unsupported OS, read‑only home), the session falls back to
-  `EphemeralBackend` over ssh and the pane shows a "not persistent" badge.
-- **Interactive attach**: `ssh -tt <dest> -- env ZMX_DIR=~/.armadale/run
-  ZMX_NO_DETACH_KEY=1 ~/.armadale/bin/zmx-<ver> attach a-<id> <program>`
-  runs inside the pane's PTY, spawned through the same `ctty-exec`
-  trampoline as local sessions because `ssh -t` also relies on SIGWINCH to
-  forward resizes. Host‑key and passphrase prompts therefore appear in the
-  pane itself, which is the simplest and most honest UX. The attach‑only and
-  double‑attach‑on‑create rules from section 4 apply unchanged.
-- **Control commands** (`ls`, `kill`, `exists`, deploy) run through the same
-  destination with OpenSSH multiplexing:
-  `-o ControlMaster=auto -o ControlPersist=600 -o ControlPath=<App
-  Support>/ssh/%C`, so a workspace with twenty remote panes keeps one TCP
-  connection per host.
-- **Working directory** for remote sessions is a path on the host, validated
-  with `ssh host test -d` before creation.
-- Hosts are managed in Settings › Hosts and in the new‑session sheet. SSH
-  config aliases are honoured, so most users only type a name.
-
----
+- **Transport** (`SSHTransport` protocol; `OpenSSHTransport` runs the
+  system's `/usr/bin/ssh`, tests use scripted and loopback fakes). Every
+  invocation for a host gets `-o ControlMaster=auto -o ControlPersist=600
+  -o ControlPath="<dir>/<token>" -o ConnectTimeout=10
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o LogLevel=ERROR`,
+  plus `-F <config>`, `-p <port>`, `-i <identity>` when the host sets them,
+  then `--` and the destination (so a destination can never be read as an
+  option; one starting with `-` is refused anyway). A destination may be an
+  `ssh_config` alias; the user's own config, keys and agent apply
+  (`SSH_AUTH_SOCK` is kept, `ZMX_*` and the variables scrubbed for
+  sessions are removed from ssh's environment, `TERM=xterm-256color`).
+  `Host.sshConfigFile` replaces the user's config (`ssh -F`), e.g. the file
+  `limactl show-ssh --format=config` writes for a Lima VM.
+  `LogLevel=ERROR` matters for interactive clients: without it ssh prints
+  "Shared connection to … closed." on the pane's terminal after zmx's
+  final reset sequence, which the output filter would then no longer find.
+- **ControlPath** lives in the runtime directory: `<state dir>/run/ssh/`,
+  or `/tmp/armadale-<uid>/ssh/` when that is too long. ssh binds a new
+  master's socket at the ControlPath plus `.` and 16 random characters
+  before renaming it, so the path must stay ≤ 86 bytes. ssh's own `%C`
+  (40 hex characters) does not fit under the default state directory
+  (`~/Library/Application Support/Armadale/run/ssh` is 57 bytes for a
+  five-letter user name), so the socket is named by a 16-hex-character
+  token: SHA-256 of destination, port, identity and config file. Editing
+  any of them therefore never reuses another connection. (*Deviation:* the
+  original design had `<App Support>/ssh/%C`, which overflows `sun_path`.)
+  With the default state directory the ControlPath is 74 bytes.
+- **Control commands** (`test -x`, `uname`, `ls`, `kill`, uploads) run
+  `ssh -T -o BatchMode=yes …` through `CommandRunner` (stdin `/dev/null`, or
+  a pipe for uploads with SIGPIPE off; stdout and stderr captured; 30 s
+  limit, 180 s for uploads; a timeout counts as unreachable). The first one
+  leaves a master behind, so later commands and the interactive clients
+  multiplex over one connection per host (measured against a Lima VM:
+  190 ms for the first command, 6 ms after). Every remote command is a
+  single-line `/bin/sh` script (`exec /bin/sh -c '<script>'`, statements
+  joined with `;`), so it means the same whatever the user's login shell
+  is: sshd hands the command line to that shell, and csh-family shells
+  reject a newline inside quotes (a test parses every command line with
+  `/bin/tcsh`, `/bin/sh` and `/bin/zsh`, and the loopback suite runs a whole
+  session with tcsh as the login shell). `~/…` becomes `"$HOME"/…`. ssh's
+  own failures are exit status 255: `SSHFailure` tells *unreachable*
+  (refused, timed out, lost) from *needs interaction* (an unknown host key,
+  a rejected or locked key) and *refused* (a changed host key, too many
+  authentication failures).
+- **Deployment** (`RemoteDeployer`, one per host). Before every create or
+  attach, one round trip over the shared connection: `uname -sm` and the
+  size (`wc -c`) of `<dir>/bin/zmx-<ver>` if it is an executable file. If it
+  is missing or not exactly the size of the bundled binary for that
+  platform (a truncated or foreign copy), it is deployed again. Deploying:
+  `uname -sm` and `$HOME`; the platform is
+  mapped to `linux-aarch64`, `linux-x86_64`, `macos-aarch64` or
+  `macos-x86_64` (`Linux arm64` and `amd64` spellings accepted); the bundled
+  binary is `Contents/Resources/remote/zmx-<platform>` for Linux and the
+  universal `Contents/Helpers/zmx` for macOS (`HelperLocator.remoteZmx`,
+  falling back to `Vendor/zmx/<platform>/zmx` in the source tree); it is
+  uploaded into a temporary file next to its final path (a rename puts it
+  in place: Linux refuses to write over a running binary), and the
+  **temporary file is checked before the rename**: its size must equal the
+  bundled binary's (`[ $(wc -c < tmp) -eq N ]`), and where the host has
+  `sha256sum` or `shasum -a 256` its SHA-256 must equal the bundled
+  binary's. Otherwise it is removed and the upload fails (exit 5 or 6;
+  "damaged on its way", retried at the next connection). This matters
+  because a dropped link (or the 180 s upload limit killing ssh) gives the
+  remote `cat` an early EOF and it succeeds: before this check a 3 MB
+  prefix could be installed, pass `test -x` and even print its version.
+  "Integrity" here means *matches the bundled binary*, which the build
+  verified against `scripts/zmx.lock`. A host with neither hash tool gets a
+  size check only; the upload prints a marker, `RemoteDeployment.hashVerified`
+  is false and the app logs it. After the rename the helper must run
+  (`zmx version` prints `zmx\t\t0.8.1` and its socket and log
+  directories); one that does not is removed (the helper's own output goes
+  to the log, not to the user). Directories are created with `umask 077`
+  (so Armadale's own folders are 0700); no existing directory's
+  permissions are ever changed. Concurrent checks share one deploy. The
+  default directory is `~/.armadale` (`Host.remoteDirectory`): it must be a
+  folder of Armadale's own, `~/…` or absolute and at least two levels deep,
+  without `.` or `..` (`~`, `/` and `/opt` are refused, by the model and
+  again by the deployer). Old versions on the host are not removed in v1.
+- **Not persistent**: another system or architecture, a directory that
+  cannot be written, a helper that cannot run there, a home so long that
+  `<dir>/run/a-<id>` would not fit a socket path, or a bundle without that
+  platform's binary throw `BackendError.notPersistent(reason:)`. A *create*
+  then falls back to a plain `ssh -tt <host> -- <session script>` in the
+  pane (not `EphemeralBackend`, which is local): the handle carries a
+  `persistenceNote`, the tab's host badge turns orange with that note, and
+  the window subtitle shows the existing "Sessions won’t survive quitting"
+  warning. Such a session records no runtime version, so after a relaunch it
+  is shown as ended at once.
+- **Interactive attach**: `ssh -tt … -- <dest> "exec /bin/sh -c 'unset
+  ZMX_SESSION ZMX_SESSION_PREFIX; exec env ZMX_DIR=<dir>/run
+  ZMX_NO_DETACH_KEY=1 <dir>/bin/zmx-<ver> attach a-<id> <program…>'"`,
+  spawned on the pane's PTY through `ctty-exec` with argv[0] `ssh`, exactly
+  like a local client, so resizes reach it and prompts appear in the pane.
+  The attach-only sentinel is `true` (from the host's `PATH`). The program a
+  create starts is `/bin/sh -c <script>`: unset `ZMX_*`, `cd` to the
+  working directory (checked with `test -d` before the create; home if it
+  is missing), export `TERM`, `COLORTERM`, `TERM_PROGRAM(_VERSION)`,
+  `ARMADALE_SESSION_ID`, `LANG=C.UTF-8` if unset and the profile's
+  variables, then `exec "$SHELL" -l`, or `exec "$SHELL" -l -c 'exec
+  <program> <args…>'` for a profile with a program, as locally (`-c`
+  without `-l` for csh and tcsh). Output over
+  ssh may start with text that is not zmx's (an ssh warning, a noisy remote
+  rc file), so the remote classification skips whole lines: zmx's output is
+  only looked for at the start of the stream or of a line, and an attach is
+  only zmx's full `ESC[2J ESC[H` there (verified: zmx writes exactly that,
+  after `session "…" created\r\n` for a new session), never an `ESC[2J` in
+  the middle of other text. User-visible failures never quote the helper's
+  own output (which names its paths); it goes to the log. The flood mitigation of section 7 does not apply:
+  the local process is ssh, which does not grow; the backlog builds up in
+  the zmx client on the host, out of reach.
+- **Prompts**: when a BatchMode control command fails for a reason a
+  prompt might fix (an unknown host key; "Permission denied", which is also
+  what a key locked by a passphrase gives), the backend starts an
+  interactive `ssh -tt … -- <dest> exit 0` on the pane's PTY and watches
+  its output for up to 10 s. Only a real question (`password:`,
+  `passphrase`, "Are you sure you want to continue connecting", `(yes/no`,
+  a verification code) starts a sign-in: the backend returns a
+  `SignInClient`, the user answers in the pane, the sign-in becomes the
+  master and stays up (`ControlPersist`), and the session is deployed,
+  created or attached over it, with the same handle carrying on as that
+  client (output relayed on demand, so backpressure still holds). The user
+  has 120 s; then the sign-in is ended. A sign-in that fails (a wrong
+  password), times out or is abandoned ends the handle with a
+  `connectionFailure`: the controller shows ssh's last line as
+  Disconnected, does not ask whether the session exists and does **not**
+  retry by itself. An interactive ssh that asks nothing (a rejected key)
+  and a refusal (a changed host key: no interactive ssh is even started)
+  are `BackendError.authenticationFailed`: Disconnected with ssh's message,
+  Reconnect Now, no automatic retries. Test Connection in Settings cannot
+  answer prompts and says to open a tab.
+- **Exit resolution** is the local rule: when a client goes away the
+  backend asks `exists` (an `ls` over ssh). Only a host that answers
+  without the session ends it; an unreachable host means `.detached`.
+- **Disconnected and reconnect.** A create or attach that cannot reach the
+  host throws `BackendError.unreachable(message)`; the controller shows
+  Disconnected with ssh's message and does not ask `exists` (it would
+  only time out again). Remote controllers have a `ReconnectSchedule`
+  (pure, tested): retries after 1 s, 2 s, 4 s, 8 s, 16 s and then every
+  30 s, no attempt starting more than 5 minutes after the loss (13
+  attempts). Retries are quiet: the pane keeps the placeholder, titled
+  **Reconnecting…** with a spinner, ssh's message, **Close Pane** and
+  **Reconnect Now**; the glyph stays ⚠ disconnected. Reconnect Now stops
+  the loop and tries at once, after waiting for an attempt that is still
+  under way (never two connects at once); if it fails as unreachable the
+  schedule starts over. Close and Respawn stop it, and so does closing the
+  pane's window (retries resume when it is opened again). Authentication
+  failures are never retried by themselves (above). An ssh client that exits
+  255 before zmx showed anything is unreachable, not a runtime failure.
+  When the budget runs out the pane is plain
+  Disconnected with Reconnect. A create that never reached the host is
+  retried as a create (nothing was created); everything else as an attach.
+  A dropped ssh client with the host still reachable (e.g. `pkill -f 'ssh
+  -tt'`) is resolved as detached and reattached at once, to the same shell.
+- **Sessions on hosts in the app** (`SessionRegistry`): one
+  `RemoteZmxBackend` per host, made on first use and replaced when the
+  host's settings change. Every controller of that host switches to the new
+  one at once; an attached client keeps its working connection, and its
+  next reattach, Reconnect or retry uses the new settings. At launch each host referenced by a restored session is probed
+  (`ls --short`) in the background; until it answers its sessions show as
+  starting, never ended, and attaching them waits for that answer only. A
+  host that does not answer leaves them attaching → disconnected →
+  retried. Respawn All Ended lists each host again first and leaves every
+  session on a host that does not answer alone. Remote orphans are not
+  reclaimed (several Macs may share a host's `~/.armadale`). Closing a pane
+  on an unreachable host kills nothing on the host; the session stays
+  there until its program exits.
+- **Removed hosts**: a removed host's sessions stay in their panes and are
+  unavailable, with a "Host removed" placeholder (Close Pane only; closing
+  asks first and leaves the session running on the host), never killed.
+  An attached pane is hung up at once (the session keeps running on the
+  host) and its controller gets an `UnavailableBackend`, which refuses to
+  create or attach and whose kill does nothing, so a later close ends
+  nothing on the host.
 
 ## 7. Process plumbing (`ArmadaleSessions`)
 
@@ -719,7 +884,9 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   `@unchecked Sendable`. `forkpty` stays selectable as a fallback.
 - One‑shot commands (`zmx ls`, `kill`, ssh control) go through an
   `actor CommandRunner` built on `Process` with async `run() -> (status,
-  stdout, stderr)` and a timeout.
+  stdout, stderr)` and a timeout. Since step 6 it can feed stdin from a
+  pipe (uploads), with `F_SETNOSIGPIPE` so a command that exits early
+  cannot kill the app.
 - `SessionController` (`@MainActor`) is the per‑session glue: owns the
   surface, the `ProcessHandle`, the state machine, the attention flag, and
   forwards title / cwd / bell to `AppModel` through a delegate. An optional
@@ -886,7 +1053,31 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     program, arguments one per line, environment table); edits go through
     the `AppModel` intents. File › New Tab with Profile and the tab bar's
     "+" context menu open a tab with any profile.
-  - Hosts is a placeholder until step 6.
+  - **Hosts** (step 6, `Settings/HostsSettingsView.swift`): a list with
+    add / remove and an editor like Profiles: name, destination (`user@host`
+    or an alias; a blank or `-`-prefixed one is flagged), port, identity
+    file and SSH config file (each with Choose…, an open panel showing
+    hidden files from `~/.ssh`), remote folder. **Test Connection** runs
+    `uname -sm` through the transport and reports the platform and whether
+    the persistence helper is installed (or ssh's error); **Deploy Now**
+    uploads and verifies it even if it is there. Edits are saved when a
+    field's editing ends (focus leaves it, Return, Choose…), before Test
+    Connection or Deploy Now, and when the tab closes, never per keystroke,
+    so a half-typed destination never reaches the sessions. Removing a host that
+    sessions run on asks first; those sessions become unavailable, never
+    killed. Nothing user-visible names the runtime: it is "the persistence
+    helper". Hosts are saved with the layout (`state.json`).
+  - **New sessions on hosts**: File › New Tab on Host (filled when it
+    opens: one item per host, "No Hosts", Add Host… which opens Settings ›
+    Hosts) and a "On Host" section in the tab bar "+" context menu create a
+    remote tab in the selected tab group with the default profile in the
+    host's home directory (`~`). Splitting a remote pane stays on its host.
+    Remote tabs carry a small host badge (a network glyph; with the host's
+    name in the sidebar; orange when not persistent). The window subtitle
+    is unchanged by remote tabs, except that it shows the existing
+    "Sessions won’t survive quitting" warning while one of the workspace's
+    sessions is a non-persistent fallback (section 6). Remote sessions
+    restore on relaunch like local ones.
   - Shortcuts is generated from the menu bar `MainMenu` builds
     (`ShortcutTable`): every item with a key equivalent, hidden alternates
     folded into their visible item, numbered runs collapsed
@@ -1030,9 +1221,10 @@ armadale/
 │   ├── App/                         main.swift, AppDelegate, menus
 │   ├── Windows/                     WorkspaceWindowController, WorkspaceActions, ContentViewController
 │   ├── Sidebar/                     SidebarView (SwiftUI)
-│   ├── Tabs/                        TabBarView, StatusGlyph (SwiftUI)
+│   ├── Tabs/                        TabBarView, StatusGlyph, HostBadge (SwiftUI)
 │   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
-│   ├── Sessions/                    SessionRegistry (controllers per session), SessionStatus / CloseRisk
+│   ├── Sessions/                    SessionRegistry (controllers per session, a backend per host,
+│   │                                RemoteSessionSupport), SessionStatus / CloseRisk
 │   ├── Settings/                    SettingsWindowController, Preferences, ShortcutTable, SwiftUI tabs
 │   │                                (General, Appearance, Profiles, Hosts, Shortcuts)
 │   ├── Resources/                   Assets.xcassets, Info.plist, Armadale.entitlements
@@ -1042,8 +1234,9 @@ armadale/
 ├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/
 │   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations   (no AppKit)
-│   ├── ArmadaleSessions/            PTYProcess, CommandRunner, backends, SSHTransport, SessionController,
-│   │                                LaunchResolver, HelperLocator; Sources/ctty-exec (helper source)
+│   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
+│   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
+│   │                                SessionController, LaunchResolver, HelperLocator; Sources/ctty-exec
 │   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
@@ -1063,7 +1256,14 @@ armadale/
   window is shown, no state file is touched, and an inert backend starts no
   process.
 - `ArmadaleSessions` has integration tests that spawn a real local zmx
-  session, kill it, and assert the state machine.
+  session, kill it, and assert the state machine. Since step 6 the remote
+  backend is tested three ways: with a scripted `FakeTransport` (command
+  lines, parsing, 255 → unreachable, exit resolution, deployment), with a
+  `LoopbackTransport` that runs "remote" commands on this Mac with a
+  private `HOME`, so deployment, create/attach, reconnecting to the same
+  shell, the plain-ssh fallback and the interactive sign-in run against the
+  real zmx without a network, and against a real host when
+  `ARMADALE_TEST_SSH_HOST` is set (README).
 - No hosted CI: GitHub Actions is disabled for this repository. The full
   build and test command is run locally before every commit (see README).
 - Signing: hardened runtime, no sandbox entitlement, `zmx` helper signed as
@@ -1129,7 +1329,29 @@ armadale/
   directory lives; handled with the fallback above. zmx does not resolve
   symlinks, so a symlinked short directory is an alternative if ever needed.
 - **Remote deployment trust.** Armadale writes a binary into the user's home
-  on remote hosts. This is explicit in the Hosts UI, versioned, and confined
-  to `~/.armadale`.
+  on remote hosts. This is explicit in the Hosts UI, versioned, verified by
+  SHA-256 where the host can, and confined to `~/.armadale` (0700).
+- **Host keys and prompts.** Control commands never prompt (BatchMode). An
+  unknown host key, a passphrase or a password is answered in the pane by an
+  interactive sign-in that leaves the shared connection up (section 6); a
+  *changed* host key makes ssh refuse, and its warning is what the pane
+  shows. A master that dies (network change, sleep) takes every pane on
+  that host with it; they reconnect on the schedule.
+- **Agent forwarding** is not supported in v1 (no `-A`); a user's own
+  `ForwardAgent` in `ssh_config` applies to the connection that becomes the
+  master, which is usually a control command.
+- **Login shells**: remote command lines are single-line POSIX `sh`
+  scripts and are verified to parse under tcsh, sh and zsh; fish is not
+  tested. Inside a session, csh and tcsh as the user's `$SHELL` get
+  `$SHELL -c '<program>'` instead of `-l -c` (they refuse `-l` with other
+  flags); a loopback test starts a program that way.
+- **Windows hosts are unsupported**, as are other systems and
+  architectures than Linux and macOS on ARM64 and x86-64: sessions there
+  are plain ssh shells that end when Armadale quits. A host whose shell
+  start-up files print text when run non-interactively still works (the
+  classification skips it), but a remote `.bashrc` that asks for input
+  would hang the attach until its timeout.
+- **Remote floods**: the zmx client's unbounded buffer (section 7) is on
+  the host; Armadale cannot see or bound it.
 - **Team ID** is not yet set; `project.yml` carries an empty placeholder.
   The bundle identifier is `com.tinylittleapps.armadale`.

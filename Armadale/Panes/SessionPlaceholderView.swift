@@ -9,8 +9,14 @@ struct SessionPlaceholderView: View {
         case ended
         /// Armadale lost its connection; the session may still be running.
         case disconnected
+        /// Disconnected, and Armadale is retrying by itself (a remote host
+        /// that may come back).
+        case reconnecting
         /// Persistent sessions cannot be reached in this run.
         case unavailable
+        /// The session's host was removed from Settings; it may still be
+        /// running there and is left alone.
+        case hostRemoved
     }
 
     let kind: Kind
@@ -25,7 +31,9 @@ struct SessionPlaceholderView: View {
         switch kind {
         case .ended: "Session Ended"
         case .disconnected: "Disconnected"
+        case .reconnecting: "Reconnecting…"
         case .unavailable: "Persistent sessions are unavailable"
+        case .hostRemoved: "Host removed"
         }
     }
 
@@ -33,6 +41,10 @@ struct SessionPlaceholderView: View {
         switch kind {
         case .ended: "The session “\(title)” is no longer running."
         case .disconnected: "Armadale lost its connection to this session. It may still be running."
+        case .reconnecting: "Armadale lost its connection to this session and keeps trying to reconnect. "
+            + "The session may still be running."
+        case .hostRemoved: "The host the session “\(title)” runs on was removed from Settings › Hosts. It may still be "
+            + "running there and has been left alone."
         case .unavailable: "Armadale could not start the service that keeps sessions running, so the session "
             + "“\(title)” can’t be reached right now. It may still be running and has been left alone."
         }
@@ -42,15 +54,17 @@ struct SessionPlaceholderView: View {
         switch kind {
         case .ended: "Respawn"
         case .disconnected: "Reconnect"
-        case .unavailable: "Retry"
+        case .reconnecting: "Reconnect Now"
+        case .unavailable, .hostRemoved: "Retry"
         }
     }
 
     private var symbol: String {
         switch kind {
         case .ended: "terminal"
-        case .disconnected: "bolt.horizontal.circle"
+        case .disconnected, .reconnecting: "bolt.horizontal.circle"
         case .unavailable: "exclamationmark.triangle"
+        case .hostRemoved: "network.slash"
         }
     }
 
@@ -69,7 +83,10 @@ struct SessionPlaceholderView: View {
                 Text(message)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                if let failure, kind != .unavailable {
+                if kind == .reconnecting {
+                    ProgressView().controlSize(.small)
+                }
+                if let failure, kind != .unavailable, kind != .hostRemoved {
                     Text(failure)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -79,11 +96,15 @@ struct SessionPlaceholderView: View {
                 HStack(spacing: 12) {
                     // An unavailable session cannot be ended from here: its
                     // runtime is unreachable, and closing would orphan it.
+                    // One whose host was removed can only be closed (the
+                    // close confirmation says it is left running).
                     if kind != .unavailable {
                         Button("Close Pane", action: closePane)
                     }
-                    Button(primaryTitle, action: primary)
-                        .keyboardShortcut(.defaultAction)
+                    if kind != .hostRemoved {
+                        Button(primaryTitle, action: primary)
+                            .keyboardShortcut(.defaultAction)
+                    }
                 }
                 .controlSize(.large)
                 .padding(.top, 8)

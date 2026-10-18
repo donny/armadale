@@ -89,7 +89,7 @@ struct TabBarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .help("New Tab (right-click to choose a profile)")
+                .help("New Tab (right-click to choose a profile or a host)")
                 .accessibilityLabel("New Tab")
                 .contextMenu {
                     ForEach(model.profiles) { profile in
@@ -97,6 +97,17 @@ struct TabBarView: View {
                             actions.newTab(in: group?.id, profile: profile.id)
                         } label: {
                             Label(profile.name, systemImage: profile.icon)
+                        }
+                    }
+                    if !model.hosts.isEmpty {
+                        Section("On Host") {
+                            ForEach(model.hosts) { host in
+                                Button {
+                                    actions.newTab(onHost: host.id, in: group?.id)
+                                } label: {
+                                    Label(host.displayName, systemImage: "network")
+                                }
+                            }
                         }
                     }
                 }
@@ -144,6 +155,7 @@ private struct TabItemView: View {
         let sessions = tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
         HStack(spacing: 6) {
             StatusGlyph(status: registry.status(of: sessions))
+            HostBadge(hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions))
             Text(title)
                 .lineLimit(1)
                 .truncationMode(.middle)

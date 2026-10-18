@@ -37,7 +37,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .general: NSSize(width: 620, height: 330)
             case .appearance: NSSize(width: 620, height: 640)
             case .profiles: NSSize(width: 780, height: 560)
-            case .hosts: NSSize(width: 620, height: 220)
+            case .hosts: NSSize(width: 780, height: 600)
             case .shortcuts: NSSize(width: 620, height: 560)
             }
         }
@@ -46,7 +46,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
     private let settings: AppSettings
     private let tabs: SettingsTabViewController
 
-    init(model: AppModel, settings: AppSettings, mainMenu: @escaping @MainActor () -> NSMenu) {
+    init(
+        model: AppModel, settings: AppSettings, hostTools: HostTools = .unavailable,
+        mainMenu: @escaping @MainActor () -> NSMenu
+    ) {
         self.settings = settings
         // Read first: adding the tabs selects the first one, which is recorded.
         let saved = settings.preferences.settingsTab.flatMap(Tab.init(rawValue:)) ?? .general
@@ -59,7 +62,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .general: AnyView(GeneralSettingsView(model: model, preferences: settings.preferences))
             case .appearance: AnyView(AppearanceSettingsView(settings: settings))
             case .profiles: AnyView(ProfilesSettingsView(model: model))
-            case .hosts: AnyView(HostsSettingsView())
+            case .hosts: AnyView(HostsSettingsView(model: model, tools: hostTools))
             case .shortcuts: AnyView(ShortcutsSettingsView(rows: ShortcutTable.rows(from: mainMenu())))
             }
             let hosting = NSHostingController(rootView: root.frame(width: tab.contentSize.width, height: tab.contentSize.height))

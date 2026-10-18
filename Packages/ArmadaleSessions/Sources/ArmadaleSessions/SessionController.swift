@@ -98,6 +98,18 @@ public final class SessionController {
     public private(set) var state: SessionState = .detached
     /// Why the last start failed, if it did (spawn errors and the like).
     public private(set) var failure: String?
+    /// The controller is retrying a lost connection by itself
+    /// (``reconnectSchedule``); the session is disconnected meanwhile.
+    public private(set) var isReconnecting = false
+    /// Why the session will not outlive the app although its backend is
+    /// persistent (``ProcessHandle/persistenceNote``), from the last connect.
+    public private(set) var persistenceNote: String?
+    /// When set, a disconnected session is retried by itself on this
+    /// schedule (remote sessions: the host may come back), until it
+    /// connects, the budget runs out, or ``reconnect()``, ``close()`` or
+    /// ``respawn()`` takes over. `nil` (local sessions): only the one
+    /// immediate reattach.
+    @ObservationIgnored public var reconnectSchedule: ReconnectSchedule?
 
     @ObservationIgnored public private(set) var surface: any TerminalSurface
     /// Makes the surface that replaces ``surface`` at the next connect.
@@ -118,6 +130,16 @@ public final class SessionController {
     @ObservationIgnored private var isClosed = false
     /// Automatic reattaches since the last attach that lasted.
     @ObservationIgnored private var automaticReattaches = 0
+    /// The retry loop of ``reconnectSchedule``, while it runs.
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
+    /// How a retry connects: attach, unless a create never reached the
+    /// session's host (then nothing was created, and the retry creates).
+    @ObservationIgnored private var retryMode: StartMode = .attach
+    /// A connect is under way (``backend`` has been asked to create or
+    /// attach and has not answered yet).
+    @ObservationIgnored private var isConnecting = false
+    /// Automatic retries are paused (the pane's window is closed).
+    @ObservationIgnored private var isReconnectPaused = false
     /// Reattaches made because the client's backlog grew too large.
     @ObservationIgnored public private(set) var floodReattaches = 0
 
@@ -226,30 +248,77 @@ public final class SessionController {
     /// never started, respawned or killed until ``useBackend(_:makeOutputFilter:)``
     /// provides a working one. Does nothing unless detached or unavailable.
     public func markUnavailable(reason: String) {
-        guard state == .detached || state.isUnavailable, !isClosed else { return }
+        guard state == .detached || state.isUnavailable || state.isDisconnected, binding == nil, !isClosed else { return }
+        cancelAutomaticReconnect()
         setState(.unavailable(reason: reason))
     }
 
-    /// Switches to another backend while not connected (after the session
-    /// runtime became available). An unavailable session becomes detached,
-    /// ready to be started.
+    /// Switches to another backend (after the session runtime became
+    /// available, or its host's settings changed). A live client keeps
+    /// running; the next connect (a reattach, Reconnect, an automatic
+    /// retry) goes through `backend`. An unavailable session becomes
+    /// detached, ready to be started.
     public func useBackend(_ backend: any PersistenceBackend, makeOutputFilter: @escaping @MainActor () -> any OutputFilter) {
-        guard binding == nil, !isClosed, state != .attaching else { return }
+        guard !isClosed else { return }
         self.backend = backend
         self.makeOutputFilter = makeOutputFilter
         if state.isUnavailable { setState(.detached) }
     }
 
-    /// Tries again to attach to a disconnected session.
+    /// The backend the next connect uses.
+    public var activeBackend: any PersistenceBackend { backend }
+
+    /// The session can no longer be reached at all (its host was removed):
+    /// any client is hung up (the session keeps running), retries stop, and
+    /// `backend` (one that refuses everything) replaces the current one, so
+    /// a later close ends nothing. The session shows as unavailable.
+    public func detachAsUnavailable(reason: String, backend: any PersistenceBackend) {
+        guard !isClosed else { return }
+        cancelAutomaticReconnect()
+        if let handle = binding?.handle {
+            abandonBinding()
+            handle.hangUp()
+        }
+        self.backend = backend
+        setState(.unavailable(reason: reason))
+    }
+
+    /// Stops automatic retries for now (the pane's window closed); the
+    /// session stays disconnected. ``resumeAutomaticReconnect()`` starts
+    /// them again.
+    public func pauseAutomaticReconnect() {
+        isReconnectPaused = true
+        cancelAutomaticReconnect()
+    }
+
+    public func resumeAutomaticReconnect() {
+        guard isReconnectPaused else { return }
+        isReconnectPaused = false
+        if state.isDisconnected, retriesAutomatically { scheduleAutomaticReconnect() }
+    }
+
+    /// Whether the last disconnect may be retried by itself (not after a
+    /// refused sign-in or key, which only the user can fix).
+    @ObservationIgnored private var retriesAutomatically = true
+
+    /// Tries again to attach to a disconnected session, at once (stopping
+    /// any automatic retries; if this attempt fails too, they start over).
     public func reconnect() async {
         guard state.isDisconnected, !isClosed else { return }
+        cancelAutomaticReconnect()
+        // Not on top of an attempt still under way: let it finish first.
+        while isConnecting {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard state.isDisconnected, !isClosed else { return }
         automaticReattaches = 0
-        await bind(.attach)
+        await bind(retryMode)
     }
 
     /// Disconnects from the session without ending it: the client process
     /// is terminated, the session (for a persistent backend) keeps running.
     public func detach() async {
+        cancelAutomaticReconnect()
         guard let handle = binding?.handle else { return }
         await stopBinding(killing: false)
         await handle.terminate()
@@ -259,6 +328,7 @@ public final class SessionController {
     /// ``detach()`` without waiting, for quitting: the client is hung up and
     /// its terminal closed before this returns; the session keeps running.
     public func detachNow() {
+        cancelAutomaticReconnect()
         guard let handle = binding?.handle else { return }
         abandonBinding()
         handle.hangUp()
@@ -280,6 +350,7 @@ public final class SessionController {
         guard !isRespawning, !isClosed, !state.isUnavailable else { return }
         isRespawning = true
         defer { isRespawning = false }
+        cancelAutomaticReconnect()
         let old = session
         automaticReattaches = 0
         await stopBinding(killing: true)
@@ -304,6 +375,7 @@ public final class SessionController {
     /// discarded afterwards.
     public func close() async {
         isClosed = true
+        cancelAutomaticReconnect()
         await stopBinding(killing: !state.isUnavailable)
         setState(.ended(exitCode: nil))
     }
@@ -323,18 +395,23 @@ public final class SessionController {
 
     // MARK: Binding
 
-    private func bind(_ mode: StartMode) async {
+    /// Connects. `quietly` (automatic retries) keeps showing the session
+    /// as disconnected until the connect has worked, so the placeholder
+    /// does not flicker away on every attempt.
+    private func bind(_ mode: StartMode, quietly: Bool = false) async {
         generation += 1
         let generation = generation
         let target = session
-        failure = nil
+        if !quietly { failure = nil }
         // Before the size is taken: the new surface's view is laid out in
         // the pane when the delegate installs it.
         installPendingSurface()
-        setState(.attaching)
+        if !quietly { setState(.attaching) }
         let size = currentPTYSize()
         let handle: any ProcessHandle
+        isConnecting = true
         do {
+            defer { isConnecting = false }
             switch mode {
             case .create: handle = try await backend.create(target, size: size)
             case .attach: handle = try await backend.attach(target, size: size)
@@ -342,10 +419,26 @@ public final class SessionController {
         } catch {
             guard generation == self.generation, !isClosed else { return }
             switch error as? BackendError {
-            case .notPersistent?, .noSuchSession?:
+            case .notPersistent(_)?, .noSuchSession?:
                 // Simply gone; nothing went wrong.
                 failure = nil
                 setState(.ended(exitCode: nil))
+            case .unreachable(let reason)?:
+                // The host did not answer: nothing is known about the
+                // session, so it is not ended. A create that never got
+                // there created nothing, so its retries create.
+                failure = reason
+                retryMode = mode
+                retriesAutomatically = true
+                setState(.disconnected(reason: reason))
+                scheduleAutomaticReconnect()
+            case .authenticationFailed(let reason)?:
+                // Refused (a rejected key, a changed host key): only the
+                // user can fix it, so no automatic retries.
+                failure = reason
+                retryMode = mode
+                stopRetrying()
+                setState(.disconnected(reason: reason))
             default:
                 let reason = String(describing: error)
                 // Only a session confirmed gone is ended. One that may still
@@ -355,7 +448,10 @@ public final class SessionController {
                 let alive = (try? await backend.exists(target.id)) ?? true
                 guard generation == self.generation, !isClosed else { return }
                 failure = reason
+                retryMode = .attach
+                retriesAutomatically = true
                 setState(alive ? .disconnected(reason: reason) : .ended(exitCode: nil))
+                if alive { scheduleAutomaticReconnect() }
             }
             return
         }
@@ -372,6 +468,10 @@ public final class SessionController {
             }
             return
         }
+        retryMode = .attach
+        retriesAutomatically = true
+        failure = nil
+        persistenceNote = handle.persistenceNote
         if mode == .create, let version = handle.runtimeVersion, session.runtimeVersion != version {
             session.runtimeVersion = version
             delegate?.sessionController(self, didRecordRuntimeVersion: version)
@@ -458,6 +558,16 @@ public final class SessionController {
         current.floodWatchTask?.cancel()
         binding = current
         finishFilter()
+        if let reason = current.handle.connectionFailure {
+            // It never reached the session (a sign-in that failed or timed
+            // out): nothing to resolve, and no retry until the user asks.
+            binding?.cancelTasks()
+            binding = nil
+            failure = reason
+            stopRetrying()
+            setState(.disconnected(reason: reason))
+            return
+        }
         let lasted = ContinuousClock.now - current.attachedAt >= reattachAllowanceInterval
         let target = session
         let backend = backend
@@ -513,6 +623,47 @@ public final class SessionController {
         binding = nil
         finishFilter()
         setState(.disconnected(reason: reason))
+        scheduleAutomaticReconnect()
+    }
+
+    // MARK: Automatic reconnect
+
+    /// Starts retrying a disconnected session on ``reconnectSchedule``, if
+    /// it has one and no retry loop is running yet.
+    private func scheduleAutomaticReconnect() {
+        guard let schedule = reconnectSchedule, reconnectTask == nil, state.isDisconnected, !isClosed,
+              !isReconnectPaused, retriesAutomatically
+        else { return }
+        isReconnecting = true
+        reconnectTask = Task { [weak self] in
+            let started = ContinuousClock.now
+            var attempt = 0
+            while let delay = schedule.delay(beforeAttempt: attempt, elapsed: ContinuousClock.now - started) {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let controller = self, controller.state.isDisconnected, !controller.isClosed
+                else { break }
+                await controller.bind(controller.retryMode, quietly: true)
+                guard !Task.isCancelled else { return }
+                if !controller.state.isDisconnected { break }
+                attempt += 1
+            }
+            // Cancelled: whoever cancelled has already reset the state.
+            guard !Task.isCancelled, let controller = self else { return }
+            controller.reconnectTask = nil
+            controller.isReconnecting = false
+        }
+    }
+
+    /// No more automatic retries for this disconnect.
+    private func stopRetrying() {
+        retriesAutomatically = false
+        cancelAutomaticReconnect()
+    }
+
+    private func cancelAutomaticReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        isReconnecting = false
     }
 
     /// Flushes what the current filter held back. Runs once per binding,

@@ -91,6 +91,9 @@ private actor FakeBackend: PersistenceBackend {
     var alive: Set<SessionID> = []
     var createDelay: Duration?
     var killDelay: Duration?
+    var attachDelay: Duration?
+    private var concurrentAttaches = 0
+    private(set) var maxConcurrentAttaches = 0
 
     func setCreateError(_ error: (any Error)?) { createError = error }
     func setCreateDelay(_ delay: Duration?) { createDelay = delay }
@@ -100,6 +103,7 @@ private actor FakeBackend: PersistenceBackend {
     func setAttachError(_ error: (any Error)?) { attachError = error }
     func setRuntimeVersion(_ value: String?) { runtimeVersion = value }
     func setAlive(_ ids: Set<SessionID>) { alive = ids }
+    func setAttachDelay(_ delay: Duration?) { attachDelay = delay }
 
     func create(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
         if let createDelay { try await Task.sleep(for: createDelay) }
@@ -111,7 +115,11 @@ private actor FakeBackend: PersistenceBackend {
     }
 
     func attach(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
-        guard canAttach else { throw BackendError.notPersistent }
+        guard canAttach else { throw BackendError.notPersistent(reason: nil) }
+        concurrentAttaches += 1
+        maxConcurrentAttaches = max(maxConcurrentAttaches, concurrentAttaches)
+        defer { concurrentAttaches -= 1 }
+        if let attachDelay { try await Task.sleep(for: attachDelay) }
         if let attachError { throw attachError }
         attached.append(session)
         let handle = FakeHandle(runtimeVersion: runtimeVersion)
@@ -835,5 +843,224 @@ struct SessionControllerPTYTests {
         }
         #expect(delegate.states == [.attaching, .attached, .ended(exitCode: 0)])
         #expect(surface.text.contains("hi from zsh\r\n"), "\(surface.text.debugDescription)")
+    }
+}
+
+// MARK: Automatic reconnect (remote sessions)
+
+@Suite("SessionController reconnect")
+@MainActor
+struct SessionControllerReconnectTests {
+    private let backend = FakeBackend()
+    private let surface = FakeSurface()
+    private let delegate = RecordingDelegate()
+    private let session = Session(
+        location: .remote(host: HostID(raw: "abcdefghijklmnop")), profileID: Profile.shell.id,
+        launch: LaunchSpec(), workingDirectory: "~")
+    /// Fast, so tests do not wait seconds: 20, 40, 80, 100, 100 … ms for 1 s.
+    private let schedule = ReconnectSchedule(
+        initialDelay: .milliseconds(20), maximumDelay: .milliseconds(100), budget: .seconds(1))
+
+    private func makeController() -> SessionController {
+        let surface = surface
+        let controller = SessionController(session: session, backend: backend, makeSurface: { surface })
+        controller.delegate = delegate
+        controller.reconnectSchedule = schedule
+        return controller
+    }
+
+    private func eventually(
+        timeout: Duration = .seconds(3), _ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while !condition(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(condition(), sourceLocation: sourceLocation)
+    }
+
+    @Test func anUnreachableHostDisconnectsAndRetriesUntilItAnswers() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("ssh: connect to host vm port 22: Connection refused"))
+        let controller = makeController()
+        await controller.start(.attach)
+        #expect(controller.state == .disconnected(reason: "ssh: connect to host vm port 22: Connection refused"))
+        #expect(controller.isReconnecting)
+        #expect(await backend.killed.isEmpty)
+        // Retries are quiet: the pane stays disconnected, never "attaching",
+        // until one works.
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(!delegate.states.contains(.ended(exitCode: nil)))
+        let attachingBefore = delegate.states.filter { $0 == .attaching }.count
+        #expect(attachingBefore == 1, "only the first, visible attempt")
+
+        await backend.setAttachError(nil)
+        await eventually { controller.state == .attached }
+        #expect(!controller.isReconnecting)
+        #expect(delegate.states.filter { $0 == .attaching }.count == 1)
+        #expect(await backend.attached.count == 1)
+    }
+
+    @Test func retriesStopWhenTheBudgetRunsOut() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        await controller.start(.attach)
+        #expect(controller.isReconnecting)
+        await eventually(timeout: .seconds(4)) { !controller.isReconnecting }
+        #expect(controller.state == .disconnected(reason: "down"), "still disconnected, never ended")
+        #expect(controller.failure == "down")
+    }
+
+    @Test func reconnectNowStopsTheLoopAndStartsAgainIfItFails() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let slow = ReconnectSchedule(initialDelay: .seconds(30), maximumDelay: .seconds(30), budget: .seconds(300))
+        let controller = makeController()
+        controller.reconnectSchedule = slow
+        await controller.start(.attach)
+        #expect(controller.isReconnecting)
+        await backend.setAttachError(nil)
+        await controller.reconnect()
+        #expect(controller.state == .attached)
+        #expect(!controller.isReconnecting)
+    }
+
+    @Test func closeStopsRetrying() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        await controller.start(.attach)
+        await controller.close()
+        #expect(!controller.isReconnecting)
+        let attempts = await backend.attached.count
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await backend.attached.count == attempts)
+    }
+
+    @Test func aCreateThatNeverReachedTheHostIsRetriedAsACreate() async throws {
+        await backend.setCreateError(BackendError.unreachable("down"))
+        let controller = makeController()
+        await controller.start(.create)
+        #expect(controller.state.isDisconnected)
+        await backend.setCreateError(nil)
+        await eventually { controller.state == .attached }
+        #expect(await backend.attached.isEmpty, "attach would have found nothing to attach to")
+        #expect(await backend.created.count == 1)
+    }
+
+    @Test func aLostClientReattachesAndThenRetriesOnSchedule() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        await controller.start(.attach)
+        // The connection drops; the host cannot be asked (detached), and the
+        // immediate reattach fails too: then the schedule takes over.
+        await backend.setResolutions([.detached])
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let first = try #require(await backend.handles.first)
+        first.finishOutput()
+        first.exit(255)
+        await eventually { controller.state.isDisconnected }
+        #expect(controller.isReconnecting)
+        await backend.setAttachError(nil)
+        await eventually { controller.state == .attached }
+    }
+
+    /// A host removed while its pane is attached: the client is hung up,
+    /// the session shows unavailable, and closing it ends nothing.
+    @Test func detachingAsUnavailableHangsUpAndNeverKills() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        await controller.start(.attach)
+        let handle = try #require(await backend.handles.first)
+        controller.detachAsUnavailable(reason: "Host removed", backend: UnavailableBackend(reason: "Host removed"))
+        #expect(handle.hungUp)
+        #expect(controller.state == .unavailable(reason: "Host removed"))
+        #expect(controller.activeBackend is UnavailableBackend)
+        handle.finishOutput()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.state == .unavailable(reason: "Host removed"), "the old client's end changes nothing")
+        await controller.close()
+        #expect(await backend.killed.isEmpty)
+    }
+
+    /// Host settings edited while attached: the live client stays, the next
+    /// connect goes through the new backend.
+    @Test func aNewBackendWhileAttachedKeepsTheClientAndServesTheNextConnect() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        await controller.start(.attach)
+        let handle = try #require(await backend.handles.first)
+        let replacement = FakeBackend()
+        await replacement.setCanAttach(true)
+        controller.useBackend(replacement, makeOutputFilter: { IdentityOutputFilter() })
+        #expect(controller.state == .attached)
+        #expect(!handle.terminated && !handle.hungUp)
+        // The connection drops; the reattach goes to the new backend.
+        await backend.setResolutions([.detached])
+        await replacement.setResolutions([.detached])
+        handle.finishOutput()
+        handle.exit(nil)
+        for _ in 0..<100 where await replacement.attached.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await replacement.attached.count == 1)
+        #expect(controller.state == .attached)
+        #expect(await backend.attached.count == 1, "only the first attach")
+    }
+
+    /// Reconnect Now while an automatic attempt is still under way waits for
+    /// it instead of running a second connect on top of it.
+    @Test func reconnectNowDoesNotOverlapAnAttemptInFlight() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        await controller.start(.attach)
+        await backend.setAttachDelay(.milliseconds(300))
+        // Let the loop start an attempt, then ask for one.
+        try await Task.sleep(for: .milliseconds(60))
+        await controller.reconnect()
+        #expect(await backend.maxConcurrentAttaches == 1)
+    }
+
+    @Test func pausedRetriesResumeWhenTheWindowOpensAgain() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        await controller.start(.attach)
+        #expect(controller.isReconnecting)
+        controller.pauseAutomaticReconnect()
+        #expect(!controller.isReconnecting)
+        await backend.setAttachError(nil)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(controller.state.isDisconnected, "no attempts while paused")
+        controller.resumeAutomaticReconnect()
+        await eventually { controller.state == .attached }
+    }
+
+    /// A refused connection (a rejected key) is shown and not retried.
+    @Test func anAuthenticationFailureIsNotRetried() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.authenticationFailed("vm: Permission denied (publickey)."))
+        let controller = makeController()
+        await controller.start(.attach)
+        #expect(controller.state == .disconnected(reason: "vm: Permission denied (publickey)."))
+        #expect(controller.failure == "vm: Permission denied (publickey).")
+        #expect(!controller.isReconnecting)
+        await backend.setAttachError(nil)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(controller.state.isDisconnected, "only the user retries")
+        await controller.reconnect()
+        #expect(controller.state == .attached)
+    }
+
+    @Test func localSessionsDoNotRetryBySchedule() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        controller.reconnectSchedule = nil
+        await controller.start(.attach)
+        #expect(controller.state.isDisconnected)
+        #expect(!controller.isReconnecting)
     }
 }

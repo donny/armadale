@@ -37,7 +37,7 @@ public actor EphemeralBackend: PersistenceBackend {
     /// Always throws ``BackendError/notPersistent``: an ephemeral session that
     /// is not running in this process is gone for good.
     public func attach(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
-        throw BackendError.notPersistent
+        throw BackendError.notPersistent(reason: nil)
     }
 
     public func exists(_ id: SessionID) async throws -> Bool {
@@ -68,4 +68,30 @@ public actor EphemeralBackend: PersistenceBackend {
     private func pruneExited() {
         processes = processes.filter { $0.value.isRunning }
     }
+}
+
+/// The backend of a session that cannot be reached at all any more (its
+/// host was removed): it refuses to create or attach and never ends
+/// anything, so closing such a pane leaves the session running where it is.
+public actor UnavailableBackend: PersistenceBackend {
+    public let reason: String
+
+    public init(reason: String) {
+        self.reason = reason
+    }
+
+    public func create(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
+        throw BackendError.unreachable(reason)
+    }
+
+    public func attach(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
+        throw BackendError.unreachable(reason)
+    }
+
+    public func exists(_ id: SessionID) async throws -> Bool { throw BackendError.unreachable(reason) }
+    public func liveSessions() async throws -> Set<SessionID> { throw BackendError.unreachable(reason) }
+    /// Does nothing: the session is out of reach and must not be ended.
+    public func kill(_ id: SessionID) async throws {}
+    public func history(_ id: SessionID) async throws -> Data { throw BackendError.historyUnavailable(id) }
+    public func resolveExit(of session: Session) async -> ExitResolution { .detached }
 }

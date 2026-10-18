@@ -161,7 +161,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             let presentations = Observations {
                 let workspace = model.workspace(workspaceID)
                 let group = workspace?.selectedTabGroup?.name ?? ""
+                // Local sessions that won't persist, or remote ones on a
+                // host that could not take the persistence helper.
                 let warning = registry.persistenceWarning
+                    ?? registry.persistenceNote(of: model.sessionIDs(in: workspaceID)).map { _ in
+                        SessionRegistry.persistenceWarningText
+                    }
                 return Presentation(
                     title: workspace?.name ?? "Armadale",
                     subtitle: [group, warning ?? ""].filter { !$0.isEmpty }.joined(separator: " — "),
@@ -196,6 +201,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     @objc func newTabWithProfile(_ sender: Any?) {
         guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
         actions.newTab(profile: ProfileID(raw: raw))
+    }
+
+    /// File › New Tab on Host: the item's represented object is the host's ID.
+    @objc func newTabOnHost(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        actions.newTab(onHost: HostID(raw: raw))
     }
 
     /// ⌘D: a new shell right of the focused pane, in its directory.
@@ -311,7 +322,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         let group = workspace?.selectedTabGroup
         let tab = group?.selectedTab
         switch menuItem.action {
-        case #selector(newTab(_:)), #selector(newTabWithProfile(_:)), #selector(newTabGroup(_:)), #selector(renameWorkspace(_:)),
+        case #selector(newTab(_:)), #selector(newTabWithProfile(_:)), #selector(newTabOnHost(_:)), #selector(newTabGroup(_:)),
+             #selector(renameWorkspace(_:)),
              #selector(deleteWorkspace(_:)):
             return workspace != nil
         case #selector(closePane(_:)):

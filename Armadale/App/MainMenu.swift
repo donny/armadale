@@ -14,6 +14,8 @@ enum MainMenu {
     /// Identifier of File › New Tab with Profile, whose items are filled in
     /// by `profileMenuDelegate` each time it opens.
     static let newTabWithProfileIdentifier = NSUserInterfaceItemIdentifier("newTabWithProfile")
+    /// Identifier of File › New Tab on Host, filled in the same way.
+    static let newTabOnHostIdentifier = NSUserInterfaceItemIdentifier("newTabOnHost")
 
     /// Prefix of the identifier given to every item this builds. AppKit adds
     /// items of its own later (the Services menu's contents, the Window
@@ -61,6 +63,10 @@ enum MainMenu {
         profiles.identifier = newTabWithProfileIdentifier
         profiles.delegate = profileMenuDelegate
         file.addItem(withTitle: "New Tab with Profile", action: nil, keyEquivalent: "").submenu = profiles
+        let hosts = NSMenu(title: "New Tab on Host")
+        hosts.identifier = newTabOnHostIdentifier
+        hosts.delegate = profileMenuDelegate
+        file.addItem(withTitle: "New Tab on Host", action: nil, keyEquivalent: "").submenu = hosts
         file.addItem(.separator())
         file.addItem(withTitle: "Close Pane", action: #selector(WorkspaceWindowController.closePane(_:)),
                      keyEquivalent: "w")
@@ -228,6 +234,25 @@ enum MainMenu {
             item.image = NSImage(systemSymbolName: profile.icon, accessibilityDescription: nil)
             item.state = profile.id == defaultProfile ? .on : .off
         }
+    }
+
+    /// Fills File › New Tab on Host: one item per host (a tab there, in
+    /// the home directory, with the default profile), then Add Host….
+    static func fillHostMenu(_ menu: NSMenu, hosts: [ArmadaleCore.Host]) {
+        menu.removeAllItems()
+        if hosts.isEmpty {
+            menu.addItem(withTitle: "No Hosts", action: nil, keyEquivalent: "").isEnabled = false
+        }
+        for host in hosts {
+            let item = menu.addItem(
+                withTitle: host.displayName, action: #selector(WorkspaceWindowController.newTabOnHost(_:)),
+                keyEquivalent: "")
+            item.representedObject = host.id.raw
+            item.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
+            if host.displayName != host.sshDestination { item.toolTip = host.sshDestination }
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Add Host…", action: #selector(AppDelegate.showHostsSettings(_:)), keyEquivalent: "")
     }
 
     // MARK: Directions

@@ -615,6 +615,102 @@ public final class AppModel {
         profile(session.profileID)?.launchSpec ?? session.launch
     }
 
+    // MARK: Hosts
+
+    public func host(_ id: HostID) -> Host? {
+        hosts.first { $0.id == id }
+    }
+
+    /// Adds a host at the end of the list and returns its ID. A blank name
+    /// becomes "New Host" (made unique); the rest is cleaned up as
+    /// ``updateHost(_:)`` does.
+    @discardableResult
+    public func addHost(
+        name: String = "",
+        sshDestination: String = "",
+        port: Int? = nil,
+        identityFile: String? = nil,
+        sshConfigFile: String? = nil,
+        remoteDirectory: String = Host.defaultRemoteDirectory
+    ) -> HostID {
+        var host = Self.cleaned(Host(
+            name: name, sshDestination: sshDestination, port: port, identityFile: identityFile,
+            sshConfigFile: sshConfigFile, remoteDirectory: remoteDirectory))
+        if host.name.isEmpty { host.name = uniqueHostName("New Host") }
+        hosts.append(host)
+        didChange()
+        return host.id
+    }
+
+    /// Replaces the stored host with the same ID by `host`, cleaned up:
+    /// surrounding whitespace is trimmed everywhere; a port outside
+    /// 1…65535 becomes `nil` (ssh's default); a blank identity or config
+    /// file `nil`; a blank or unusable remote directory
+    /// (``Host/remoteDirectoryProblem(_:)``) the default, and trailing
+    /// slashes are dropped. Sessions on the host keep running; they use the
+    /// new settings from their next connection.
+    public func updateHost(_ host: Host) {
+        guard let index = hosts.firstIndex(where: { $0.id == host.id }) else { return }
+        let updated = Self.cleaned(host)
+        guard updated != hosts[index] else { return }
+        hosts[index] = updated
+        didChange()
+    }
+
+    /// Removes a host. Sessions on it stay in their panes and are left
+    /// running there: they become unreachable (the app shows them as
+    /// unavailable), never killed. Returns those sessions.
+    @discardableResult
+    public func removeHost(_ id: HostID) -> [SessionID] {
+        guard let index = hosts.firstIndex(where: { $0.id == id }) else { return [] }
+        let left = sessionIDs(onHost: id)
+        hosts.remove(at: index)
+        didChange()
+        return left
+    }
+
+    /// Sessions whose location is `host`, whether the host still exists or not.
+    public func sessionIDs(onHost host: HostID) -> [SessionID] {
+        sessions.filter { $0.location == .remote(host: host) }.map(\.id)
+    }
+
+    /// File › New Tab on Host: a tab in `tabGroupID` whose session runs on
+    /// `host`, in the home directory there, with `profile` (else the
+    /// default profile). `nil` if the group or host is unknown.
+    @discardableResult
+    public func newTab(in tabGroupID: TabGroupID, onHost host: HostID, profile: ProfileID? = nil) -> TabID? {
+        guard self.host(host) != nil else { return nil }
+        return newTab(in: tabGroupID, profile: profile, location: .remote(host: host), workingDirectory: "~")
+    }
+
+    private static func cleaned(_ host: Host) -> Host {
+        var host = host
+        host.name = host.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        host.sshDestination = host.sshDestination.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let port = host.port, !(1...65535).contains(port) { host.port = nil }
+        func optionalPath(_ value: String?) -> String? {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        host.identityFile = optionalPath(host.identityFile)
+        host.sshConfigFile = optionalPath(host.sshConfigFile)
+        var directory = host.remoteDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        while directory.count > 1, directory.hasSuffix("/") { directory.removeLast() }
+        if directory.isEmpty || Host.remoteDirectoryProblem(directory) != nil {
+            directory = Host.defaultRemoteDirectory
+        }
+        host.remoteDirectory = directory
+        return host
+    }
+
+    private func uniqueHostName(_ base: String) -> String {
+        let names = Set(hosts.map(\.name))
+        guard names.contains(base) else { return base }
+        var n = 2
+        while names.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
     private func uniqueProfileName(_ base: String) -> String {
         let names = Set(profiles.map(\.name))
         guard names.contains(base) else { return base }

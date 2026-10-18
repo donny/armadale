@@ -9,11 +9,23 @@ splits and SwiftUI for chrome. Terminal rendering sits behind a pluggable
 persistence comes from a private, bundled `zmx` daemon. Layout is stored as
 versioned JSON in `~/Library/Application Support/Armadale/`.
 
-Status: step 5 (settings). **Armadale › Settings…** (⌘,) has General
+Status: step 6 (remote). **Settings › Hosts** adds SSH hosts (a
+destination such as `user@host` or a name from your SSH configuration,
+optionally a port, identity file, SSH config file and remote folder), with
+Test Connection and Deploy Now. **File › New Tab on Host** (or the "On Host"
+section of the tab bar "+" right-click menu) opens a session on a host that
+keeps running there, like a local one: Armadale installs its private
+persistence helper in `~/.armadale` on the host the first time, quitting
+leaves the session running, and a relaunch reattaches it. A lost connection
+shows *Reconnecting…* and is retried by itself (1 s, 2 s, 4 s … every 30 s,
+for up to 5 minutes); a session is only shown as ended when the host says it
+is gone. Remote tabs carry a small host badge. See docs/DESIGN.md section 6.
+
+Step 5 (settings): **Armadale › Settings…** (⌘,) has General
 (default profile and directory, close confirmation), Appearance (font,
 size, theme with separate light and dark choices, Ghostty theme import,
 cursor, renderer), Profiles (add, duplicate, delete and edit launch
-profiles), Hosts (a placeholder until remote sessions arrive) and a
+profiles), Hosts and a
 read-only Shortcuts table generated from the menus. Appearance changes
 apply to every open pane at once; **File › New Tab with Profile** (or a
 right-click on the tab bar's "+") opens a tab with any profile.
@@ -140,6 +152,42 @@ without the reattach mitigation (docs/DESIGN.md section 7); it only runs
 when `ARMADALE_FLOOD_BASELINE` is set (to the number of seconds to wait for
 the prompt, 300 by default) and can take minutes.
 
+### Remote hosts and the SSH integration tests
+
+Remote sessions use the system's `/usr/bin/ssh` with your own
+configuration, keys and agent. Connections to a host are shared
+(`ControlMaster`); their sockets are in `<state dir>/run/ssh/` (or
+`/tmp/armadale-<uid>/ssh/`), named by a short hash of the host's settings.
+To close one by hand: `ssh -O exit -o ControlPath=<that socket> <host>`.
+On the host, everything is in the remote folder (default `~/.armadale`):
+`bin/zmx-<version>` and `run/` (its sessions). Removing that folder is a
+complete uninstall from the host.
+
+The package tests exercise the remote backend without a network: a
+scripted transport for command lines and parsing, and a loopback transport
+that runs "remote" commands on this Mac with a private `HOME` against the
+real zmx (deploy, create, reattach, reconnect after a lost connection,
+fallback, interactive sign-in). The tests in `SSHIntegrationTests` run
+against a real host only when `ARMADALE_TEST_SSH_HOST` names an ssh
+destination (they are skipped otherwise); `ARMADALE_TEST_SSH_CONFIG`
+optionally names an ssh config file for it (`ssh -F`). They deploy the
+helper to `~/.armadale` on the host (and leave it there), create, detach,
+reattach and kill a session, check that the shared connection is reused
+(`ssh -O check`), kill an upload's ssh mid-transfer and check that nothing
+was installed, and check that a truncated helper on the host is replaced. For example, against a Lima VM:
+
+```sh
+limactl start default
+limactl show-ssh --format=config default > /tmp/lima-ssh.conf
+cd Packages/ArmadaleSessions
+ARMADALE_TEST_SSH_HOST=lima-default ARMADALE_TEST_SSH_CONFIG=/tmp/lima-ssh.conf \
+  swift test --filter SSHIntegrationTests
+```
+
+Through `xcodebuild test`, prefix the variables with `TEST_RUNNER_`
+(`TEST_RUNNER_ARMADALE_TEST_SSH_HOST=…`); xcodebuild passes those on to
+the test process without the prefix.
+
 ### Environment overrides
 
 | Variable | Effect |
@@ -224,9 +272,9 @@ and removes the folder at the end.
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog` and `AppSettings` (`Support/`) |
+| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog` and `AppSettings` (`Support/`) |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `StateStore`, migrations (no AppKit) |
-| `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `LocalZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
+| `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
 | `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase) |

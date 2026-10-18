@@ -19,13 +19,15 @@ public struct CommandResult: Sendable, Hashable {
     public var stderrText: String { String(decoding: stderr, as: UTF8.self) }
 }
 
-/// Runs one-shot commands (`zmx ls`, `zmx kill`, later ssh control
-/// commands) with `Process`, collecting their output, with a timeout
+/// Runs one-shot commands (`zmx ls`, `zmx kill`, ssh control commands)
+/// with `Process`, collecting their output, with a timeout
 /// (docs/DESIGN.md section 7).
 ///
 /// - stdout and stderr are always pipes, never files: zmx writes
 ///   positionally at offset 0 and would overwrite a file's start.
-/// - stdin is `/dev/null`.
+/// - stdin is `/dev/null`, or a pipe fed with `input` (an upload over
+///   ssh). Writing to it never raises SIGPIPE, even if the command exits
+///   without reading everything.
 /// - `ZMX_SESSION` and `ZMX_SESSION_PREFIX` are removed from every
 ///   environment, whatever the caller passes.
 /// - On timeout the command gets SIGTERM, then SIGKILL a second later, and
@@ -59,6 +61,7 @@ public actor CommandRunner {
         executable: String,
         arguments: [String] = [],
         environment: [String: String],
+        input: Data? = nil,
         timeout: Duration = .seconds(10)
     ) async throws -> CommandResult {
         var environment = environment
@@ -69,7 +72,8 @@ public actor CommandRunner {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.environment = environment
-        process.standardInput = FileHandle.nullDevice
+        let stdinPipe = input.map { _ in Pipe() }
+        process.standardInput = stdinPipe ?? FileHandle.nullDevice
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
@@ -93,6 +97,10 @@ public actor CommandRunner {
         // The child has its own copies; without closing ours, EOF never comes.
         try? stdoutPipe.fileHandleForWriting.close()
         try? stderrPipe.fileHandleForWriting.close()
+        if let stdinPipe, let input {
+            try? stdinPipe.fileHandleForReading.close()
+            Self.feed(input, to: stdinPipe.fileHandleForWriting)
+        }
 
         guard let status = await exit.wait(timeout: timeout) else {
             let pid = process.processIdentifier
@@ -108,6 +116,20 @@ public actor CommandRunner {
         async let out = stdout.collect(timeout: Self.drainTimeout)
         async let err = stderr.collect(timeout: Self.drainTimeout)
         return CommandResult(status: status, stdout: await out, stderr: await err)
+    }
+}
+
+extension CommandRunner {
+    /// Writes `data` to a pipe off the caller's thread (a blocking write of
+    /// megabytes must not hold a cooperative thread), then closes it so the
+    /// command sees EOF. SIGPIPE is off for the pipe: a command that exits
+    /// early makes the write fail with EPIPE instead of killing the app.
+    nonisolated static func feed(_ data: Data, to handle: FileHandle) {
+        _ = fcntl(handle.fileDescriptor, F_SETNOSIGPIPE, 1)
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? handle.write(contentsOf: data)
+            try? handle.close()
+        }
     }
 }
 

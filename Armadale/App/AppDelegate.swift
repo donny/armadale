@@ -104,7 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             model: model,
             runtime: sessions.setup,
             restoredSessionIDs: Set(state.sessions.map(\.id)),
-            settings: settings)
+            settings: settings,
+            remote: Self.makeRemoteSupport(cttyExec: sessions.cttyExec))
         self.saver = StateSaver(url: url)
         super.init()
         wireRegistry()
@@ -162,6 +163,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         var setup: SessionRuntimeSetup
         var runtime: ZmxRuntime?
         var failure: String?
+        /// The installed `ctty-exec`, when the installer ran.
+        var cttyExec: String?
+    }
+
+    /// SSH hosts (docs/DESIGN.md section 6): the system's OpenSSH, with its
+    /// shared connections' sockets in the runtime directory (or the `/tmp`
+    /// fallback when that is too long for them).
+    private static func makeRemoteSupport(cttyExec: String?) -> RemoteSessionSupport {
+        let environment = ProcessInfo.processInfo.environment
+        let runtimeDirectory = ZmxRuntime.directory(forStateDirectory: StateLocation.directory(environment: environment))
+        let transport = OpenSSHTransport(
+            controlDirectory: OpenSSHTransport.controlDirectory(forRuntimeDirectory: runtimeDirectory),
+            environment: OpenSSHTransport.clientEnvironment(environment))
+        return RemoteSessionSupport(
+            transport: transport,
+            cttyExec: cttyExec,
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
     }
 
     /// The persistent zmx backend, with the helpers installed into the
@@ -196,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             Task { await backend.noteRuntimeVersions(versions) }
             return SessionBackend(
                 setup: SessionRuntimeSetup(backend: backend, makeOutputFilter: { ZmxOutputFilter() }, isPersistent: true),
-                runtime: runtime, failure: nil)
+                runtime: runtime, failure: nil, cttyExec: installed.cttyExec.path)
         } catch {
             NSLog("Armadale: persistent sessions unavailable: %@", String(describing: error))
             return ephemeral(String(describing: error))
@@ -330,12 +348,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Armadale › Settings… (⌘,): the one Settings window.
     @objc func showSettings(_ sender: Any?) {
+        showSettings(tab: nil)
+    }
+
+    /// File › New Tab on Host › Add Host…: Settings › Hosts.
+    @objc func showHostsSettings(_ sender: Any?) {
+        showSettings(tab: .hosts)
+    }
+
+    private func showSettings(tab: SettingsWindowController.Tab?) {
         if settingsWindowController == nil {
-            settingsWindowController = SettingsWindowController(model: model, settings: settings) {
+            let registry = registry
+            settingsWindowController = SettingsWindowController(
+                model: model, settings: settings,
+                hostTools: HostTools(
+                    testConnection: { try await registry.testConnection(to: $0) },
+                    deploy: { try await registry.deployHelper(to: $0) })
+            ) {
                 NSApp.mainMenu ?? MainMenu.make(installsSpecialMenus: false)
             }
         }
-        settingsWindowController?.show()
+        settingsWindowController?.show(tab)
         NSApp.activate()
     }
 
@@ -364,10 +397,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// File › New Tab with Profile is filled in each time it opens.
+    /// File › New Tab with Profile and New Tab on Host are filled in each
+    /// time they open.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu.identifier == MainMenu.newTabWithProfileIdentifier else { return }
-        MainMenu.fillProfileMenu(menu, profiles: model.profiles, defaultProfile: model.defaultProfileID)
+        switch menu.identifier {
+        case MainMenu.newTabWithProfileIdentifier:
+            MainMenu.fillProfileMenu(menu, profiles: model.profiles, defaultProfile: model.defaultProfileID)
+        case MainMenu.newTabOnHostIdentifier:
+            MainMenu.fillHostMenu(menu, hosts: model.hosts)
+        default:
+            break
+        }
     }
 
     // MARK: Windows
@@ -403,6 +443,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard let self, !self.isTerminating else { return }
             if !state.isOpen {
                 self.windowControllers[controller.workspaceID] = nil
+                // Nobody sees its panes: no retrying lost connections.
+                self.registry.setWindowOpen(false, for: controller.workspaceID)
             }
             // A deleted workspace has nothing left to record.
             if self.model.workspace(controller.workspaceID) != nil {
@@ -411,6 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         windowControllers[id] = controller
         controller.showWindow(nil)
+        registry.setWindowOpen(true, for: id)
     }
 
     // MARK: Alerts

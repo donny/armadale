@@ -57,7 +57,7 @@ struct ZmxRuntimeTests {
             #expect(ZmxRuntime.sessionID(fromName: name) == nil, "\(name)")
         }
         #expect(ZmxRuntime.sessionID(fromName: "a-abcdefghijklm234") == SessionID(raw: "abcdefghijklm234"))
-        #expect(LocalZmxBackend.parseSessionList("a-abcdefghijklmnop\nwork\n\na-qrstuvwxyz234567\n  a-bogus\n")
+        #expect(ZmxProtocol.parseSessionList("a-abcdefghijklmnop\nwork\n\na-qrstuvwxyz234567\n  a-bogus\n")
             == [SessionID(raw: "abcdefghijklmnop"), SessionID(raw: "qrstuvwxyz234567")])
     }
 
