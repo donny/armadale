@@ -19,7 +19,7 @@ reviewed and committed on `main`:
 | 5 Settings | 4d3ab86 | Settings window, preferences, themes, profiles, renderer registry |
 | 6 Remote | 7302a12 | `SSHTransport`, deployment, `RemoteZmxBackend`, reconnect, Hosts tab |
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
-| 8 Menu bar | (next commit) | quit question, General preference, accessory mode with status item, End Sessions and Quit |
+| 8 Menu bar | bf40d94 | quit question, General preference, accessory mode with status item, End Sessions and Quit |
 
 The app icon ("Panes": a graphite tile with three panes, the top-right
 one lit coral) was added after step 7: `scripts/render-app-icon.swift`
