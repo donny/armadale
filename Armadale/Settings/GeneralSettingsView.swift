@@ -3,7 +3,7 @@ import ArmadaleCore
 import SwiftUI
 
 /// Settings › General: default profile, default directory, notifications,
-/// close confirmation.
+/// close confirmation, quitting with running sessions.
 struct GeneralSettingsView: View {
     let model: AppModel
     @Bindable var preferences: Preferences
@@ -48,8 +48,13 @@ struct GeneralSettingsView: View {
             }
             Section {
                 Toggle("Ask before closing a pane with a running process", isOn: $preferences.confirmClosingRunningSession)
+                Picker("When quitting with running sessions", selection: $preferences.quitWithRunningSessions) {
+                    ForEach(Preferences.QuitWithRunningSessions.allCases, id: \.self) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
             } footer: {
-                Text("Armadale always reopens your windows at launch and reconnects to the sessions in them.")
+                Text("Armadale always reopens your windows at launch and reconnects to the sessions in them. Sessions kept running in the menu bar can be reopened or ended from Armadale’s icon there.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

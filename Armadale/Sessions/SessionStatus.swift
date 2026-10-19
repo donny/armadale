@@ -65,13 +65,16 @@ struct CloseRisk: Equatable, Sendable {
     /// the launch probe has answered, a restored session that was never
     /// shown may well be alive, and one that is connecting may be too.
     static func assess(_ items: [Item]) -> CloseRisk {
-        let mayBeRunning = items.contains { item in
-            switch item.status {
-            case .running, .disconnected, .attention: true
-            case .pending: item.mayExist || item.isRunning
-            case .ended, .unavailable: item.isRunning
-            }
+        CloseRisk(mayBeRunning: items.contains(where: mayBeRunning), unreachable: items.contains { $0.status == .unavailable })
+    }
+
+    /// Whether one session may still have a live process. Also what a quit
+    /// counts as a running session (``QuitDecision``).
+    static func mayBeRunning(_ item: Item) -> Bool {
+        switch item.status {
+        case .running, .disconnected, .attention: true
+        case .pending: item.mayExist || item.isRunning
+        case .ended, .unavailable: item.isRunning
         }
-        return CloseRisk(mayBeRunning: mayBeRunning, unreachable: items.contains { $0.status == .unavailable })
     }
 }

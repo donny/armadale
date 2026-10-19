@@ -300,6 +300,53 @@ final class SessionRegistry {
         }
     }
 
+    /// End Sessions and Quit (docs/DESIGN.md section 8): ends every
+    /// session that may be alive, all at once. Shown panes go through their
+    /// controllers (``SessionController/close()``: the backend's kill, then
+    /// the client); sessions never shown are killed in their backend
+    /// (restored ones may be alive). Unreachable sessions are left: those of
+    /// a removed host, and persistent sessions while the persistent runtime
+    /// is unavailable. Each kill is bounded by its backend's command
+    /// timeout, so this returns within the longest of them. Panes stay in
+    /// place, ended; the model is not changed. `only` limits it to those
+    /// sessions (a second pass); returns the sessions it went through.
+    @discardableResult
+    func endAllSessions(only: Set<SessionID>? = nil) async -> Set<SessionID> {
+        let ids = only ?? Set(model.sessions.map(\.id)).union(panes.keys)
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                if let controller = panes[id]?.controller {
+                    group.addTask { await controller.close() }
+                } else if let session = model.session(id) {
+                    if let host = session.remoteHostID {
+                        guard let backend = remoteBackend(for: host) else { continue }
+                        group.addTask { try? await backend.kill(id) }
+                    } else if runtime.isPersistent {
+                        let backend = runtime.backend
+                        group.addTask { try? await backend.kill(id) }
+                    }
+                }
+            }
+        }
+        return ids
+    }
+
+    /// Sessions that may be running although an End pass went through
+    /// `ended`: ones it did not cover (a tab opened meanwhile), and covered
+    /// ones whose pane runs again (a Respawn meanwhile). A covered session
+    /// that was never shown is judged gone: its launch-probe status is
+    /// stale after the kill.
+    func sessionsRunning(after ended: Set<SessionID>) -> Set<SessionID> {
+        Set(model.sessions.map(\.id).filter { id in
+            guard ended.contains(id) else { return CloseRisk.mayBeRunning(riskItem(for: id)) }
+            return panes[id] != nil && CloseRisk.mayBeRunning(riskItem(for: id))
+        })
+    }
+
+    /// Whether local sessions outlive the app in this run (the persistent
+    /// runtime is set up). In the fallback they end with any quit.
+    var sessionsSurviveQuit: Bool { runtime.isPersistent }
+
     // MARK: Persistence availability
 
     /// Retry on an unavailable pane: sets the persistent runtime up again
@@ -445,12 +492,21 @@ final class SessionRegistry {
 
     /// Whether closing these sessions needs a confirmation (``CloseRisk``).
     func closeRisk(of sessionIDs: [SessionID]) -> CloseRisk {
-        CloseRisk.assess(sessionIDs.map { id in
-            CloseRisk.Item(
-                status: status(of: id),
-                mayExist: restoredSessionIDs.contains(id) || panes[id].map { $0.controller.state != .detached } ?? false,
-                isRunning: panes[id]?.controller.isRunning ?? false)
-        })
+        CloseRisk.assess(sessionIDs.map(riskItem(for:)))
+    }
+
+    /// How many of the model's sessions may still have a live process, by
+    /// the close-confirmation rule (``CloseRisk/mayBeRunning(_:)``): what a
+    /// quit asks about and the status item's menu shows.
+    func runningSessionCount() -> Int {
+        QuitDecision.runningCount(model.sessions.map { riskItem(for: $0.id) })
+    }
+
+    private func riskItem(for id: SessionID) -> CloseRisk.Item {
+        CloseRisk.Item(
+            status: status(of: id),
+            mayExist: restoredSessionIDs.contains(id) || panes[id].map { $0.controller.state != .detached } ?? false,
+            isRunning: panes[id]?.controller.isRunning ?? false)
     }
 
     // MARK: Remote hosts

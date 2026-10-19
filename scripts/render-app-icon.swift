@@ -5,6 +5,8 @@
 //
 // Writes, under <repo-root>/Armadale/Resources:
 //   Assets.xcassets/AppIcon.appiconset/   PNGs 16…1024 px and Contents.json
+//   Assets.xcassets/StatusItem.imageset/  the menu bar status item's glyph:
+//                                         template PNGs, 18 pt at 1x and 2x
 //   AppIcon.icon/                         Icon Composer document for macOS 26+
 //                                         (icon.json plus the layer SVGs)
 // and <repo-root>/docs/icon/AppIcon.svg, the master vector for reference.
@@ -16,6 +18,11 @@
 // catalog rasters follow the macOS icon grid: an 824 pt tile centred on a
 // 1024 pt canvas with a soft baked shadow. The Icon Composer layers are
 // full-bleed; the system supplies the tile shape, depth and lighting.
+//
+// The status item glyph (menu bar mode, docs/DESIGN.md section 8) is the
+// same three panes without the tile, black on transparent for template
+// rendering: the lit pane solid, the two idle panes as outlines, so the lit
+// one still stands out in one colour.
 
 import CoreGraphics
 import Foundation
@@ -133,6 +140,101 @@ func renderPNG(pixels: Int, to url: URL) throws {
     guard CGImageDestinationFinalize(dest) else {
         throw NSError(domain: "render-app-icon", code: 3, userInfo: [NSLocalizedDescriptionKey: "finalize failed for \(url.path)"])
     }
+}
+
+// MARK: - Status item glyph (template image)
+
+enum StatusGlyph {
+    /// Points of the square image; the menu bar's usual template size.
+    static let points: CGFloat = 18
+    /// The panes' bounding box (168…856 on the tile) fills this many points,
+    /// centred.
+    static let content: CGFloat = 16
+    /// Outline width of the idle panes, in points.
+    static let stroke: CGFloat = 1
+    static let scales = [1, 2]
+}
+
+/// A pane scaled to the glyph, in points, top-left origin, with its edges
+/// on the pixel grid of `scale` so the small rasters stay sharp.
+func glyphRect(_ rect: CGRect, scale: Int) -> CGRect {
+    let box = Geometry.tall.union(Geometry.lit).union(Geometry.lowRight)
+    let k = StatusGlyph.content / box.width
+    let inset = (StatusGlyph.points - StatusGlyph.content) / 2
+    let s = CGFloat(scale)
+    func snap(_ v: CGFloat) -> CGFloat { (v * s).rounded() / s }
+    let minX = snap(inset + (rect.minX - box.minX) * k), maxX = snap(inset + (rect.maxX - box.minX) * k)
+    let minY = snap(inset + (rect.minY - box.minY) * k), maxY = snap(inset + (rect.maxY - box.minY) * k)
+    return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+}
+
+func renderStatusGlyph(scale: Int, to url: URL) throws {
+    let pixels = Int(StatusGlyph.points) * scale
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    guard let ctx = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        throw NSError(domain: "render-app-icon", code: 1, userInfo: [NSLocalizedDescriptionKey: "no CGContext for the status glyph"])
+    }
+    ctx.setShouldAntialias(true)
+    ctx.translateBy(x: 0, y: CGFloat(pixels))
+    ctx.scaleBy(x: CGFloat(scale), y: -CGFloat(scale))
+    let k = StatusGlyph.content / Geometry.tall.union(Geometry.lit).union(Geometry.lowRight).width
+    let radius = Geometry.paneRadius * k
+    let black = CGColor(gray: 0, alpha: 1)
+    // Idle panes: outlines inside their bounds.
+    let half = StatusGlyph.stroke / 2
+    for rect in Geometry.dimPanes {
+        let r = glyphRect(rect, scale: scale).insetBy(dx: half, dy: half)
+        ctx.addPath(CGPath(roundedRect: r, cornerWidth: radius - half, cornerHeight: radius - half, transform: nil))
+    }
+    ctx.setStrokeColor(black)
+    ctx.setLineWidth(StatusGlyph.stroke)
+    ctx.strokePath()
+    // The lit pane: solid.
+    ctx.addPath(CGPath(roundedRect: glyphRect(Geometry.lit, scale: scale), cornerWidth: radius, cornerHeight: radius, transform: nil))
+    ctx.setFillColor(black)
+    ctx.fillPath()
+    guard let image = ctx.makeImage(),
+          let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+        throw NSError(domain: "render-app-icon", code: 2, userInfo: [NSLocalizedDescriptionKey: "cannot write \(url.path)"])
+    }
+    // 72 dpi × scale, so the 2x file is 18 pt as well.
+    let dpi = 72 * scale
+    CGImageDestinationAddImage(dest, image, [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi] as CFDictionary)
+    guard CGImageDestinationFinalize(dest) else {
+        throw NSError(domain: "render-app-icon", code: 3, userInfo: [NSLocalizedDescriptionKey: "finalize failed for \(url.path)"])
+    }
+}
+
+func statusGlyphFileName(scale: Int) -> String {
+    scale == 1 ? "status_item.png" : "status_item@\(scale)x.png"
+}
+
+func statusGlyphContentsJSON() -> String {
+    let images = StatusGlyph.scales.map { scale in
+        """
+            {
+              "filename" : "\(statusGlyphFileName(scale: scale))",
+              "idiom" : "universal",
+              "scale" : "\(scale)x"
+            }
+        """
+    }.joined(separator: ",\n")
+    return """
+    {
+      "images" : [
+    \(images)
+      ],
+      "info" : {
+        "author" : "xcode",
+        "version" : 1
+      },
+      "properties" : {
+        "template-rendering-intent" : "template"
+      }
+    }
+
+    """
 }
 
 // MARK: - SVG
@@ -278,6 +380,14 @@ do {
         print("wrote \(url.path)")
     }
     try write(contentsJSON(), to: appiconset.appendingPathComponent("Contents.json"))
+    let statusItem = resources.appendingPathComponent("Assets.xcassets/StatusItem.imageset")
+    try fm.createDirectory(at: statusItem, withIntermediateDirectories: true)
+    for scale in StatusGlyph.scales {
+        let url = statusItem.appendingPathComponent(statusGlyphFileName(scale: scale))
+        try renderStatusGlyph(scale: scale, to: url)
+        print("wrote \(url.path)")
+    }
+    try write(statusGlyphContentsJSON(), to: statusItem.appendingPathComponent("Contents.json"))
     try write("{\n  \"info\" : {\n    \"author\" : \"xcode\",\n    \"version\" : 1\n  }\n}\n",
               to: resources.appendingPathComponent("Assets.xcassets/Contents.json"))
 

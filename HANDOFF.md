@@ -5,9 +5,9 @@ whenever work pauses. The durable rules for working in this repository are
 in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
 instructions are in `README.md`.
 
-## Status (October 18, 2026)
+## Status (October 19, 2026)
 
-Steps 1–7 of the build order (`docs/DESIGN.md` §12) are implemented,
+Steps 1–8 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
 
 | Step | Commit | What it added |
@@ -19,6 +19,7 @@ reviewed and committed on `main`:
 | 5 Settings | 4d3ab86 | Settings window, preferences, themes, profiles, renderer registry |
 | 6 Remote | 7302a12 | `SSHTransport`, deployment, `RemoteZmxBackend`, reconnect, Hosts tab |
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
+| 8 Menu bar | (next commit) | quit question, General preference, accessory mode with status item, End Sessions and Quit |
 
 The app icon ("Panes": a graphite tile with three panes, the top-right
 one lit coral) was added after step 7: `scripts/render-app-icon.swift`
@@ -28,10 +29,21 @@ refinement pages used to choose it are not in the repository.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
-warnings). The working tree was clean and nothing was running when work
-paused.
+warnings; 467 at step 8). The working tree was clean and nothing was
+running when work paused.
 
-## Next: step 8 (Ship), not started
+Step 8 (October 19, 2026) came out of the macOS 27 investigation below:
+Armadale asks before quitting with running sessions and can stay in the
+menu bar instead (`docs/DESIGN.md` section 8, "Quitting with running
+sessions"). Owner decisions: a plain quit that leaves sessions running
+exists only in the status item's menu (from accessory mode, where the
+Dock shows nothing), never in the ⌘Q alert; the choice is rememberable
+through a General preference (Ask / Keep running in the menu bar / End
+sessions, default Ask); the status item shows the Panes glyph as a
+template image. Built with the implementer → reviewer loop (467 tests,
+zero warnings, `check-quit.sh` passing).
+
+## Next: step 9 (Ship), not started
 
 Decisions needed from the owner before work begins:
 
@@ -92,7 +104,31 @@ Agents
 - A session whose profile was deleted is never notified under "Only for
   agent profiles".
 
-Shipping (step 8)
+Menu bar mode (step 8), from its review
+- The Dock badge could not be seen for Armadale on this Mac in any mode,
+  before or after step 8 (the Dock's `AXStatusLabel` stays empty with
+  attention pending). Probably the app's badge setting in System
+  Settings › Notifications; the code path (`NSApp.dockTile.badgeLabel`)
+  is unchanged. Check on a Mac where badges show.
+- A workspace window in full screen saves its full-screen frame to the
+  state file, so the next launch opens a screen-sized normal window.
+  Predates step 8.
+- Not exercised live: a real logout, restart or shutdown (the quit
+  event's reason is unit-tested with synthetic events only); a
+  notification click reopening from menu bar mode (code path only);
+  End Sessions and Quit against a slow or unreachable remote host; the
+  persistence fallback mode; window order with several windows on
+  return; macOS hiding the status item; the light menu bar.
+- Whether a quit from menu bar mode (accessory policy) triggers macOS
+  27's first-quit "allow this app to run in the background" prompt is
+  unknown: the owner's stored Allow masks it on this Mac. Whether
+  launchd lists the session daemons under Background App Activity after
+  such a quit is also unknown (needs root or the System Settings UI).
+- What Don't Allow does on that prompt is still untested (toggle
+  Armadale off under Allow in the Background, launch, quit with a
+  session).
+
+Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
 - `DEVELOPMENT_TEAM` empty; signing is "sign to run locally".
@@ -140,59 +176,121 @@ Proposed step: a `GhosttySurface` package implementing `TerminalSurface`
 over libghostty-spm's in-memory session, registered in `SurfaceRegistry`
 as a second renderer with SwiftTerm staying the default, then compared on
 real sessions. Decision needed: whether to spend a step on this before or
-after step 8.
+after step 9 (Ship).
 
-### macOS 27: "Running in Background" after quit
+### macOS 27: "Running in Background" after quit — tested, decided (step 8)
 
 Since macOS 27 the Dock keeps an app's icon with a light grey indicator
-and the tooltip "Running in Background" when any process the app is
-*responsible for* is still alive after quit (Apple support article
-125671). Responsibility is set at spawn and inherited down the whole
-process tree, double forks included. Armadale spawns `ctty-exec` with
-`posix_spawn`, it execs the persistence client, the client forks the
-session daemon, the daemon runs the shell and any agent: all of it is
-attributed to Armadale, so after quitting with live sessions the Dock is
-reporting the truth. Verified on this Mac with a spawn experiment: a plain
-child and its grandchild report the parent's responsible process; a child
-spawned with `responsibility_spawnattrs_setdisclaim` (present on macOS 27,
-used by LLDB and Chromium, not in public headers, looked up with `dlsym`)
-is responsible for itself, and so is its grandchild.
+and the tooltip "Running in Background" when processes that originate
+from the app are still alive after quit (Apple support article 125671).
+Tested live on October 19, 2026 (isolated state directory, fresh session
+each run, Dock driven through accessibility). Results:
 
-The risk is the icon's context menu item "Stop Running in Background",
-which press coverage says kills the background processes. For Armadale
-that would be every session daemon, so every persistent session and the
-agents in them, from one Dock click. The per-app toggle in System
-Settings › General › Login Items & Extensions › Background App Activity
-is undocumented for already-running processes. Apple has published no
-developer guidance or API. Neither action has been tested here: it needs
-the Mac free for live UI work.
+- **The Dock's "Stop Running in Background" ends every session.** It
+  sends SIGTERM to every process in the session tree at once (a trap in
+  the session shell and one in a background job both recorded TERM
+  before the daemon's own SIGHUP arrived). The daemon logs "SIGTERM
+  received, shutting down gracefully", unlinks its socket and SIGHUPs the
+  shell. No SIGKILL follows: a process that ignores SIGTERM survives,
+  orphaned, but the session is gone. The icon leaves the Dock once the
+  tree is dead; a quit with nothing left behind shows no indicator.
+- **A first-quit prompt exists.** On quit with a live session the
+  system asked the owner: "“Armadale” was closed. Allow this app to run
+  in the background in the future?", with Don't Allow / Allow. Every
+  user will see this on their first quit with a session running, and
+  the wording ("updating or syncing data") makes Don't Allow sound
+  harmless. What Don't Allow does is **untested**; by Apple's deployment
+  guide the system then terminates the background tasks, presumably on
+  every quit. Apple's deployment guide: "if background tasks are started
+  by an app and remain active after a user quits the app, the user is
+  prompted to allow or not allow the background tasks to remain active";
+  an MDM Service Management profile can suppress the prompt by bundle id
+  or team id.
+- **Disclaiming responsibility does not help.** With
+  `responsibility_spawnattrs_setdisclaim` on the `posix_spawn` in
+  `spawnOnPTY` (symbol via `dlsym`), every process in the tree became its
+  own responsible process (daemon, shell, client), yet the Dock still
+  showed the indicator and its stop item still killed the daemon. The
+  only effect was on privacy prompts: `ls ~/Desktop` from inside a
+  session produced "“ctty-exec-0.1.0” would like to access files in your
+  Desktop folder" (the installed helper copy's file name) instead of
+  Armadale. The change was reverted.
+- **A launchd job submitted from inside a session does not escape
+  either.** `launchctl submit` from the pane gave the job its own
+  coalition and responsibility, but after quit the Dock still showed
+  Armadale, and the stop item killed the job and removed its launchd
+  entry. The attribution is kept by launchd across fork, exec, disclaim
+  and `launchctl submit`; nothing a child does after spawn changes it.
+  Option 3 of the earlier plan (transient launchd agents started by the
+  app) is therefore out as well.
 
-Options:
-1. Keep attribution, accept the indicator. Sessions keep inheriting
-   Armadale's privacy grants (a Full Disk Access grant covers every shell;
-   folder prompts say "Armadale"). Nothing in our code can intercept the
-   Dock's kill if it is SIGKILL.
-2. Disclaim at spawn: one attribute on the `posix_spawn` call in
-   `PTYSpawn.swift` (`spawnOnPTY`). The daemon tree becomes its own
-   responsible process; the indicator should disappear and the Dock has
-   nothing to kill. Cost: privacy prompts from shells and agents would
-   carry the helper binary's name rather than Armadale's, and Armadale's
-   grants would no longer cover sessions. The installed helper copy would
-   have to be renamed so the runtime's name never reaches a prompt
-   (product rule). The `forkpty` fallback cannot disclaim; acceptable.
-3. Transient launchd agents for daemons: same privacy consequence as 2,
-   more moving parts, needs a server-only start mode. No advantage over 2.
+What Apple says (developer forums, DTS replies on the macOS 26 version of
+this feature, thread 799162): apps should quit when told; background work
+that outlives the app must be visible, as a menu bar status item, a
+window, or an entry in System Settings › Login Items & Extensions.
+Keyboard Maestro's forum reports that its Engine avoids the Dock
+indicator when it runs as a login item rather than being launched by the
+editor. Against that, forum thread 835214 (macOS 27 beta, FB23203848)
+reports an `SMAppService` agent still giving the parent app the grey dot
+after quit, and thread 848726 reports turning an app off under Background
+App Activity sends its `SMAppService` daemon SIGTERM. Thread 847300: a
+background-only app (`LSUIElement`) now appears in the Dock with the
+"Running in Background" subtitle. No API, entitlement or Info.plist key
+opts out.
 
-Test plan before deciding (owner present, isolated state dir): start a
-throwaway session, quit, confirm the grey dot, choose "Stop Running in
-Background", check whether the daemon dies and how (socket removed means
-SIGTERM, socket left means SIGKILL); then a build with the disclaim
-attribute: dot gone, sessions survive quit, and what name a protected-folder
-prompt carries from inside a session. Recommendation: if the kill is real,
-ship the disclaim with a presentable helper name, because "one click ends
-every session" is the worse failure for a persistence terminal; if the
-Dock action is gentler than described, keep attribution and document the
-dot. Record the outcome in `docs/DESIGN.md` section 7 and 13.
+Options considered (3 was chosen and became step 8):
+1. Keep the architecture, accept the indicator and the prompt, document
+   both, and make the sessions survivable: a visible "sessions are still
+   running" cue at quit (an alert, or a window that stays while sessions
+   are alive) so the first-quit prompt is understood, and a note in the
+   README. Does not stop a user clicking Don't Allow or Stop.
+2. Move session ownership out of the app's process tree into a
+   `SMAppService` login item or agent ("Armadale Sessions"): a small
+   server that launchd starts and that owns the persistence daemons; the
+   app attaches through it. It appears under Login Items & Extensions
+   with the app's name, which is Apple's sanctioned form, but thread
+   835214 suggests the Dock may still show the parent app, and a user
+   turning it off there still SIGTERMs it. Needs a prototype before it
+   becomes a step: register an agent, start a daemon from it, quit, and
+   see what the Dock and the toggle do.
+3. Do not quit: keep a status item while sessions are alive (the
+   "visible presence" exemption). **Prototyped and tested on October 19,
+   2026**, then built as step 8. The prototype: ⌘Q with live sessions shows an
+   alert, "N sessions are still running", with *Keep Running in Menu
+   Bar* (default), *End Sessions and Quit* (destructive) and *Cancel*.
+   Keep hides every window, switches the activation policy to accessory
+   and adds a status item whose menu shows the count, *Open Armadale*,
+   *Quit, Keep Sessions Running* and *End Sessions and Quit*. Observed:
+   - In menu bar mode Armadale is **not in the Dock at all**, still not
+     after 90 s, and no system dialog appeared. The daemon and its client
+     stay attached. *Open Armadale* brings the window and Dock icon back.
+   - *Quit, Keep Sessions Running* from the status menu quits from
+     accessory mode: the daemon survives and the Dock shows **no**
+     "Running in Background" item, checked at 3 s and 20 s. A quit from
+     the normal (regular) policy with the same daemon alive does show it.
+     The Dock decorates an existing tile; an accessory app has none.
+     Whether launchd still lists the daemon under Background App
+     Activity is unknown (needs root or System Settings).
+   - Relaunch reattaches the pane to the same session. *End Sessions and
+     Quit* kills every session (controllers for shown panes, backends for
+     the rest), the daemon logs the kill, the socket is removed, and the
+     app exits with nothing left; no Dock item.
+   - SIGTERM (logout) bypasses the alert and quits as before; the
+     `check-quit.sh` paths are unchanged in principle but were not rerun.
+   Open questions for making this a step: wording; whether a quit from
+   menu bar mode should be the only "keep running" quit; whether the
+   first-quit system prompt still appears for an accessory-mode quit
+   (cannot be tested on this Mac while the Allow decision is stored);
+   the Settings window and notifications while in menu bar mode; the
+   `.terminateLater` note in DESIGN.md §8 (the prototype cancels the
+   quit, ends sessions in a Task, then calls terminate again, so it does
+   not depend on `.terminateLater`).
+
+Still untested, in order of value: Don't Allow on the prompt (toggle
+Armadale off under Allow in the Background, launch, quit with a
+session); whether an accessory-mode quit triggers that prompt; an
+`SMAppService` agent prototype (option 2). Record the outcome in
+`docs/DESIGN.md` sections 7 and 13 once decided.
 
 ### The `ctty-exec` helper, for orientation
 
@@ -214,6 +312,14 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
 
 ## State of this Mac that matters
 
+- Background App Activity: on October 19, 2026 the owner answered
+  **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
+  so the prompt will not appear again on this Mac until Armadale is
+  switched off under System Settings › General › Login Items &
+  Extensions › Allow in the Background (`sudo sfltool dumpbtm` shows the
+  record). A Desktop-folder privacy denial was recorded for the deleted
+  path `/tmp/armadale-bgtest/bin/ctty-exec-0.1.0` during the disclaim
+  test; harmless.
 - Notification permission for `com.tinylittleapps.armadale` is granted in
   System Settings (done during step 7 testing); it applies to any build
   with that bundle id.

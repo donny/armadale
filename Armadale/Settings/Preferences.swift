@@ -32,6 +32,27 @@ final class Preferences {
         static let notifyOnAttention = "notifyOnAttention"
         static let notifyOnlyForAgents = "notifyOnlyForAgents"
         static let notificationPlaysSound = "notificationPlaysSound"
+        static let quitWithRunningSessions = "quitWithRunningSessions"
+    }
+
+    /// Settings › General, "When quitting with running sessions"
+    /// (docs/DESIGN.md section 8, "Quitting with running sessions").
+    enum QuitWithRunningSessions: String, CaseIterable, Sendable {
+        /// Ask every time (the default): keep running in the menu bar, end
+        /// the sessions and quit, or cancel.
+        case ask
+        /// Keep the sessions running and stay in the menu bar, without asking.
+        case keepInMenuBar
+        /// End every session and quit, without asking.
+        case endSessions
+
+        var title: String {
+            switch self {
+            case .ask: "Ask"
+            case .keepInMenuBar: "Keep running in the menu bar"
+            case .endSessions: "End sessions"
+            }
+        }
     }
 
     static let fontSizeRange: ClosedRange<Double> = 6...48
@@ -58,6 +79,7 @@ final class Preferences {
     private var storedNotifyOnAttention: Bool
     private var storedNotifyOnlyForAgents: Bool
     private var storedNotificationPlaysSound: Bool
+    private var storedQuitWithRunningSessions: QuitWithRunningSessions
 
     init(defaults: UserDefaults, suiteName: String? = nil) {
         self.defaults = defaults
@@ -77,6 +99,8 @@ final class Preferences {
         storedNotifyOnAttention = defaults.object(forKey: Key.notifyOnAttention) as? Bool ?? true
         storedNotifyOnlyForAgents = defaults.object(forKey: Key.notifyOnlyForAgents) as? Bool ?? true
         storedNotificationPlaysSound = defaults.object(forKey: Key.notificationPlaysSound) as? Bool ?? false
+        storedQuitWithRunningSessions = defaults.string(forKey: Key.quitWithRunningSessions)
+            .flatMap(QuitWithRunningSessions.init(rawValue:)) ?? .ask
     }
 
     // MARK: General
@@ -116,6 +140,12 @@ final class Preferences {
     var confirmClosingRunningSession: Bool {
         get { storedConfirmClosing }
         set { storedConfirmClosing = newValue; defaults.set(newValue, forKey: Key.confirmClosingRunningSession) }
+    }
+
+    /// What quitting does while sessions are running (``QuitDecision``).
+    var quitWithRunningSessions: QuitWithRunningSessions {
+        get { storedQuitWithRunningSessions }
+        set { storedQuitWithRunningSessions = newValue; defaults.set(newValue.rawValue, forKey: Key.quitWithRunningSessions) }
     }
 
     // MARK: Notifications (DESIGN §10)

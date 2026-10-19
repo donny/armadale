@@ -34,7 +34,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
         /// Each tab's content size; the window resizes to it, keeping its top edge.
         var contentSize: NSSize {
             switch self {
-            case .general: NSSize(width: 620, height: 330)
+            case .general: NSSize(width: 620, height: 520)
             case .appearance: NSSize(width: 620, height: 640)
             case .profiles: NSSize(width: 780, height: 560)
             case .hosts: NSSize(width: 780, height: 600)
@@ -45,6 +45,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private let settings: AppSettings
     private let tabs: SettingsTabViewController
+    /// Called when the window closes (in menu bar mode the app delegate
+    /// then gives up being the active app).
+    var onClose: (() -> Void)?
 
     init(
         model: AppModel, settings: AppSettings, hostTools: HostTools = .unavailable,
@@ -131,6 +134,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             menuItem.title = "Close Settings"
         }
         return true
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose?()
     }
 
     func windowDidMove(_ notification: Notification) {

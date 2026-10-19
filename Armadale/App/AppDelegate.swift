@@ -41,6 +41,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// are the saved sessions a complete list of what Armadale created.
     private let stateLoadedCleanly: Bool
 
+    /// Menu bar mode (docs/DESIGN.md section 8, "Quitting with running
+    /// sessions"): the status item while the app stays running with its
+    /// windows hidden and no Dock icon; `nil` otherwise.
+    private var menuBarItem: MenuBarStatusItem?
+    /// The quit came from SIGTERM (logout) or a launch that cannot go on:
+    /// never ask, never stay.
+    private var isForcedQuit = false
+    /// End Sessions and Quit is running.
+    private var isEndingSessions = false
+    /// End Sessions and Quit has finished; its quit goes straight through.
+    private var sessionsEnded = false
+
     /// What to tell the user about the state file at launch.
     private struct LoadReport {
         var message: String
@@ -340,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // Do not open windows or save anything: the file on disk wins.
             NSApp.activate()
             showAlert(message: report.message, details: report.details, style: .critical)
+            isForcedQuit = true
             NSApp.terminate(nil)
             return
         }
@@ -376,6 +389,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Running sessions (docs/DESIGN.md section 8): ask, stay in the menu
+        // bar, or end them first. Neither waits here: staying cancels the
+        // quit, and ending them cancels it and quits again when done.
+        let decision = QuitDecision.decide(
+            running: registry.runningSessionCount(),
+            preference: settings.preferences.quitWithRunningSessions,
+            context: QuitDecision.Context(
+                isForced: isForcedQuit || Self.isSystemQuit(NSAppleEventManager.shared().currentAppleEvent),
+                isInMenuBar: menuBarItem != nil,
+                isEndingSessions: isEndingSessions, sessionsEnded: sessionsEnded))
+        switch decision {
+        case .quitNow:
+            break
+        case .ask(let running):
+            switch askAboutRunningSessions(running) {
+            case .alertFirstButtonReturn: enterMenuBarMode()
+            case .alertSecondButtonReturn: endSessionsAndQuit(nil)
+            default: break
+            }
+            return .terminateCancel
+        case .keepInMenuBar:
+            enterMenuBarMode()
+            return .terminateCancel
+        case .endSessions:
+            endSessionsAndQuit(nil)
+            return .terminateCancel
+        case .cancel:
+            return .terminateCancel
+        }
         // Windows closing because the app quits must stay "open" for next launch.
         isTerminating = true
         // Quitting never ends sessions: hang up every client now (SIGHUP and
@@ -406,6 +448,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // `open -a`, Finder, or a second launch while in menu bar mode.
+        if menuBarItem != nil {
+            openFromMenuBar(nil)
+            return true
+        }
         if !flag {
             if let first = model.workspaces.first {
                 openWindow(for: first.id)
@@ -451,7 +498,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             ) {
                 NSApp.mainMenu ?? MainMenu.make(installsSpecialMenus: false)
             }
+            settingsWindowController?.onClose = { [weak self] in
+                self?.settingsWindowDidClose()
+            }
         }
+        NSApp.unhide(nil) // hidden after Settings closed in menu bar mode
         settingsWindowController?.show(tab)
         NSApp.activate()
     }
@@ -485,10 +536,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     /// A click on a notification: the session's pane, if it still exists;
-    /// otherwise just the app.
+    /// otherwise just the app. Either leaves menu bar mode (revealing a
+    /// pane opens its window, which does).
     fileprivate func openNotification(for session: SessionID?) {
         if let session, attention.reveal(session) { return }
-        NSApp.activate()
+        if menuBarItem != nil {
+            openFromMenuBar(nil)
+        } else {
+            NSApp.activate()
+        }
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
@@ -531,6 +587,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// no tab groups left, a fresh "Main" group) as needed. A new window
     /// without a saved frame is cascaded from `reference`.
     private func openWindow(for id: WorkspaceID, cascadingFrom reference: NSWindow? = nil) {
+        // Showing a workspace window always leaves menu bar mode (a
+        // notification click, ⌘N or ⌃⌘A from the Settings window there).
+        leaveMenuBarMode()
         if let existing = windowControllers[id] {
             existing.showWindow(nil)
             return
@@ -590,6 +649,137 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
+    // MARK: Menu bar mode
+
+    /// A quit Apple event that carries a reason (`kAEQuitReason`: log out,
+    /// restart, shut down, quit all) comes from the system, not from the
+    /// user: like SIGTERM it must not ask (that would hold up logout) or
+    /// stay. ⌘Q has no Apple event; the Dock's Quit and AppleScript's
+    /// `quit` send one without a reason.
+    static func isSystemQuit(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event, event.eventClass == AEEventClass(kCoreEventClass),
+              event.eventID == AEEventID(kAEQuitApplication)
+        else { return false }
+        let keyword = AEKeyword(kAEQuitReason)
+        return event.attributeDescriptor(forKeyword: keyword) != nil || event.paramDescriptor(forKeyword: keyword) != nil
+    }
+
+    /// The quit question (docs/DESIGN.md section 8). Returns the button:
+    /// first Keep Running in Menu Bar, second End Sessions and Quit.
+    private func askAboutRunningSessions(_ running: Int) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.messageText = MenuBarText.alertMessage(running: running)
+        alert.informativeText = MenuBarText.alertInformative
+        alert.addButton(withTitle: MenuBarText.keepButton)
+        let end = alert.addButton(withTitle: MenuBarText.endButton)
+        end.hasDestructiveAction = true
+        alert.addButton(withTitle: MenuBarText.cancelButton)
+        // A quit from the Dock's menu, or from another app, may come while
+        // Armadale is in the background: the alert needs it in front.
+        NSApp.activate()
+        return alert.runModal()
+    }
+
+    /// Hides every window (ordered out, not closed: the workspaces stay
+    /// open for the next launch and their panes stay attached), leaves the
+    /// Dock (accessory activation policy) and shows the status item.
+    private func enterMenuBarMode() {
+        guard menuBarItem == nil else { return }
+        for controller in windowControllers.values {
+            controller.window?.orderOut(nil)
+        }
+        settingsWindowController?.window?.orderOut(nil)
+        NSApp.setActivationPolicy(.accessory)
+        let registry = registry
+        menuBarItem = MenuBarStatusItem(
+            target: self,
+            actions: MenuBarStatusItem.Actions(
+                open: #selector(openFromMenuBar(_:)),
+                settings: #selector(showSettings(_:)),
+                quitKeepingSessions: #selector(quitKeepingSessions(_:)),
+                endSessionsAndQuit: #selector(endSessionsAndQuit(_:))),
+            attention: attention,
+            runningCount: { registry.runningSessionCount() },
+            sessionsSurviveQuit: { registry.sessionsSurviveQuit })
+    }
+
+    /// Back to a regular app: Dock icon (with the attention badge, which
+    /// kept counting meanwhile) and every hidden workspace window. Does
+    /// nothing outside menu bar mode.
+    private func leaveMenuBarMode() {
+        guard let item = menuBarItem else { return }
+        item.remove()
+        menuBarItem = nil
+        NSApp.unhide(nil)
+        NSApp.setActivationPolicy(.regular)
+        NSApp.dockTile.badgeLabel = AttentionBadge.label(total: attention.total)
+        for controller in windowControllers.values {
+            controller.showWindow(nil)
+        }
+    }
+
+    /// Closing Settings (⌘W) in menu bar mode would leave an active
+    /// accessory app with no window, taking keystrokes nowhere: once the
+    /// close is done the app hides, which activates the app that was
+    /// active before (`NSApp.deactivate()` does not, for an accessory app:
+    /// it stayed the frontmost application). The status item stays; every
+    /// way back unhides (``leaveMenuBarMode()``, ``showSettings(tab:)``).
+    private func settingsWindowDidClose() {
+        guard menuBarItem != nil else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.menuBarItem != nil,
+                  self.settingsWindowController?.window?.isVisible != true
+            else { return }
+            NSApp.hide(nil)
+        }
+    }
+
+    /// Status menu › Open Armadale (and every reopen in menu bar mode).
+    @objc func openFromMenuBar(_ sender: Any?) {
+        leaveMenuBarMode()
+        if windowControllers.isEmpty {
+            if let first = model.workspaces.first {
+                openWindow(for: first.id)
+            } else {
+                newWindow(nil)
+            }
+        }
+        NSApp.activate()
+    }
+
+    /// Status menu › Quit, Keep Sessions Running: a plain quit from
+    /// accessory mode (``QuitDecision/Context/isInMenuBar``). Clients hang
+    /// up, sessions keep running, and with no Dock tile the Dock shows
+    /// nothing afterwards.
+    @objc func quitKeepingSessions(_ sender: Any?) {
+        NSApp.terminate(nil)
+    }
+
+    /// End Sessions and Quit (the alert, the status menu, or the "End
+    /// them" preference): ends every session, then quits. The quit that
+    /// led here was cancelled; this one goes straight through. Never
+    /// `.terminateLater` (see ``applicationShouldTerminate(_:)``).
+    /// Sessions that started while the first pass ran (a tab opened, a
+    /// pane respawned) get one more pass; then it quits regardless. In
+    /// menu bar mode the status menu shows "Ending sessions…" meanwhile.
+    @objc func endSessionsAndQuit(_ sender: Any?) {
+        guard !isEndingSessions else { return }
+        isEndingSessions = true
+        menuBarItem?.showEnding()
+        Task { [weak self, registry] in
+            let ended = await registry.endAllSessions()
+            let appeared = registry.sessionsRunning(after: ended)
+            if !appeared.isEmpty {
+                NSLog("Armadale: %d session(s) started while ending sessions; ending them too", appeared.count)
+                await registry.endAllSessions(only: appeared)
+            }
+            guard let self else { return }
+            self.isEndingSessions = false
+            self.sessionsEnded = true
+            NSApp.terminate(nil)
+        }
+    }
+
     // MARK: Persistence
 
     /// Turns SIGTERM (`kill`, `pkill`, launchd at logout) into a normal quit
@@ -597,13 +787,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func handleTerminationSignal() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler {
+        source.setEventHandler { [weak self] in
             // From the run loop rather than inside this dispatch block, so
             // the quit runs like ⌘Q's; in the common and modal-panel modes,
             // so an app-modal alert (a launch warning, a save failure) does
             // not hold it up until someone clicks OK. Logout must not wait.
-            RunLoop.main.perform(inModes: [.common, .modalPanel]) {
+            RunLoop.main.perform(inModes: [.common, .modalPanel]) { [weak self] in
                 MainActor.assumeIsolated {
+                    self?.isForcedQuit = true
                     NSApp.terminate(nil)
                 }
             }

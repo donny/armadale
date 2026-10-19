@@ -29,6 +29,7 @@ struct PreferencesTests {
             #expect(preferences.cursorShape == .block)
             #expect(preferences.cursorBlinks)
             #expect(preferences.rendererID == "swiftterm")
+            #expect(preferences.quitWithRunningSessions == .ask)
             #expect(defaults.dictionaryRepresentation().keys.allSatisfy { !$0.hasPrefix("font") }, "reading writes nothing")
         }
     }
@@ -48,6 +49,7 @@ struct PreferencesTests {
             preferences.cursorShape = .bar
             preferences.cursorBlinks = false
             preferences.rendererID = "other"
+            preferences.quitWithRunningSessions = .keepInMenuBar
 
             let reloaded = Preferences(defaults: defaults)
             #expect(reloaded.defaultProfileID == Profile.codex.id)
@@ -64,8 +66,21 @@ struct PreferencesTests {
             #expect(reloaded.cursorShape == .bar)
             #expect(!reloaded.cursorBlinks)
             #expect(reloaded.rendererID == "other")
+            #expect(reloaded.quitWithRunningSessions == .keepInMenuBar)
+            #expect(defaults.string(forKey: "quitWithRunningSessions") == "keepInMenuBar")
+            reloaded.quitWithRunningSessions = .endSessions
+            #expect(Preferences(defaults: defaults).quitWithRunningSessions == .endSessions)
             // The close confirmation keeps its step 4 key.
             #expect(defaults.object(forKey: "confirmClosingRunningSession") as? Bool == false)
+        }
+    }
+
+    @Test func anUnknownQuitChoiceFallsBackToAsk() {
+        withSuite { defaults, _ in
+            defaults.set("quitSilently", forKey: Preferences.Key.quitWithRunningSessions)
+            #expect(Preferences(defaults: defaults).quitWithRunningSessions == .ask)
+            defaults.set(true, forKey: Preferences.Key.quitWithRunningSessions)
+            #expect(Preferences(defaults: defaults).quitWithRunningSessions == .ask)
         }
     }
 

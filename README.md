@@ -11,8 +11,9 @@ versioned JSON in `~/Library/Application Support/Armadale/`.
 
 ## Status
 
-Steps 1–7 of the build order in [docs/DESIGN.md](docs/DESIGN.md) section 12
-are implemented and committed on `main` (October 2026). Step 8 (Ship:
+Steps 1–8 of the build order in [docs/DESIGN.md](docs/DESIGN.md) section 12
+are implemented and committed on `main` (October 2026); step 8 is menu bar
+mode, asking before quitting with running sessions. Step 9 (Ship:
 Developer ID signing, notarization, crash reporting and an update
 mechanism) has not been started, so the app runs from a local build only.
 Where development stopped, what is next and the open items are in
@@ -30,16 +31,18 @@ What works today:
   renamed and reordered by dragging, and a tab dragged onto a sidebar tab
   group moves there. Closing a window keeps its workspace in the sidebar.
   The full shortcut table is in docs/DESIGN.md section 9 and in Settings.
-- **Persistence.** Quitting Armadale leaves sessions running; a relaunch
+- **Persistence.** Sessions outlive Armadale (see [Quitting and the menu
+  bar](#quitting-and-the-menu-bar)); a relaunch
   restores windows, layouts and selections and reattaches every visible
   pane, replaying its screen and scrollback. A session whose program exited
   shows *Session Ended* with Respawn / Close Pane; **Workspace › Respawn All
   Ended** (⌥⌘R) respawns every ended pane of a workspace.
 - **Settings** (⌘,): General (default profile and directory, close
-  confirmation, notifications), Appearance (font, size, light and dark
-  themes, Ghostty theme import, cursor, renderer), Profiles, Hosts, and a
-  read-only Shortcuts table generated from the menus. **File › New Tab with
-  Profile** opens a tab with any profile.
+  confirmation, quitting with running sessions, notifications), Appearance
+  (font, size, light and dark themes, Ghostty theme import, cursor,
+  renderer), Profiles, Hosts, and a read-only Shortcuts table generated
+  from the menus. **File › New Tab with Profile** opens a tab with any
+  profile.
 - **Remote hosts.** **Settings › Hosts** adds SSH hosts (destination, port,
   identity file, SSH config file, remote folder) with Test Connection and
   Deploy Now. **File › New Tab on Host** opens a session that keeps running
@@ -301,6 +304,32 @@ docs/DESIGN.md section 10):
   hooks), and does nothing outside Armadale. It cannot reach the pane from
   inside tmux or screen, which swallow the sequence.
 
+## Quitting and the menu bar
+
+Quitting (⌘Q) while sessions are running asks first: **Keep Running in
+Menu Bar** (the default button), **End Sessions and Quit**, or Cancel.
+Keeping them hides Armadale's windows and Dock icon and leaves a status
+item in the menu bar (the three-pane glyph, with the number of panes
+needing attention next to it); its menu shows how many sessions are
+running and has **Open Armadale**, **Settings…**, **Quit, Keep Sessions
+Running** (not offered when persistent sessions are unavailable in this
+run, since a quit would end them) and **End Sessions and Quit**. Clicking a notification,
+`open -a Armadale` or opening the app from Finder brings the windows back
+too. If the status item is not visible (macOS can hide it: the per-app
+menu bar setting in System Settings, or a crowded menu bar on a display
+with a notch), opening Armadale from the Dock, Finder, Spotlight or with
+`open -a Armadale` brings the windows back. Settings › General › "When
+quitting with running sessions" (Ask, Keep running in the menu bar, End
+sessions) skips the question. Logout,
+restart, shutdown and SIGTERM never ask: they quit at once, as before,
+without ending the sessions.
+
+Why: since macOS 27, a quit that leaves processes started by the app
+running makes the Dock show the app as "Running in Background" (with a
+one-time prompt to allow it), and the Dock's "Stop Running in Background"
+ends every session at once. A quit from menu bar mode leaves no Dock item.
+Details in docs/DESIGN.md section 8, "Quitting with running sessions".
+
 ## Settings and themes
 
 Settings live in the app's user defaults (`com.tinylittleapps.armadale`,
@@ -308,7 +337,8 @@ i.e. `~/Library/Preferences/com.tinylittleapps.armadale.plist`), through the
 typed `Preferences` store: default profile and directory, the three
 notification settings (`notifyOnAttention`, `notifyOnlyForAgents`,
 `notificationPlaysSound`), `confirmClosingRunningSession` (default `true`: closing a pane, tab or tab
-group with a running process asks first), font name and size (⌘= / ⌘- / ⌘0
+group with a running process asks first), `quitWithRunningSessions` (`ask`, `keepInMenuBar` or
+`endSessions`; default `ask`), font name and size (⌘= / ⌘- / ⌘0
 change the stored size), theme choice, cursor, renderer, and the Settings
 window's position and tab. Profiles are not preferences: they are saved
 with the layout in `state.json`.
@@ -349,5 +379,5 @@ and removes the folder at the end.
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
-| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
+| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |
