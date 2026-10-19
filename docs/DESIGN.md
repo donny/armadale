@@ -1673,6 +1673,20 @@ on `main`. Steps 1–7 are done: d0c4587, 93019d8, f6cedbb, 76a4e4e,
 - **SwiftTerm under Swift 6.** It is not annotated for strict concurrency.
   The adapter confines it to the main actor with `@preconcurrency import`,
   and the swappable surface means a cleaner renderer can replace it later.
+  SwiftTerm 1.99.0 is a preview of 2.0 with an API break; a Ghostty-based
+  second renderer over `Lakr233/libghostty-spm` (the one wrapper with
+  host-fed I/O) was evaluated on October 19, 2026 and is recorded as a
+  pending decision in `HANDOFF.md`.
+- **macOS 27 background attribution.** Every session process is spawned
+  with Armadale as its responsible process (inherited through `ctty-exec`,
+  the persistence client, the daemon and the shell), so after quitting with
+  live sessions the Dock shows Armadale as "Running in Background", and its
+  "Stop Running in Background" item may kill every session daemon. The
+  alternative, disclaiming responsibility at spawn
+  (`responsibility_spawnattrs_setdisclaim` on the `posix_spawn` in
+  `spawnOnPTY`), removes the indicator but moves privacy attribution from
+  Armadale to the helper. Undecided; the test plan and trade-offs are in
+  `HANDOFF.md`.
 - **Socket path length** on macOS (104 bytes) constrains where the runtime
   directory lives; handled with the fallback above. zmx does not resolve
   symlinks, so a symlinked short directory is an alternative if ever needed.
