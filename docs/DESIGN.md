@@ -1711,7 +1711,7 @@ armadale/
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
-│                                    render-app-icon.swift, release.sh (step 9)
+│                                    render-app-icon.swift, release.sh, install-release.sh
 ├── docs/                            DESIGN.md, icon/AppIcon.svg (generated master vector)
 ├── AGENTS.md                        how to work in this repository (process, rules, test hosts)
 └── HANDOFF.md                       where development stopped (status, next step, open items)

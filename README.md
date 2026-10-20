@@ -427,6 +427,13 @@ To release:
    a file with that name is not a release. The script prints the suggested
    `git tag` command; tagging and publishing are up to you.
 
+To run the release build on this Mac, `scripts/install-release.sh` runs
+`scripts/release.sh` (passing on any options, such as `--skip-notarize`),
+mounts the DMG and installs the app from it into `~/Applications`,
+replacing the copy there. It refuses while Armadale is running (quit it
+first; persistent sessions keep running). `--from-dmg` installs the DMG
+already in `build/release/` without building again.
+
 `scripts/release.sh --skip-notarize` (no credentials needed) stops after
 the signature checks and builds `build/release/Armadale-<version>-unnotarized.dmg`,
 signed but not notarized: Gatekeeper rejects it ("source=Unnotarized
