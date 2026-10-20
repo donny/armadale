@@ -306,6 +306,13 @@ persistence.
 - Written atomically (temp file + rename), debounced 500 ms after any model
   change, and synchronously on quit.
 - Stores workspaces, selections, window frames, sessions, hosts, profiles.
+  A window's frame is always its normal (windowed) frame; `isFullScreen`
+  says whether it was in full screen (section 8, "App lifecycle").
+- A field added after a schema version shipped decodes with a default
+  when absent (`decodeIfPresent`), without a version bump, when the
+  default is right for every file written before it (`Profile.attentionIntegration`,
+  `WindowState.isFullScreen`); a change old files cannot be read as
+  gets a migration step.
 - Does **not** store scrollback or terminal state; the session daemon holds
   that.
 - A backup of the previous file is kept as `state.json.bak`; a parse failure
@@ -1341,6 +1348,57 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   a move or live resize ends, and, debounced by 500 ms, after a sidebar
   drag or collapse and after a resize that is not live (zoom), so a crash
   loses at most that half second.
+- **Full screen.** A full-screen frame is never recorded: while the window
+  is in full screen, or entering or leaving it, the recorded frame stays
+  the normal one (the frame from just before full screen, else the last
+  saved one; `WindowGeometry.recordedFrame`), and `WindowState.isFullScreen`
+  (default false; state saved before it decodes as false) records the
+  state the window is in or going to. Entering and leaving full screen
+  each save once the transition ends, so leaving it records the normal
+  frame again. At launch a window that was in full screen opens at its
+  normal frame and is shown, its visible sessions start at that size
+  (after layout, as always), and then, from the default run-loop mode (so
+  after any launch alert is dismissed), it enters full screen. Several
+  such windows enter one after another, each when the previous one's
+  transition ends (one queue, also used on return from menu bar mode;
+  two toggles in the same turn leave the second window normal); each
+  becomes its own Space. From being queued until its entry starts a
+  window reports `isFullScreen` true, so a quit before then (under a
+  launch alert, say) keeps the flag although showing the window at its
+  normal frame reports a move. Entering full screen
+  resizes the panes once (one SIGWINCH; a resize while a client is
+  still connecting is applied when it attaches). Measured October 20,
+  2026 on a 3200×1800-point display: relaunched in full screen with the
+  pane attached and `stty size` reporting 121×420, the full-screen grid.
+  A window reopened later (from the sidebar) after being closed in full
+  screen opens as a normal window, and is recorded so.
+- **Closing in full screen.** AppKit sends `windowWillClose` while the
+  window is still in full screen and only then `windowWillExitFullScreen`,
+  a resize and `windowDidExitFullScreen` (the window no longer visible).
+  So a controller reports nothing after `windowWillClose` (its
+  `isOpen: false` report is the last), and the app delegate ignores
+  reports from a controller that is no longer the workspace's.
+- **Saved frames and screens.** A saved frame whose title bar (the top
+  40 pt of the frame) overlaps any screen's visible frame is applied as
+  saved: Armadale does not constrain it. AppKit still does, when the
+  window is shown: with the default separate Spaces per display, a
+  frame spanning the built-in display and an external one came back
+  entirely on the built-in one (x −600 became −1100), and one half off
+  an external display's right edge was moved fully onto it (x 2650
+  became 2100); a window cannot be made to span displays by restoring
+  its frame. One whose title bar is on no screen but which still
+  overlaps one is constrained by Armadale (`constrainFrameRect(_:to:)`)
+  to the screen it overlaps most, which brings the title bar on screen
+  (y 1500 became 1070) and fits an oversized frame (4000×2500) to the
+  visible area. One that overlaps no screen that still exists (a
+  disconnected display) opens like a window without a saved frame: the
+  default size, centred (and cascaded when reopened from another
+  window). `WindowGeometry.placement` makes the decision; it is
+  unit-tested. An old state file holding a screen-sized frame (saved in
+  full screen before this rule) still opens as a screen-sized normal
+  window fitted to the visible area; it is not healed. A miniaturized
+  window needs nothing: AppKit keeps its normal frame, and minimizing
+  reports no move or resize.
 - Reboot or daemon loss simply yields panes in the ended state on next
   launch, with "Respawn All Ended" one click away.
 
@@ -1383,7 +1441,16 @@ the menu bar.
   stay alive), the Settings window too; the activation policy becomes
   `.accessory`, so the Dock icon and the main menu go away; a status item
   appears. Panes stay attached (output keeps flowing into their
-  surfaces, attention keeps being tracked). The status item shows the
+  surfaces, attention keeps being tracked). Each window's recorded state
+  is frozen when it is hidden and reported unchanged until it is shown
+  again, so a quit from menu bar mode saves what was on screen. A
+  full-screen window first leaves full screen and is ordered out when
+  that ends; shown again, it is queued to re-enter full screen, one
+  window after another as at launch. Found October 20,
+  2026: a full-screen window ordered out and shown again does come back
+  in full screen, but its title bar and toolbar do not (AppKit's
+  full-screen toolbar window comes back zero-sized), so it is taken out
+  of full screen first. The saved frame and flag were sane either way. The status item shows the
   app icon's three-pane glyph as a template image, generated by
   `scripts/render-app-icon.swift` into the asset catalog as a
   `StatusItem` image set (18 pt, 1x and 2x), with the attention count as

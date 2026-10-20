@@ -42,7 +42,14 @@ commits, Escape cancels, focus loss commits; blank names are ignored and
 a blank tab title restores the derived one; the three Workspace menu
 items and the rename sheet are gone; `docs/DESIGN.md` sections 1 and 8).
 Built with the implementer → reviewer loop and a live keystroke pass
-(October 20, 2026).
+(October 20, 2026). Then the **full-screen frame** fix (same day): the
+frame is never recorded while a window is in full screen, `WindowState`
+gained `isFullScreen` (decoding to false for older files, no schema
+bump), a full-screen workspace comes back full screen at launch and
+after menu bar mode, and a saved frame is clamped to a screen that still
+exists (`docs/DESIGN.md` section 8, "Full screen" and "Saved frames and
+screens"). Built with the implementer → reviewer loop and two live
+passes.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
@@ -113,6 +120,12 @@ Session layer
 Hierarchy and UI
 - One extra SIGWINCH reaches each pane after relaunch (harmless at a
   prompt; full-screen programs redraw once).
+- Full screen restore (October 20, 2026): windows enter full screen one
+  after another through a queue in `AppDelegate`; if a transition never
+  ended (no live trigger was found; closing a window mid-transition
+  still delivers the exit callbacks) the queue would stall and later
+  entries, including returns from menu bar mode, would not run. No
+  timeout exists.
 - Inline rename (October 20, 2026): in one of seven runs of a chained
   rename (a group from the sidebar's context menu, then a tab from the
   tab bar's), the first keystroke typed 0.4 s after Return was lost;
@@ -150,9 +163,6 @@ Menu bar mode (step 8), from its review
   attention pending). Probably the app's badge setting in System
   Settings › Notifications; the code path (`NSApp.dockTile.badgeLabel`)
   is unchanged. Check on a Mac where badges show.
-- A workspace window in full screen saves its full-screen frame to the
-  state file, so the next launch opens a screen-sized normal window.
-  Predates step 8.
 - Not exercised live: a real logout, restart or shutdown (the quit
   event's reason is unit-tested with synthetic events only); a
   notification click reopening from menu bar mode (code path only);

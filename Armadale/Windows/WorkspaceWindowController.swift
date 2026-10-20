@@ -44,6 +44,22 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     /// (sidebar drags and collapses, zoom); see ``observeGeometry()``.
     private var stateTask: Task<Void, Never>?
     private var splitObserver: (any NSObjectProtocol)?
+    /// The normal frame from just before full screen, while the window is
+    /// in full screen or on its way in or out.
+    private var frameBeforeFullScreen: NSRect?
+    /// From `windowWill{Enter,Exit}FullScreen` until the transition ends:
+    /// whether the window is going into full screen (true) or out (false).
+    private var fullScreenTarget: Bool?
+    /// Called once when the current full-screen transition ends or fails.
+    private var afterFullScreenTransition: (@MainActor () -> Void)?
+    /// The state recorded when the window was ordered out for menu bar
+    /// mode, reported unchanged until it is shown again.
+    private var stateWhileHidden: WindowState?
+    /// Set in `windowWillClose`: nothing is reported after the close.
+    private var isClosed = false
+    /// Queued to enter full screen (``markFullScreenEntryPending()``): the
+    /// reported flag stays true until the entry starts.
+    private var isFullScreenEntryPending = false
 
     private static let defaultSize = NSSize(width: 1100, height: 700)
     private static let defaultSidebarWidth: CGFloat = 240
@@ -115,27 +131,57 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         #endif
     }
 
-    /// The window's current geometry.
+    /// Whether the window is in full screen or entering or leaving it: its
+    /// frame is then not a normal one.
+    var isInFullScreen: Bool {
+        fullScreenTarget != nil || window?.styleMask.contains(.fullScreen) == true
+    }
+
+    /// The window's current geometry. A full-screen frame is never
+    /// recorded: in full screen the last normal frame is kept, and
+    /// `isFullScreen` says so (the state the window is going to, during a
+    /// transition).
     func captureWindowState(isOpen: Bool) -> WindowState {
-        let frame = window?.frame ?? .zero
+        if var hidden = stateWhileHidden {
+            hidden.isOpen = isOpen
+            return hidden
+        }
+        let saved = model.workspace(workspaceID)?.window
+        let frame = WindowGeometry.recordedFrame(
+            isFullScreen: isInFullScreen,
+            current: window.map { WindowFrame($0.frame) },
+            lastNormal: frameBeforeFullScreen.map(WindowFrame.init) ?? saved?.frame)
         let collapsed = sidebarItem.isCollapsed
         let width = collapsed ? nil : Double(sidebarItem.viewController.view.frame.width)
         return WindowState(
-            frame: WindowFrame(x: frame.origin.x, y: frame.origin.y, width: frame.width, height: frame.height),
-            sidebarWidth: width ?? model.workspace(workspaceID)?.window?.sidebarWidth,
+            frame: frame,
+            sidebarWidth: width ?? saved?.sidebarWidth,
             sidebarCollapsed: collapsed,
-            isOpen: isOpen)
+            isOpen: isOpen,
+            isFullScreen: fullScreenTarget
+                ?? (isFullScreenEntryPending || window?.styleMask.contains(.fullScreen) == true))
     }
 
-    /// Whether the workspace had a saved frame when the window was made.
+    /// Whether the workspace had a saved frame when the window was made
+    /// (on a screen that still exists).
     private(set) var hadSavedFrame = false
+
+    /// Whether the saved state says the window was in full screen.
+    var savedAsFullScreen: Bool { model.workspace(workspaceID)?.window?.isFullScreen == true }
 
     private func restoreWindowState() {
         guard let window else { return }
         let state = model.workspace(workspaceID)?.window
-        if let frame = state?.frame {
+        let placement = state?.frame.map { frame in
+            WindowGeometry.placement(of: frame.rect, visibleFrames: NSScreen.screens.map(\.visibleFrame))
+        } ?? .centredDefault
+        if let frame = state?.frame?.rect, placement != .centredDefault {
             hadSavedFrame = true
-            window.setFrame(NSRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height), display: false)
+            var target = frame
+            if case .constrained(let index) = placement {
+                target = window.constrainFrameRect(frame, to: NSScreen.screens[index])
+            }
+            window.setFrame(target, display: false)
         } else {
             // Assigning contentViewController sized the window to its
             // content's fitting size; apply the default size explicitly.
@@ -364,16 +410,143 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
+    /// Reports the window's state as open, unless it has closed.
+    private func reportOpenState() {
+        guard !isClosed else { return }
+        onWindowStateChange?(self, captureWindowState(isOpen: true))
+    }
+
     private func scheduleStateReport() {
         stateTask?.cancel()
         stateTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled, let self, self.window?.isVisible == true else { return }
-            self.onWindowStateChange?(self, self.captureWindowState(isOpen: true))
+            guard !Task.isCancelled, let self, !self.isClosed, self.window?.isVisible == true else { return }
+            self.reportOpenState()
         }
     }
 
+    // MARK: Full screen and menu bar mode
+
+    /// The window is queued to enter full screen: until the entry starts,
+    /// the state it reports says full screen (a quit before then keeps
+    /// the flag).
+    func markFullScreenEntryPending() {
+        isFullScreenEntryPending = true
+    }
+
+    /// Enters full screen (the window must be on screen), then calls
+    /// `completion` when the transition has ended or failed, or at once if
+    /// the window is already in full screen or cannot enter it now. A
+    /// window still leaving full screen enters once that has ended.
+    func enterFullScreen(then completion: @escaping @MainActor () -> Void) {
+        if fullScreenTarget != nil {
+            afterCurrentTransition { [weak self] in
+                guard let self else { return completion() }
+                self.enterFullScreen(then: completion)
+            }
+            return
+        }
+        isFullScreenEntryPending = false
+        guard let window, !isClosed, window.isVisible, !isInFullScreen else {
+            completion()
+            return
+        }
+        afterFullScreenTransition = completion
+        window.toggleFullScreen(nil)
+        // AppKit refused without starting a transition (no delegate call).
+        if fullScreenTarget == nil, !window.styleMask.contains(.fullScreen) {
+            finishFullScreenTransition()
+        }
+    }
+
+    /// Runs `action` when the current transition ends, after whatever was
+    /// already waiting for it.
+    private func afterCurrentTransition(_ action: @escaping @MainActor () -> Void) {
+        let earlier = afterFullScreenTransition
+        afterFullScreenTransition = {
+            earlier?()
+            action()
+        }
+    }
+
+    private func finishFullScreenTransition() {
+        fullScreenTarget = nil
+        let completion = afterFullScreenTransition
+        afterFullScreenTransition = nil
+        completion?()
+    }
+
+    /// Menu bar mode: orders the window out. What it records stays as it
+    /// is now until ``didShowAfterMenuBarMode()``. A window in full screen
+    /// leaves it first and is ordered out once it has: a full-screen
+    /// window ordered out and back in keeps full screen but loses its
+    /// title bar and toolbar (they come back as a zero-sized window).
+    func hideForMenuBarMode() {
+        stateWhileHidden = captureWindowState(isOpen: true)
+        orderOutWhenNormal()
+    }
+
+    private func orderOutWhenNormal() {
+        guard let window, stateWhileHidden != nil else { return }
+        guard isInFullScreen else {
+            window.orderOut(nil)
+            return
+        }
+        // Out of full screen (after an entry under way has ended), then
+        // ordered out, unless menu bar mode ended meanwhile.
+        guard fullScreenTarget == nil else {
+            afterCurrentTransition { [weak self] in self?.orderOutWhenNormal() }
+            return
+        }
+        afterFullScreenTransition = { [weak self] in self?.orderOutWhenNormal() }
+        window.toggleFullScreen(nil)
+        if fullScreenTarget == nil {
+            // AppKit refused to start the transition: hide it as it is.
+            afterFullScreenTransition = nil
+            window.orderOut(nil)
+        }
+    }
+
+    /// The window is on screen again after menu bar mode. Returns whether
+    /// it was in full screen: the caller queues it to re-enter, one window
+    /// after another as at launch.
+    func didShowAfterMenuBarMode() -> Bool {
+        guard let hidden = stateWhileHidden else { return false }
+        stateWhileHidden = nil
+        return hidden.isFullScreen
+    }
+
     // MARK: NSWindowDelegate
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        if !isInFullScreen, let window { frameBeforeFullScreen = window.frame }
+        fullScreenTarget = true
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        finishFullScreenTransition()
+        reportOpenState()
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        frameBeforeFullScreen = nil
+        finishFullScreenTransition()
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        fullScreenTarget = false
+    }
+
+    /// The frame is the normal one again: record it.
+    func windowDidExitFullScreen(_ notification: Notification) {
+        frameBeforeFullScreen = nil
+        finishFullScreenTransition()
+        reportOpenState()
+    }
+
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        finishFullScreenTransition()
+    }
 
     /// An inline rename field edits with its own field editor, never the
     /// window's shared one (names are taken literally, DESIGN §8).
@@ -382,7 +555,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
-        onWindowStateChange?(self, captureWindowState(isOpen: true))
+        reportOpenState()
     }
 
     /// Zoom and other resizes that are not live (a live one is saved when
@@ -393,10 +566,13 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     func windowDidMove(_ notification: Notification) {
-        onWindowStateChange?(self, captureWindowState(isOpen: true))
+        reportOpenState()
     }
 
     func windowWillClose(_ notification: Notification) {
+        // AppKit sends the full-screen exit callbacks (and a resize) after
+        // this when a full-screen window closes; none may report it open.
+        isClosed = true
         content.stop()
         titleTask?.cancel()
         titleTask = nil

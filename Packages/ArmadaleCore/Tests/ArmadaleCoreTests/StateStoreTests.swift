@@ -62,6 +62,34 @@ struct StateStoreTests {
         #expect(loaded.hosts.first?.port == 2222)
     }
 
+    @Test func windowsSavedWithoutTheFullScreenFlagDecodeAsNotFullScreen() throws {
+        // A window state as saved before `isFullScreen` existed.
+        let json = #"{"frame":{"x":10,"y":20,"width":1100,"height":700},"sidebarWidth":240,"sidebarCollapsed":false,"isOpen":true}"#
+        let old = try JSONDecoder().decode(WindowState.self, from: Data(json.utf8))
+        #expect(!old.isFullScreen)
+        #expect(old == WindowState(frame: WindowFrame(x: 10, y: 20, width: 1100, height: 700), sidebarWidth: 240))
+        // Nor do the optional fields have to be there.
+        let bare = try JSONDecoder().decode(WindowState.self, from: Data(#"{"sidebarCollapsed":true,"isOpen":false}"#.utf8))
+        #expect(bare == WindowState(sidebarCollapsed: true, isOpen: false))
+
+        var full = old
+        full.isFullScreen = true
+        let encoded = try JSONEncoder().encode(full)
+        #expect(String(decoding: encoded, as: UTF8.self).contains(#""isFullScreen":true"#))
+        #expect(try JSONDecoder().decode(WindowState.self, from: encoded) == full)
+
+        // Through the store, in a whole state file.
+        let dir = try TempDirectory()
+        var state = sampleState()
+        state.workspaces[0].window = full
+        try StateStore.save(state, to: dir.stateFile)
+        guard case .loaded(let loaded, _) = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(loaded.workspaces.first?.window == full)
+        #expect(loaded.schemaVersion == PersistedState.currentSchemaVersion)
+    }
+
     @Test func missingFilesLoadEmpty() throws {
         let dir = try TempDirectory()
         let result = StateStore.load(from: dir.stateFile)

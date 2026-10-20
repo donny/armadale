@@ -56,12 +56,34 @@ public struct WindowState: Codable, Sendable, Hashable {
     public var sidebarCollapsed: Bool
     /// Whether the window was open at last save; open windows are restored at launch.
     public var isOpen: Bool
+    /// Whether the window was in full screen. ``frame`` is then still the
+    /// normal (windowed) frame: a full-screen frame is never recorded.
+    public var isFullScreen: Bool
 
-    public init(frame: WindowFrame? = nil, sidebarWidth: Double? = nil, sidebarCollapsed: Bool = false, isOpen: Bool = true) {
+    public init(
+        frame: WindowFrame? = nil, sidebarWidth: Double? = nil, sidebarCollapsed: Bool = false,
+        isOpen: Bool = true, isFullScreen: Bool = false
+    ) {
         self.frame = frame
         self.sidebarWidth = sidebarWidth
         self.sidebarCollapsed = sidebarCollapsed
         self.isOpen = isOpen
+        self.isFullScreen = isFullScreen
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case frame, sidebarWidth, sidebarCollapsed, isOpen, isFullScreen
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        frame = try container.decodeIfPresent(WindowFrame.self, forKey: .frame)
+        sidebarWidth = try container.decodeIfPresent(Double.self, forKey: .sidebarWidth)
+        sidebarCollapsed = try container.decode(Bool.self, forKey: .sidebarCollapsed)
+        isOpen = try container.decode(Bool.self, forKey: .isOpen)
+        // Added after step 9; windows saved before it were not full screen
+        // as far as anyone can tell (their frame may be a full-screen one).
+        isFullScreen = try container.decodeIfPresent(Bool.self, forKey: .isFullScreen) ?? false
     }
 }
 
