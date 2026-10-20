@@ -20,7 +20,7 @@ reviewed and committed on `main`:
 | 6 Remote | 7302a12 | `SSHTransport`, deployment, `RemoteZmxBackend`, reconnect, Hosts tab |
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
 | 8 Menu bar | bf40d94 | quit question, General preference, accessory mode with status item, End Sessions and Quit |
-| 9 Ship | (next commit) | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
+| 9 Ship | cb63ef7 | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
 
 The app icon ("Panes": a graphite tile with three panes, the top-right
 one lit coral) was added after step 7: `scripts/render-app-icon.swift`
