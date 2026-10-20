@@ -415,7 +415,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     // MARK: NSToolbarDelegate
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace]
+        // The toggle sits at the trailing end of the sidebar's section, next
+        // to the divider, not beside the window's traffic lights.
+        [.flexibleSpace, .toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
