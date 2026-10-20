@@ -28,10 +28,12 @@ What works today:
   selected tab group, and the selected tab's split panes. Splits (⌘D /
   ⇧⌘D), focus (⌥⌘ arrows), resize (⌃⌘ arrows or divider drag), zoom (⇧⌘↩),
   equalize (⌃⌘=), tabs (⌘T, ⌘1…⌘9, ⌃Tab), tab groups (⇧⌘N, ⇧⌘1…⇧⌘9) and
-  workspaces (⌘N) work from the menus and keyboard; tabs and groups can be
-  renamed and reordered by dragging, and a tab dragged onto a sidebar tab
-  group moves there. Closing a window keeps its workspace in the sidebar.
-  The full shortcut table is in docs/DESIGN.md section 9 and in Settings.
+  workspaces (⌘N) work from the menus and keyboard; workspaces, tab
+  groups and tabs are renamed in place (double-click the row or the tab),
+  tabs and groups are reordered by dragging, and a tab dragged onto a
+  sidebar tab group moves there. Closing a window keeps its workspace in
+  the sidebar. The full shortcut table is in docs/DESIGN.md section 9 and
+  in Settings.
 - **Persistence.** Sessions outlive Armadale (see [Quitting and the menu
   bar](#quitting-and-the-menu-bar)); a relaunch
   restores windows, layouts and selections and reattaches every visible

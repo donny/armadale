@@ -222,8 +222,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     /// The workspace of `window`, or of the window it is a sheet of (a
-    /// rename sheet takes key status from its window, whose focused pane is
-    /// still the one being looked at).
+    /// sheet, such as a close confirmation, takes key status from its
+    /// window, whose focused pane is still the one being looked at).
     private func workspaceID(of window: NSWindow) -> WorkspaceID? {
         let owner = Self.sheetOwner(of: window)
         return windowControllers.first { $0.value.window === owner }?.key
@@ -389,6 +389,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // A name typed into an inline rename field counts (on every quit,
+        // SIGTERM's included: its handler calls `terminate`), before the
+        // state is saved in `applicationWillTerminate`.
+        for controller in windowControllers.values { controller.actions.rename.commit() }
         // Running sessions (docs/DESIGN.md section 8): ask, stay in the menu
         // bar, or end them first. Neither waits here: staying cancels the
         // quit, and ending them cancels it and quits again when done.
@@ -599,7 +603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
         controller.actions.showWorkspace = { [weak self] id in self?.showWorkspace(id) }
-        controller.actions.windowOfWorkspace = { [weak self] id in self?.windowControllers[id]?.window }
+        controller.actions.actionsOfWorkspace = { [weak self] id in self?.windowControllers[id]?.actions }
         // Cascade from the current window instead of opening exactly on top.
         if !controller.hadSavedFrame, let reference, let window = controller.window, window !== reference {
             window.cascadeTopLeft(from: reference.cascadeTopLeft(from: .zero))

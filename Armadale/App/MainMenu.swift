@@ -139,13 +139,7 @@ enum MainMenu {
 
         // Workspace
         let workspace = submenu("Workspace", in: main)
-        workspace.addItem(withTitle: "Rename Workspace…",
-                          action: #selector(WorkspaceWindowController.renameWorkspace(_:)), keyEquivalent: "")
-        workspace.addItem(withTitle: "Rename Tab Group…",
-                          action: #selector(WorkspaceWindowController.renameTabGroup(_:)), keyEquivalent: "")
-        workspace.addItem(withTitle: "Rename Tab…",
-                          action: #selector(WorkspaceWindowController.renameTab(_:)), keyEquivalent: "")
-        workspace.addItem(.separator())
+        // Renaming is inline, in the sidebar and the tab bar (DESIGN §1).
         workspace.addItem(withTitle: "Respawn All Ended",
                           action: #selector(WorkspaceWindowController.respawnAllEnded(_:)), keyEquivalent: "r")
             .keyEquivalentModifierMask = [.command, .option]

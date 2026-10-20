@@ -5,7 +5,7 @@ whenever work pauses. The durable rules for working in this repository are
 in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
 instructions are in `README.md`.
 
-## Status (October 19, 2026)
+## Status (October 20, 2026)
 
 Steps 1–9 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
@@ -30,6 +30,19 @@ refinement pages used to choose it are not in the repository.
 
 After step 9, cf9305c added `scripts/install-release.sh`, which runs the
 release pipeline and installs the app from the DMG into `~/Applications`.
+
+Small changes after the build order (October 19–20, 2026), each through
+the full gate: the About panel's copyright holder (f3855aa); the sidebar
+toggle moved to the divider end of the sidebar section (a2c236b); tab
+group rows always show the plain folder icon (628c99e); AGENTS.md's
+rule to end test builds by pid while the installed app may be running
+(26c6699); and **inline renaming** of workspaces, tab groups and tabs
+in the sidebar and the tab bar (double-click or the context menu; Return
+commits, Escape cancels, focus loss commits; blank names are ignored and
+a blank tab title restores the derived one; the three Workspace menu
+items and the rename sheet are gone; `docs/DESIGN.md` sections 1 and 8).
+Built with the implementer → reviewer loop and a live keystroke pass
+(October 20, 2026).
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
@@ -100,6 +113,12 @@ Session layer
 Hierarchy and UI
 - One extra SIGWINCH reaches each pane after relaunch (harmless at a
   prompt; full-screen programs redraw once).
+- Inline rename (October 20, 2026): in one of seven runs of a chained
+  rename (a group from the sidebar's context menu, then a tab from the
+  tab bar's), the first keystroke typed 0.4 s after Return was lost;
+  six further runs lost nothing. Not reproduced; watch for it. Return
+  on a selected sidebar row does not start a rename (the List never
+  has keyboard focus); only double-click and the context menu do.
 - A system "Ask Siri" item appears in the workspace row's context menu.
 - A tab whose shell exited keeps its last terminal title.
 - The font panel lists proportional fonts; Armadale refuses them only after

@@ -2,8 +2,9 @@ import AppKit
 import ArmadaleCore
 
 /// The hierarchy operations of one workspace window, shared by its menu
-/// commands, tab bar and sidebar: selecting, creating, renaming, closing
-/// (with the same confirmation everywhere), and drag and drop. Model
+/// commands, tab bar and sidebar: selecting, creating, renaming in place
+/// (``rename``, the window's one inline edit), closing (with the same
+/// confirmation everywhere), and drag and drop. Model
 /// changes go through ``AppModel`` intents; sessions closed here are ended
 /// by the ``SessionRegistry``.
 @MainActor
@@ -11,17 +12,20 @@ final class WorkspaceActions {
     let model: AppModel
     let registry: SessionRegistry
     let workspaceID: WorkspaceID
+    /// The window's inline rename, observed by its sidebar and tab bar.
+    let rename: InlineRename
     /// Where sheets go.
     weak var window: NSWindow?
     /// Brings a workspace's window to front, opening it if it is closed.
     var showWorkspace: (WorkspaceID) -> Void = { _ in }
-    /// The open window of a workspace, if any.
-    var windowOfWorkspace: (WorkspaceID) -> NSWindow? = { _ in nil }
+    /// The actions of a workspace's open window, if any.
+    var actionsOfWorkspace: (WorkspaceID) -> WorkspaceActions? = { _ in nil }
 
     init(model: AppModel, registry: SessionRegistry, workspaceID: WorkspaceID) {
         self.model = model
         self.registry = registry
         self.workspaceID = workspaceID
+        rename = InlineRename(model: model)
     }
 
     // MARK: Selection
@@ -70,42 +74,28 @@ final class WorkspaceActions {
 
     // MARK: Renaming
 
-    /// Where a rename sheet for something in `workspace` goes: that
-    /// workspace's window when it is open (a double click on another
-    /// workspace's row has just brought it forward), else this one.
-    private func sheetWindow(for workspace: WorkspaceID?) -> NSWindow? {
-        guard let workspace, workspace != workspaceID,
-              let other = windowOfWorkspace(workspace), other.isVisible
-        else { return window }
-        return other
-    }
-
-    func renameWorkspace(_ id: WorkspaceID) {
-        guard let workspace = model.workspace(id) else { return }
-        TextPrompt.ask(on: sheetWindow(for: id), title: "Rename Workspace", initialValue: workspace.name) { [model] name in
-            guard !name.isEmpty else { return }
-            model.renameWorkspace(id, to: name)
+    /// Starts renaming `item` in place on `surface` of this window (the
+    /// sidebar row's or the tab's title becomes a text field; see
+    /// ``InlineRename``). From the sidebar, an item of another workspace
+    /// whose window is now the key window is edited in that window's
+    /// sidebar instead: the first click of a double click on its row has
+    /// just brought that window forward, and the field must be where the
+    /// keyboard is.
+    func beginRename(_ item: SidebarItem, on surface: RenameSurface) {
+        if surface == .sidebar, let owner = workspace(of: item), owner != workspaceID,
+           let other = actionsOfWorkspace(owner), other.window?.isKeyWindow == true {
+            rename.commit()
+            other.rename.begin(item, on: .sidebar)
+            return
         }
+        rename.begin(item, on: surface)
     }
 
-    func renameTabGroup(_ id: TabGroupID) {
-        guard let group = model.tabGroup(id) else { return }
-        TextPrompt.ask(
-            on: sheetWindow(for: model.workspaceID(containing: id)), title: "Rename Tab Group", initialValue: group.name
-        ) { [model] name in
-            guard !name.isEmpty else { return }
-            model.renameTabGroup(id, to: name)
-        }
-    }
-
-    func renameTab(_ id: TabID) {
-        guard let tab = model.tab(id) else { return }
-        TextPrompt.ask(
-            on: sheetWindow(for: model.location(of: id)?.workspace), title: "Rename Tab",
-            message: "Leave the name empty to show the title of the program running in the tab.",
-            initialValue: tab.customTitle ?? model.displayTitle(for: tab)
-        ) { [model] name in
-            model.renameTab(id, to: name.isEmpty ? nil : name)
+    private func workspace(of item: SidebarItem) -> WorkspaceID? {
+        switch item {
+        case .workspace(let id): id
+        case .tabGroup(let id): model.workspaceID(containing: id)
+        case .tab(let id): model.location(of: id)?.workspace
         }
     }
 

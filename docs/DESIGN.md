@@ -102,21 +102,39 @@ The current workspace's row is emphasised (accent icon, semibold), the
 window's selected tab group is the selected row, and a closed workspace is
 dimmed with a "reopen" icon. Rows: a click on another workspace shows or
 opens its window; on a tab group or tab, selects it (bringing its window to
-front if it belongs to another workspace). Double-click renames (a sheet,
-not inline editing). Context menus: workspace — New Tab Group, Rename,
-Show/Open Window, Delete Workspace… (always confirmed); tab group — New Tab,
-New Tab Group, Rename, Close Tab Group (confirmed like ⌘W); tab — Rename,
-Close Tab, Close Other Tabs. Drag and drop uses a private UTType
-(`com.tinylittleapps.armadale.hierarchy-item`, declared in Info.plist), so a
-tab dropped on a terminal never types anything: a tab group dropped on
-another of the same workspace takes its place; a tab (from the tab bar or the
-sidebar) dropped on a tab group moves to its end and becomes that group's
+front if it belongs to another workspace). Double-click, or the row's
+Rename item in its context menu, edits the title in place, Finder-style
+(the tab bar does the same for its tabs; section 8 has the mechanics).
+These are the only ways to start one: clicking a sidebar row does not give
+the list keyboard focus, so Return keeps going to the terminal (verified
+live). In the field, Return commits, Escape cancels
+and leaves the old name, and the field losing keyboard focus (a click
+elsewhere, another window or app becoming active) commits, as does
+quitting. Committing makes every run of whitespace (newlines and tabs
+included, as from a paste) one space and trims; a blank name is ignored for a
+workspace or tab group (the old name stays) and clears a tab's custom
+title, back to its derived title; text unchanged from what the field
+started with changes nothing (so a tab's derived title is not pinned by an
+edit that was opened and left). A window edits one item at a time:
+starting another edit commits the current one. Context menus: workspace —
+New Tab Group, Rename Workspace, Show/Open Window, Delete Workspace…
+(always confirmed); tab group — New Tab, New Tab Group, Rename Tab Group,
+Close Tab Group (confirmed like ⌘W); tab — Rename Tab, Close Tab, Close
+Other Tabs. There is no rename command in the menu bar. Drag and drop
+uses a private UTType (`com.tinylittleapps.armadale.hierarchy-item`,
+declared in Info.plist), so a tab dropped on a terminal never types
+anything: a tab group dropped on another of the same workspace takes its
+place; a tab (from the tab bar or the sidebar) dropped on a tab group
+moves to its end and becomes that group's
 selected tab, while the window keeps showing its current group (Finder-like
 filing; a group left empty by a move is kept and shows an empty state with
 New Tab; ⌘W there closes the group, without asking since nothing runs in
-it). A rename sheet opens on the window of the workspace that owns the
-item, so double-clicking another workspace's row (which brings its window
-forward) puts the sheet there.
+it). The first click of a double click on a row of another workspace
+brings that workspace's window forward, so the edit happens in that
+window's sidebar, where the keyboard now is; Rename chosen from a context
+menu edits in the window it was chosen in. (Renaming used to be a sheet;
+inline editing replaced it, and the Workspace menu's three Rename items
+went with it.)
 
 Closing asks first (unless turned off) when a session may be running:
 running or disconnected, or *starting* when a process may exist: a session
@@ -987,8 +1005,9 @@ tool.
 WorkspaceWindowController (NSWindowController, one per open workspace;
 │                          menu commands land here)
 ├── WorkspaceWindow (NSWindow; reports first-responder changes)
-├── WorkspaceActions                                    select / create / rename /
-│                                                       close (confirmed) / drops
+├── WorkspaceActions                                    select / create / close
+│   └── InlineRename (@Observable)                      (confirmed) / drops; the
+│                                                       window's one inline rename
 └── NSSplitViewController
     ├── Sidebar: NSHostingController<SidebarView>       SwiftUI List, drag & drop
     └── Content: ContentViewController
@@ -1065,8 +1084,80 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   which turn into a close button on hover. Click selects; dropping a tab on
   another takes its position (from any group or window); middle click
   (handled by the hosting view, SwiftUI has no gesture for it) and the close
-  button close it with the ⌘W confirmation; the context menu has Rename,
-  Close, Close Other Tabs.
+  button close it with the ⌘W confirmation; double-click or the context
+  menu's Rename Tab edits the title in place; the context menu also has
+  Close Tab, Close Other Tabs.
+- *Inline rename.* The editing state is `InlineRename`
+  (`Windows/InlineRename.swift`, `@Observable`), one per window, owned by
+  its `WorkspaceActions` (`actions.rename`): that is already the one object
+  per window that the sidebar, the tab bar and the window controller share,
+  and committing applies `AppModel` intents (`renameWorkspace`,
+  `renameTabGroup`, `renameTab`) like its other operations. Its `edit`
+  names the item and the surface it is edited on (sidebar or tab bar), so a
+  tab being renamed in the tab bar is not also a field in the sidebar; both
+  views read `edit(of:on:)` and show a field instead of the title for the
+  matching row or tab. `text` is written by the field as the user types and
+  is not observed (no redraw per keystroke). Each edit has an id, and a
+  field can only end the edit it was created for, so a field going away
+  late never ends a newer edit; asking again for the edit under way keeps
+  it (a double click inside the field). The commit rules are section 1's
+  and are unit-tested. `WorkspaceActions.beginRename(_:on:)` starts an
+  edit; from the sidebar, an item of another workspace whose window is now
+  key is handed to that window's `InlineRename` (the first click of the
+  double click brought it forward; this hand-off is not unit-tested, as
+  it needs a key window), and the sidebar expands the workspace and tab
+  group containing the row being edited. Keyboard focus after an edit
+  goes to `returnFocus`: what had it when the first field of a chain of
+  edits appeared (an edit started while another is open keeps it; a fresh
+  edit forgets it; a rename field, its field editor or the window is never
+  recorded), else, when that is gone or in another window, to the
+  window's focused terminal (`focusFallback`, set by the window
+  controller). `AppDelegate.applicationShouldTerminate` commits every
+  window's open edit before the state is saved, on every quit path.
+  The field is `InlineRenameField` (`Support/InlineRenameField.swift`), an
+  `NSViewRepresentable` over a borderless `NSTextField`, chosen over a
+  SwiftUI `TextField` so that each way an edit ends is explicit on macOS:
+  Return (`insertNewline:`) and Escape (`cancelOperation:`) are taken in
+  the delegate's `control(_:textView:doCommandBy:)` before the field editor
+  acts on them; `controlTextDidEndEditing` (a click elsewhere, Tab) commits;
+  the window's did-resign-key notification commits too, since the field
+  keeps first responder in a window that is no longer key; a mouse down
+  anywhere in the tab bar outside the field commits too
+  (`TabBarHostingView.mouseDown`: the bar never takes keyboard focus, so
+  the field would not notice that click). Whenever SwiftUI tears a field
+  down (its row deleted, or whenever `List` discards it), the teardown only
+  does bookkeeping; on the next turn of the main actor the edit is
+  committed unless another field has registered for it by then (SwiftUI
+  can recreate a field mid-edit, which must not end the edit), and focus
+  left on the window itself is put back as below. So no model change
+  happens inside SwiftUI's view update; for the same reason the commit
+  from `controlTextDidEndEditing` runs on the next turn, and only if the
+  field is still in its window. After Return, Escape or resign-key,
+  keyboard focus goes back (see `returnFocus` above; the terminal, or the
+  sidebar's list); after a click elsewhere it stays where the click put
+  it. Names are taken literally: the field has its own field editor
+  (`RenameTextFieldCell.fieldEditor(for:)`) with text replacement,
+  spelling correction, completion, quote and dash substitution and all
+  text checking (data detection, the double-space period) turned off, so
+  the window's shared field editor is never changed; should AppKit hand
+  the field the shared one anyway, the same settings are turned off for
+  the edit and put back when it ends. The window's delegate
+  (`windowWillReturnFieldEditor`) hands out the private editor for a
+  rename field too, and `controlTextDidBeginEditing` logs (debug level,
+  subsystem `com.tinylittleapps.armadale`, category `rename`) which editor
+  an edit uses. The system's period-on-double-space substitution is
+  intercepted in the private editor (`RenameFieldEditor.insertText`, which
+  puts back the space it would replace), because the text view's flags do
+  not stop it. The field takes keyboard focus
+  with its text selected on the turn after it enters the window (SwiftUI
+  has laid it out by then). Its font is the title's SwiftUI font resolved
+  in its environment (`Font.resolve(in:)`, `ctFont`): body, semibold where
+  the title is, and 12 pt in the tab bar. While a row or tab is being
+  edited it is not `draggable` (dragging in the field selects text). In
+  the sidebar the double click is the `List`'s `primaryAction`, so a single
+  click selects exactly as before; in the tab bar it is a
+  `TapGesture(count: 2)` added as a `simultaneousGesture`, so the single
+  click's select is not delayed waiting for a second click.
 - *Attention (step 7).* An app-level `AttentionCenter`
   (`Sessions/AttentionCenter.swift`, `@Observable`) owns the pure
   `AttentionTracker` (section 10). The registry forwards every bell and
@@ -1090,8 +1181,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   is elsewhere), unless the session is looked at by the time the banner
   would appear (`willPresent` asks `AttentionCenter.shouldPresent`). When a
   session's attention clears (looked at, Clear All, closed), its delivered
-  notification is removed. A sheet (a rename prompt) takes key status from
-  its window; the key workspace is resolved through `sheetParent`
+  notification is removed. A sheet (a close or delete confirmation) takes
+  key status from its window; the key workspace is resolved through `sheetParent`
   (`AppDelegate.sheetOwner(of:)`), so the focused pane under a sheet is
   still looked at.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
@@ -1460,8 +1551,9 @@ divider by 5 % of its split (`moveDivider`). ⌘= / ⌘- / ⌘0 change the font
 size of every pane; since step 5 the size is the stored Appearance
 setting, so it persists across launches. ⌘, opens Settings (step 5).
 Commands also in the menus
-without a default key: Close Tab, Close Tab Group, Rename Workspace / Tab
-Group / Tab, Delete Workspace, and (step 7) Window › Clear All Attention.
+without a default key: Close Tab, Close Tab Group, Delete Workspace, and
+(step 7) Window › Clear All Attention. (Renaming is inline, in the sidebar
+and the tab bar, and has no menu command.)
 
 *Step 7:* Window › Next Pane Needing Attention is ⌃⌘A. It is free in this
 table, in Ghostty's macOS defaults (checked against `src/config/Config.zig`:
@@ -1697,7 +1789,8 @@ armadale/
 ├── Armadale/                        app target (AppKit)
 │   ├── App/                         main.swift, AppDelegate, menus, MenuBarMode (QuitDecision,
 │   │                                MenuBarText, MenuBarStatusItem: quitting and menu bar mode)
-│   ├── Windows/                     WorkspaceWindowController, WorkspaceActions, ContentViewController
+│   ├── Windows/                     WorkspaceWindowController, WorkspaceActions (+ InlineRename),
+│   │                                ContentViewController
 │   ├── Sidebar/                     SidebarView (SwiftUI)
 │   ├── Tabs/                        TabBarView, StatusGlyph, HostBadge (SwiftUI)
 │   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
@@ -1711,8 +1804,8 @@ armadale/
 │   │                                Armadale.entitlements,
 │   │                                armadale-notify (helper for agent hooks → Contents/Resources)
 │   └── Support/                     ThemeCatalog (built-in + user themes), AppSettings
-│                                    (+ SurfaceRegistry.standard), HierarchyDragItem, TextPrompt,
-│                                    UserNotificationService;
+│                                    (+ SurfaceRegistry.standard), HierarchyDragItem,
+│                                    InlineRenameField, UserNotificationService;
 │                                    the shortcut table's source is App/MainMenu
 ├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/

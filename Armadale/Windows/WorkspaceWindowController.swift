@@ -84,6 +84,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         super.init(window: window)
 
         actions.window = window
+        // Where focus goes after a rename when what had it before is gone.
+        actions.rename.focusFallback = { [weak content = self.content] in content?.focusedPaneView?.focusTerminal() }
         window.onFirstResponderChange = { [weak content] responder in
             content?.firstResponderDidChange(responder)
         }
@@ -299,20 +301,6 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         registry.respawnAllEnded(in: workspaceID)
     }
 
-    @objc func renameWorkspace(_ sender: Any?) {
-        actions.renameWorkspace(workspaceID)
-    }
-
-    @objc func renameTabGroup(_ sender: Any?) {
-        guard let group = model.workspace(workspaceID)?.selectedTabGroupID else { return }
-        actions.renameTabGroup(group)
-    }
-
-    @objc func renameTab(_ sender: Any?) {
-        guard let tab = model.selectedTab(in: workspaceID)?.id else { return }
-        actions.renameTab(tab)
-    }
-
     @objc func deleteWorkspace(_ sender: Any?) {
         actions.deleteWorkspace(workspaceID)
     }
@@ -323,18 +311,17 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         let tab = group?.selectedTab
         switch menuItem.action {
         case #selector(newTab(_:)), #selector(newTabWithProfile(_:)), #selector(newTabOnHost(_:)), #selector(newTabGroup(_:)),
-             #selector(renameWorkspace(_:)),
              #selector(deleteWorkspace(_:)):
             return workspace != nil
         case #selector(closePane(_:)):
             let closesEmptyGroup = tab == nil && group?.tabs.isEmpty == true
             menuItem.title = closesEmptyGroup ? "Close Tab Group" : "Close Pane"
             return tab != nil || closesEmptyGroup
-        case #selector(splitRight(_:)), #selector(splitDown(_:)), #selector(closeTab(_:)), #selector(renameTab(_:)):
+        case #selector(splitRight(_:)), #selector(splitDown(_:)), #selector(closeTab(_:)):
             return tab != nil
         case #selector(clearScreen(_:)):
             return content.focusedPaneView != nil
-        case #selector(closeTabGroup(_:)), #selector(renameTabGroup(_:)):
+        case #selector(closeTabGroup(_:)):
             return group != nil
         case #selector(selectTabByNumber(_:)):
             let count = group?.tabs.count ?? 0
@@ -387,6 +374,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     // MARK: NSWindowDelegate
+
+    /// An inline rename field edits with its own field editor, never the
+    /// window's shared one (names are taken literally, DESIGN §8).
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        (client as? RenameTextField)?.privateFieldEditor
+    }
 
     func windowDidEndLiveResize(_ notification: Notification) {
         onWindowStateChange?(self, captureWindowState(isOpen: true))

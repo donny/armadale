@@ -86,6 +86,7 @@ final class ContentViewController: NSViewController {
             model: model, registry: registry, workspaceID: workspaceID, actions: actions, frames: frames))
         tabBar.frames = frames
         tabBar.onMiddleClick = { [weak self] tab in self?.actions.closeTab(tab) }
+        tabBar.onMouseDown = { [weak self] in self?.actions.rename.commit() }
         tabBar.sizingOptions = []
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         self.tabBar = tabBar

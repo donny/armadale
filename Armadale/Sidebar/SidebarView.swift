@@ -13,8 +13,10 @@ enum SidebarItem: Hashable {
 /// their panes needing attention; a tab needing attention shows ◐. The current window's workspace
 /// starts expanded and is shown in bold; its selected tab group is the
 /// highlighted row. Clicking another workspace brings its window to front
-/// (or opens it); clicking a tab group or tab selects it. Double-click
-/// renames; the context menu creates, renames and closes. Tab groups can be
+/// (or opens it); clicking a tab group or tab selects it. Double-click (or
+/// the context menu's Rename) turns the row's title into a text field
+/// (``InlineRenameField``, driven by the window's ``InlineRename``); the
+/// context menu also creates and closes. Tab groups can be
 /// dragged to reorder them, and a tab (from here or the tab bar) dropped on
 /// a tab group moves it there.
 struct SidebarView: View {
@@ -41,15 +43,19 @@ struct SidebarView: View {
                         DisclosureGroup(isExpanded: groupExpansion(group.id)) {
                             ForEach(group.tabs) { tab in
                                 TabRow(model: model, registry: registry, tab: tab,
-                                       isSelected: tab.id == group.selectedTabID)
+                                       isSelected: tab.id == group.selectedTabID,
+                                       rename: rename, edit: rename.edit(of: .tab(tab.id), on: .sidebar))
                                     .tag(SidebarItem.tab(tab.id))
-                                    .draggable(HierarchyDragItem.tab(tab.id))
+                                    .draggable(
+                                        HierarchyDragItem.tab(tab.id),
+                                        unlessEditing: rename.edit(of: .tab(tab.id), on: .sidebar) != nil)
                             }
                         } label: {
                             TabGroupRow(
                                 group: group,
                                 attentionCount: registry.attention?.count(in: model.sessionIDs(ofTabGroup: group.id)) ?? 0,
-                                actions: actions)
+                                actions: actions,
+                                edit: rename.edit(of: .tabGroup(group.id), on: .sidebar))
                                 .tag(SidebarItem.tabGroup(group.id))
                         }
                     }
@@ -57,7 +63,9 @@ struct SidebarView: View {
                     WorkspaceRow(
                         workspace: workspace,
                         isCurrent: workspace.id == currentWorkspaceID,
-                        attentionCount: registry.attention?.count(in: model.sessionIDs(in: workspace.id)) ?? 0)
+                        attentionCount: registry.attention?.count(in: model.sessionIDs(in: workspace.id)) ?? 0,
+                        rename: rename,
+                        edit: rename.edit(of: .workspace(workspace.id), on: .sidebar))
                         .tag(SidebarItem.workspace(workspace.id))
                 }
             }
@@ -66,9 +74,14 @@ struct SidebarView: View {
         .contextMenu(forSelectionType: SidebarItem.self) { items in
             if let item = items.first { menu(for: item) }
         } primaryAction: { items in
-            if let item = items.first { rename(item) }
+            if let item = items.first { beginRename(item) }
+        }
+        .onChange(of: rename.edit?.id) {
+            if let edit = rename.edit, edit.surface == .sidebar { reveal(edit.item) }
         }
     }
+
+    private var rename: InlineRename { actions.rename }
 
     // MARK: Selection
 
@@ -94,11 +107,21 @@ struct SidebarView: View {
         }
     }
 
-    private func rename(_ item: SidebarItem) {
+    private func beginRename(_ item: SidebarItem) {
+        actions.beginRename(item, on: .sidebar)
+    }
+
+    /// Expands what contains `item`, so the row being renamed is shown.
+    private func reveal(_ item: SidebarItem) {
         switch item {
-        case .workspace(let id): actions.renameWorkspace(id)
-        case .tabGroup(let id): actions.renameTabGroup(id)
-        case .tab(let id): actions.renameTab(id)
+        case .workspace:
+            break
+        case .tabGroup(let id):
+            if let workspace = model.workspaceID(containing: id) { expandedWorkspaces.insert(workspace) }
+        case .tab(let id):
+            guard let location = model.location(of: id) else { return }
+            expandedWorkspaces.insert(location.workspace)
+            collapsedGroups.remove(location.tabGroup)
         }
     }
 
@@ -109,7 +132,7 @@ struct SidebarView: View {
         switch item {
         case .workspace(let id):
             Button("New Tab Group") { actions.newTabGroup(in: id) }
-            Button("Rename Workspace…") { actions.renameWorkspace(id) }
+            Button("Rename Workspace") { beginRename(item) }
             if id != currentWorkspaceID {
                 Divider()
                 Button(model.workspace(id)?.window?.isOpen == true ? "Show Window" : "Open Window") {
@@ -121,11 +144,11 @@ struct SidebarView: View {
         case .tabGroup(let id):
             Button("New Tab") { actions.newTab(in: id) }
             Button("New Tab Group") { actions.newTabGroup(in: model.workspaceID(containing: id)) }
-            Button("Rename Tab Group…") { actions.renameTabGroup(id) }
+            Button("Rename Tab Group") { beginRename(item) }
             Divider()
             Button("Close Tab Group") { actions.closeTabGroup(id) }
         case .tab(let id):
-            Button("Rename Tab…") { actions.renameTab(id) }
+            Button("Rename Tab") { beginRename(item) }
             Divider()
             Button("Close Tab") { actions.closeTab(id) }
             Button("Close Other Tabs") { actions.closeOtherTabs(than: id) }
@@ -157,14 +180,23 @@ private struct WorkspaceRow: View {
     let isCurrent: Bool
     /// Panes of the workspace needing attention.
     let attentionCount: Int
+    let rename: InlineRename
+    /// The rename under way of this row, if any.
+    let edit: InlineRename.Edit?
 
     var body: some View {
         let isOpen = workspace.window?.isOpen ?? false
+        let font = Font.body.weight(isCurrent ? .semibold : .regular)
         HStack {
             Label {
-                Text(workspace.name)
-                    .font(.body.weight(isCurrent ? .semibold : .regular))
-                    .foregroundStyle(isOpen || isCurrent ? .primary : .secondary)
+                if let edit {
+                    InlineRenameField(rename: rename, edit: edit, font: font)
+                        .id(edit.id)
+                } else {
+                    Text(workspace.name)
+                        .font(font)
+                        .foregroundStyle(isOpen || isCurrent ? .primary : .secondary)
+                }
             } icon: {
                 Image(systemName: isOpen ? "macwindow" : "macwindow.badge.plus")
                     .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
@@ -181,11 +213,22 @@ private struct TabGroupRow: View {
     /// Panes of the group needing attention.
     let attentionCount: Int
     let actions: WorkspaceActions
+    /// The rename under way of this row, if any.
+    let edit: InlineRename.Edit?
     @State private var isTargeted = false
 
     var body: some View {
         HStack {
-            Label(group.name, systemImage: "folder")
+            Label {
+                if let edit {
+                    InlineRenameField(rename: actions.rename, edit: edit)
+                        .id(edit.id)
+                } else {
+                    Text(group.name)
+                }
+            } icon: {
+                Image(systemName: "folder")
+            }
             Spacer(minLength: 4)
             AttentionCount(count: attentionCount)
             Text("\(group.tabs.count)")
@@ -198,7 +241,7 @@ private struct TabGroupRow: View {
                 RoundedRectangle(cornerRadius: 5).stroke(Color.accentColor, lineWidth: 2).padding(-3)
             }
         }
-        .draggable(HierarchyDragItem.tabGroup(group.id))
+        .draggable(HierarchyDragItem.tabGroup(group.id), unlessEditing: edit != nil)
         .dropDestination(for: HierarchyDragItem.self) { items, _ in
             actions.drop(items, onTabGroup: group.id)
         } isTargeted: { isTargeted = $0 }
@@ -210,17 +253,30 @@ private struct TabRow: View {
     let registry: SessionRegistry
     let tab: ArmadaleCore.Tab
     let isSelected: Bool
+    let rename: InlineRename
+    /// The rename under way of this row, if any.
+    let edit: InlineRename.Edit?
 
     var body: some View {
         let sessions = tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
         let status = registry.glyphStatus(of: sessions)
         HStack(spacing: 6) {
             StatusGlyph(status: status)
-            Label(model.displayTitle(for: tab), systemImage: icon)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(isSelected || status == .attention ? .primary : .secondary)
-                .fontWeight(status == .attention ? .semibold : nil)
+            Label {
+                if let edit {
+                    InlineRenameField(
+                        rename: rename, edit: edit, font: .body.weight(status == .attention ? .semibold : .regular))
+                        .id(edit.id)
+                } else {
+                    Text(model.displayTitle(for: tab))
+                }
+            } icon: {
+                Image(systemName: icon)
+            }
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .foregroundStyle(isSelected || status == .attention ? .primary : .secondary)
+            .fontWeight(status == .attention ? .semibold : nil)
             HostBadge(
                 hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions),
                 showsName: true)

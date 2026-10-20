@@ -359,8 +359,11 @@ struct AttentionFromSurfaceTests {
         #expect(await eventually { center.needsAttention(second) })
 
         // The app in the background: even the focused pane gets attention.
+        // Its view's last bell must be over 100 ms ago, or SwiftTerm drops
+        // this one (the checks since then can take less than that).
         center.clearAll()
         center.isAppActive = false
+        try await Task.sleep(for: settle)
         firstSurface.feed([0x07])
         #expect(await eventually { center.needsAttention(first) })
         center.isAppActive = true
@@ -453,9 +456,9 @@ struct NotifyHelperTests {
     }
 }
 
-/// A rename sheet takes key status from its window; that window's focused
-/// pane is still the one being looked at (the app delegate resolves the
-/// sheet to its window).
+/// A sheet (a close confirmation) takes key status from its window; that
+/// window's focused pane is still the one being looked at (the app delegate
+/// resolves the sheet to its window).
 @Suite("Sheets and the key window")
 @MainActor
 struct SheetOwnerTests {

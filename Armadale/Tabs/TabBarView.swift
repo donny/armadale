@@ -14,11 +14,19 @@ final class TabFrameStore {
 }
 
 /// Hosts the tab bar and closes the tab under a middle click, which SwiftUI
-/// has no gesture for.
+/// has no gesture for. A click anywhere in it outside a rename field ends
+/// the window's inline rename (the bar never takes keyboard focus, so the
+/// field would not notice the click).
 @MainActor
 final class TabBarHostingView: NSHostingView<TabBarView> {
     var frames = TabFrameStore()
     var onMiddleClick: ((TabID) -> Void)?
+    var onMouseDown: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?()
+        super.mouseDown(with: event)
+    }
 
     override func otherMouseUp(with event: NSEvent) {
         guard event.buttonNumber == 2 else { return super.otherMouseUp(with: event) }
@@ -36,8 +44,9 @@ private let tabBarCoordinateSpace = "TabBar"
 /// The tabs of the window's selected tab group (DESIGN §8): status glyph
 /// (◐ and a tinted background when a pane needs attention), title, ⌘N
 /// badge, close button on hover, and "+" for a new tab. Click
-/// selects, drag reorders (or drops the tab on a sidebar tab group), the
-/// context menu renames or closes.
+/// selects, drag reorders (or drops the tab on a sidebar tab group),
+/// double-click (or the context menu's Rename Tab) edits the title in place
+/// (``InlineRenameField``), the context menu also closes.
 struct TabBarView: View {
     let model: AppModel
     let registry: SessionRegistry
@@ -66,7 +75,8 @@ struct TabBarView: View {
                                 index: index,
                                 badge: Self.badge(index: index, count: tabs.count),
                                 isSelected: tab.id == group?.selectedTabID,
-                                isOnly: tabs.count == 1)
+                                isOnly: tabs.count == 1,
+                                edit: actions.rename.edit(of: .tab(tab.id), on: .tabBar))
                             .frame(width: width)
                             .onGeometryChange(for: CGRect.self) { proxy in
                                 proxy.frame(in: .named(tabBarCoordinateSpace))
@@ -147,9 +157,13 @@ private struct TabItemView: View {
     let badge: String?
     let isSelected: Bool
     let isOnly: Bool
+    /// The rename under way of this tab, if any.
+    let edit: InlineRename.Edit?
 
     @State private var isHovering = false
     @State private var isTargeted = false
+
+    private static let font = Font.system(size: 12)
 
     var body: some View {
         let title = model.displayTitle(for: tab)
@@ -159,17 +173,23 @@ private struct TabItemView: View {
         HStack(spacing: 6) {
             StatusGlyph(status: status)
             HostBadge(hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions))
-            Text(title)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(isSelected ? .primary : .secondary)
+            if let edit {
+                InlineRenameField(rename: actions.rename, edit: edit, font: Self.font)
+                    .id(edit.id)
+                    .frame(maxWidth: .infinity)
+            } else {
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
             if tab.layout.isSplit {
                 Image(systemName: tab.zoomedPaneID == nil ? "rectangle.split.2x1" : "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                     .help(tab.zoomedPaneID == nil ? "\(tab.panes.count) panes" : "Zoomed")
             }
-            Spacer(minLength: 0)
+            if edit == nil { Spacer(minLength: 0) }
             ZStack {
                 if let badge {
                     Text(badge)
@@ -192,7 +212,7 @@ private struct TabItemView: View {
             }
             .frame(minWidth: 22)
         }
-        .font(.system(size: 12))
+        .font(Self.font)
         .padding(.leading, 8)
         .padding(.trailing, 4)
         .frame(height: 24)
@@ -215,7 +235,10 @@ private struct TabItemView: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture { actions.select(tab: tab.id) }
-        .draggable(HierarchyDragItem.tab(tab.id)) {
+        // Simultaneous, so a single click still selects at once instead of
+        // waiting to see whether a second click follows.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { actions.beginRename(.tab(tab.id), on: .tabBar) })
+        .draggable(HierarchyDragItem.tab(tab.id), unlessEditing: edit != nil) {
             Label(title, systemImage: "terminal")
                 .padding(6)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
@@ -225,7 +248,7 @@ private struct TabItemView: View {
             return actions.drop(items, onTabAt: index, in: groupID)
         } isTargeted: { isTargeted = $0 }
         .contextMenu {
-            Button("Rename Tab…") { actions.renameTab(tab.id) }
+            Button("Rename Tab") { actions.beginRename(.tab(tab.id), on: .tabBar) }
             Divider()
             Button("Close Tab") { actions.closeTab(tab.id) }
             Button("Close Other Tabs") { actions.closeOtherTabs(than: tab.id) }
