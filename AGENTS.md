@@ -90,13 +90,30 @@ the suite and delete `~/Library/Preferences/armadale-<name>.plist`. AppKit
 panels still write a few keys to the real `com.tinylittleapps.armadale`
 domain; that is accepted.
 
-**Cleanup.** Quit the app (⌘Q or `pkill -x Armadale`), then
-`pkill -x zmx-0.8.1` for session daemons. Never `pkill -f` with the helper's
-name: it matches the shell running the command, including a remote one
-(this killed an agent's own cleanup once). Confirm with
-`pgrep -fl 'zmx|Armadale|ssh -tt'`. Never put a shell variable inside an
-`rm` path (`rm -rf $DIR/*` was denied once and is banned); literal paths
-only, including `$TMPDIR`.
+**Two apps with one name.** The owner's installed
+`~/Applications/Armadale.app` may be running while a test build runs,
+and both processes are named Armadale. Never end a test build by name
+(`pkill -x Armadale`, `osascript -e 'quit app "Armadale"'`,
+`pkill -x zmx-0.8.1`) when that is possible: find the test build's pid
+with `ps -o pid,command -p "$(pgrep -x Armadale | tr '\n' ',')"` (its
+path is under DerivedData) and signal that pid; end only its sessions
+with the helper copy in the test state directory
+(`ZMX_DIR=/tmp/armadale-<name>/run /tmp/armadale-<name>/bin/zmx-0.8.1
+kill <session>`); and probe its windows by pid (System Events'
+`process "Armadale"` picks one of the two at random; CoreGraphics'
+window list filtered by owner pid is reliable, and `screencapture -x -l
+<window number>` captures that window alone). `scripts/check-quit.sh`
+refuses to run while any Armadale is running, which is right.
+
+**Cleanup.** Quit the test build (⌘Q in its window, or SIGTERM to its
+pid), then end its session daemons as above, or with `pkill -x
+zmx-0.8.1` only when the installed app is not running. Never `pkill -f`
+with the helper's name: it matches the shell running the command,
+including a remote one (this killed an agent's own cleanup once).
+Confirm with `pgrep -lx Armadale; pgrep -lx zmx-0.8.1; pgrep -fl 'ssh
+-tt'` (`pgrep -fl 'zmx|Armadale'` matches the agent's own shell). Never
+put a shell variable inside an `rm` path (`rm -rf $DIR/*` was denied
+once and is banned); literal paths only, including `$TMPDIR`.
 
 **Other people's processes.** The owner runs Claude Code in other sessions
 on this Mac. Never kill a `claude` or `codex` process you did not start.
