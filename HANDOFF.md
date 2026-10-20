@@ -74,8 +74,10 @@ the bundled persistence helper stays universal for Intel Mac hosts.
 
 The build order is complete. Candidates, each needing an owner decision:
 the Ghostty second renderer (below), the open items below, a public home
-for an update feed, and the untested macOS 27 prompt cases listed under
-"Menu bar mode (step 8)".
+for an update feed, and what step 8 should say or do about macOS 27's
+"Allow in the Background" switch, which ends every session a few seconds
+after any quit when it is off, from the menu bar too (tested October 19,
+2026, evening; "macOS 27: Allow in the Background switched off" below).
 
 ## Open items carried forward
 
@@ -136,14 +138,16 @@ Menu bar mode (step 8), from its review
   End Sessions and Quit against a slow or unreachable remote host; the
   persistence fallback mode; window order with several windows on
   return; macOS hiding the status item; the light menu bar.
-- Whether a quit from menu bar mode (accessory policy) triggers macOS
-  27's first-quit "allow this app to run in the background" prompt is
-  unknown: the owner's stored Allow masks it on this Mac. Whether
-  launchd lists the session daemons under Background App Activity after
-  such a quit is also unknown (needs root or the System Settings UI).
-- What Don't Allow does on that prompt is still untested (toggle
-  Armadale off under Allow in the Background, launch, quit with a
-  session).
+- Tested October 19, 2026, evening ("macOS 27: Allow in the Background
+  switched off", below): a quit from menu bar mode shows no first-quit
+  prompt and leaves no Dock item, but with Armadale switched off under
+  Allow in the Background macOS ends every session 5 s after that quit
+  (1 s after a regular quit such as SIGTERM). Under Allow nothing is
+  touched. The app cannot read that setting; what the quit alert, the
+  status menu and the README should say about it is an owner decision.
+  Whether launchd lists the session daemons under Background App
+  Activity after a quit is still unknown (needs root or the System
+  Settings UI).
 
 Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
@@ -215,13 +219,16 @@ each run, Dock driven through accessibility). Results:
   in the background in the future?", with Don't Allow / Allow. Every
   user will see this on their first quit with a session running, and
   the wording ("updating or syncing data") makes Don't Allow sound
-  harmless. What Don't Allow does is **untested**; by Apple's deployment
-  guide the system then terminates the background tasks, presumably on
-  every quit. Apple's deployment guide: "if background tasks are started
-  by an app and remain active after a user quits the app, the user is
-  prompted to allow or not allow the background tasks to remain active";
-  an MDM Service Management profile can suppress the prompt by bundle id
-  or team id.
+  harmless. What the disallowed state does was **tested on October 19,
+  2026 (evening)**: macOS ends every session process 1 to 5 s after any
+  quit, from the menu bar too (section below). The prompt's own Don't
+  Allow button was not pressed (the stored Allow cannot be cleared on
+  this Mac without `sudo sfltool resetbtm`, which resets every app);
+  it records the same "off" state as the switch. Apple's deployment
+  guide: "if background tasks are started by an app and remain active
+  after a user quits the app, the user is prompted to allow or not allow
+  the background tasks to remain active"; an MDM Service Management
+  profile can suppress the prompt by bundle id or team id.
 - **Disclaiming responsibility does not help.** With
   `responsibility_spawnattrs_setdisclaim` on the `posix_spawn` in
   `spawnOnPTY` (symbol via `dlsym`), every process in the tree became its
@@ -296,17 +303,77 @@ Options considered (3 was chosen and became step 8):
    Open questions for making this a step: wording; whether a quit from
    menu bar mode should be the only "keep running" quit; whether the
    first-quit system prompt still appears for an accessory-mode quit
-   (cannot be tested on this Mac while the Allow decision is stored);
+   (answered below: no prompt was seen, and `loginwindow` treats the
+   exited accessory app as never user-visible);
    the Settings window and notifications while in menu bar mode; the
    `.terminateLater` note in DESIGN.md §8 (the prototype cancels the
    quit, ends sessions in a Task, then calls terminate again, so it does
    not depend on `.terminateLater`).
 
-Still untested, in order of value: Don't Allow on the prompt (toggle
-Armadale off under Allow in the Background, launch, quit with a
-session); whether an accessory-mode quit triggers that prompt; an
-`SMAppService` agent prototype (option 2). Record the outcome in
-`docs/DESIGN.md` sections 7 and 13 once decided.
+Still untested, in order of value: an `SMAppService` agent prototype
+(option 2), now also as a possible way out of the kill described in the
+next section; the prompt's Don't Allow button itself (needs a Mac with
+no stored decision; the switch records the same state); whether a quit
+leaves the ssh connection masters (`ControlPersist`, up to 10 minutes)
+as subordinate processes that show the Dock indicator or are killed;
+whether Background App Activity lists the daemons.
+
+### macOS 27: "Allow in the Background" switched off — tested, October 19, 2026 (evening)
+
+The two prompt cases left open above were tested with the Debug build of
+0892714 (ad hoc, real bundle id, launched through Launch Services with
+`open -n --env`, state in `/tmp/armadale-bgtest`), the owner switching
+Armadale off under System Settings › General › Login Items & Extensions
+› Allow in the Background for tests 1 to 3 and on again for test 4.
+Each run: one local shell session, quit, then the daemon watched for
+60 s and the unified log read (`log show`, subsystems
+`com.apple.launchservices:quitsupport` and
+`com.apple.backgroundtaskmanagement`).
+
+| Test | Switch | Quit | App gone | Daemon | Dock tile | Prompt |
+|---|---|---|---|---|---|---|
+| 1 | off | ⌘Q › Keep Running in Menu Bar › status menu › Quit, Keep Sessions Running | at once | SIGTERM 5 s after the quit | none | none |
+| 2 | off | SIGTERM (`pkill -x Armadale`, regular policy) | 0.6 s | SIGTERM 1 s after the quit, gone at 2.3 s | none seen | none |
+| 3 | off | as 2, with a TERM trap in the pane's shell | 0.6 s | gone at 1.7 s; the shell's trap started (its output file was created) and was cut off | none seen | none |
+| 4 | on | as 1 | at once | alive after 60 s | none | none |
+
+What the log shows. When the app process exits, `loginwindow` notes the
+"non-application coalition pids" (daemon, shells) and asks Background
+Task Management whether the app may run background tasks
+(`checkTasksAllowedInBackgroundForAppURL`). Switched off, the answer is
+"BTM said this application is not allowed to run background processes"
+and `loginwindow` calls `_LSForceQuitApplication` on the app's
+coalition, which SIGTERMs every remaining process; the daemon logs
+"SIGTERM received, shutting down gracefully" and the shell gets the
+signal directly as well (test 3). After a regular-policy quit the app
+"was foreground, and still has subordinate processes", and the kill is
+scheduled 1 s later. After a quit from menu bar mode the exited app "is
+non-foreground and never tracked", is dropped from the application
+list, and the check and kill come 5 s later with the words "is not
+allowed to run non-foreground and has never been user-visible, so
+killing the process and its subordinate processes". Switched on, the
+same quit logs only the "never tracked" line and nothing is touched.
+
+What it means. Menu bar mode avoids the Dock's "Running in Background"
+tile and its stop item, as step 8 intended, but not the allow decision:
+the sessions survive a quit only while Armadale is allowed in the
+background, whatever the quit. A user who answers Don't Allow on the
+first-quit prompt (or switches Armadale off later) loses every session
+a few seconds after each quit, with *Quit, Keep Sessions Running* in
+the status menu promising otherwise. While Armadale is running, in the
+menu bar or not, nothing is killed. There is no API for the app to read
+the decision (`SMAppService` covers login items, not this record), and
+no prompt appears for an accessory-mode quit, so the user is never told
+again. Remote sessions are not affected (no local process), except that
+their ssh masters are subordinate processes too (untested).
+
+Options for the owner: say so in the quit alert and the README
+(cheapest; the alert already explains menu bar mode), add it to the
+status menu's wording, or prototype the `SMAppService` agent (option 2
+above) to see whether a login item's processes escape the check. What
+was recorded: `docs/DESIGN.md` section 8 ("Quit, Keep Sessions
+Running") and section 13; the README's "Quitting and the menu bar"
+gained one sentence.
 
 ### The `ctty-exec` helper, for orientation
 
@@ -330,12 +397,14 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
 
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
-  so the prompt will not appear again on this Mac until Armadale is
-  switched off under System Settings › General › Login Items &
-  Extensions › Allow in the Background (`sudo sfltool dumpbtm` shows the
-  record). A Desktop-folder privacy denial was recorded for the deleted
-  path `/tmp/armadale-bgtest/bin/ctty-exec-0.1.0` during the disclaim
-  test; harmless.
+  so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`
+  shows the record). The switch under System Settings › General › Login
+  Items & Extensions › Allow in the Background was turned off for the
+  evening's tests and **is on again**; off means every session is ended
+  a few seconds after any quit (above). A Desktop-folder privacy denial
+  was recorded for the deleted path
+  `/tmp/armadale-bgtest/bin/ctty-exec-0.1.0` during the disclaim test;
+  harmless.
 - Notification permission for `com.tinylittleapps.armadale` is granted in
   System Settings (done during step 7 testing); notification
   authorization is per bundle id, so it covers ad-hoc and Developer ID

@@ -1309,6 +1309,20 @@ the menu bar.
   clients detached, sessions alive, state saved. The Dock shows nothing
   afterwards (no tile to decorate). Whether launchd lists the daemons
   under Background App Activity in System Settings is not known.
+  **The sessions survive only while Armadale is allowed to run in the
+  background** (System Settings › General › Login Items & Extensions ›
+  Allow in the Background, the decision the first-quit prompt records).
+  Tested October 19, 2026: with Armadale switched off there,
+  `loginwindow` asks Background Task Management when the app exits,
+  is told no, and force-quits the app's coalition, which SIGTERMs
+  every daemon and shell: 5 s after a quit from menu bar mode (the
+  exited accessory app counts as "never user-visible"), 1 s after a
+  regular quit such as SIGTERM. No prompt appeared for an accessory-mode
+  quit, switched on or off (a Mac with no stored decision was not
+  tested). Switched on, nothing is touched. The app has no
+  way to read that setting, so the status menu's promise holds only
+  under Allow; what to say about it is an open point (section 13,
+  `HANDOFF.md`).
 - **End Sessions and Quit** ends every session that may be alive, then
   quits: shown panes through their controllers (`close()`), the rest
   through their backends (`kill`); unavailable sessions cannot be
@@ -1984,7 +1998,18 @@ The build order is complete.
   nothing: launchd keeps the attribution across fork, exec, disclaim and
   job submission. Decision (October 19, 2026): Armadale asks before
   quitting with running sessions and otherwise stays in the menu bar
-  (step 8, section 8); the findings are in `HANDOFF.md`.
+  (step 8, section 8); the findings are in `HANDOFF.md`. Tested the
+  same evening: menu bar mode avoids the Dock indicator and its stop
+  item, and no prompt appeared for a quit from it (with a decision
+  stored), but the stored allow decision governs the sessions all the
+  same. With Armadale switched
+  off under Allow in the Background (what Don't Allow on the first-quit
+  prompt records), `loginwindow` force-quits the app's whole coalition
+  5 s after a menu bar mode quit and 1 s after a regular quit ("BTM said
+  this application is not allowed to run background processes"), so
+  every local session dies; under Allow nothing is touched. No API
+  reports the decision. Open: whether the quit alert, the status menu
+  or an `SMAppService` login item should answer this (`HANDOFF.md`).
 - **Socket path length** on macOS (104 bytes) constrains where the runtime
   directory lives; handled with the fallback above. zmx does not resolve
   symlinks, so a symlinked short directory is an alternative if ever needed.

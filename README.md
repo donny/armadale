@@ -329,7 +329,13 @@ Why: since macOS 27, a quit that leaves processes started by the app
 running makes the Dock show the app as "Running in Background" (with a
 one-time prompt to allow it), and the Dock's "Stop Running in Background"
 ends every session at once. A quit from menu bar mode leaves no Dock item.
-Details in docs/DESIGN.md section 8, "Quitting with running sessions".
+Sessions survive a quit only while Armadale is allowed to run in the
+background: if you answered Don't Allow to that prompt, or switched
+Armadale off under System Settings › General › Login Items & Extensions
+› Allow in the Background, macOS ends every session a few seconds after
+Armadale quits, from the menu bar too. Keep it allowed, or keep Armadale
+running. Details in docs/DESIGN.md section 8, "Quitting with running
+sessions".
 
 ## Settings and themes
 
