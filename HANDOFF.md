@@ -78,6 +78,8 @@ for an update feed, and what step 8 should say or do about macOS 27's
 "Allow in the Background" switch, which ends every session a few seconds
 after any quit when it is off, from the menu bar too (tested October 19,
 2026, evening; "macOS 27: Allow in the Background switched off" below).
+The owner deferred that last decision on October 19, 2026; it is an
+open item, not started.
 
 ## Open items carried forward
 
@@ -144,7 +146,8 @@ Menu bar mode (step 8), from its review
   Allow in the Background macOS ends every session 5 s after that quit
   (1 s after a regular quit such as SIGTERM). Under Allow nothing is
   touched. The app cannot read that setting; what the quit alert, the
-  status menu and the README should say about it is an owner decision.
+  status menu and the README should say about it is an owner decision,
+  deferred on October 19, 2026 (open item).
   Whether launchd lists the session daemons under Background App
   Activity after a quit is still unknown (needs root or the System
   Settings UI).
@@ -370,8 +373,9 @@ their ssh masters are subordinate processes too (untested).
 Options for the owner: say so in the quit alert and the README
 (cheapest; the alert already explains menu bar mode), add it to the
 status menu's wording, or prototype the `SMAppService` agent (option 2
-above) to see whether a login item's processes escape the check. What
-was recorded: `docs/DESIGN.md` section 8 ("Quit, Keep Sessions
+above) to see whether a login item's processes escape the check.
+**Decision deferred by the owner (October 19, 2026): open item, nothing
+started.** What was recorded: `docs/DESIGN.md` section 8 ("Quit, Keep Sessions
 Running") and section 13; the README's "Quitting and the menu bar"
 gained one sentence.
 
