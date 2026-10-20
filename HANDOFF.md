@@ -7,7 +7,7 @@ instructions are in `README.md`.
 
 ## Status (October 19, 2026)
 
-Steps 1–8 of the build order (`docs/DESIGN.md` §12) are implemented,
+Steps 1–9 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
 
 | Step | Commit | What it added |
@@ -20,6 +20,7 @@ reviewed and committed on `main`:
 | 6 Remote | 7302a12 | `SSHTransport`, deployment, `RemoteZmxBackend`, reconnect, Hosts tab |
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
 | 8 Menu bar | bf40d94 | quit question, General preference, accessory mode with status item, End Sessions and Quit |
+| 9 Ship | (next commit) | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
 
 The app icon ("Panes": a graphite tile with three panes, the top-right
 one lit coral) was added after step 7: `scripts/render-app-icon.swift`
@@ -43,22 +44,27 @@ sessions, default Ask); the status item shows the Panes glyph as a
 template image. Built with the implementer → reviewer loop (467 tests,
 zero warnings, `check-quit.sh` passing).
 
-## Next: step 9 (Ship), not started
+Step 9 (October 19, 2026): Developer ID signing under team
+**YJ8LXVCB3T** (an individual enrolment under the owner's name; "Tiny
+Little Apps" is only the bundle id prefix), `scripts/release.sh`
+(archive, verify, notarize and staple the app, build, sign, notarize and
+staple the DMG, Gatekeeper checks), a README "Releasing" section. **No
+updater** in v1 (the repository is private, so a Sparkle feed has no
+public home; revisit if the repository or a website becomes public) and
+**no crash reporting**. Spec: `docs/DESIGN.md` section 11, "Release
+pipeline (step 9)". The keychain profile `armadale-notary` exists on this
+Mac and the first notarized `Armadale-0.1.0.dmg` was produced and
+accepted during the step's verification (not kept: `build/` is
+git-ignored and wiped by the script). Built with the implementer →
+reviewer loop. The app is arm64 only (macOS 27 has no Intel support);
+the bundled persistence helper stays universal for Intel Mac hosts.
 
-Decisions needed from the owner before work begins:
+## Next
 
-1. The Developer ID **team identifier**. `DEVELOPMENT_TEAM` is `""` in
-   `project.yml` (app and `ctty-exec` targets); the bundle id is
-   `com.tinylittleapps.armadale`.
-2. Whether to add **crash reporting**, and which service or mechanism.
-3. The **update mechanism**. Sparkle is the obvious candidate.
-
-Then the work is: Developer ID signing of the app and both helpers (keep
-the helpers signed with no entitlements; see the `project.yml` comments),
-`scripts/notarize.sh` with `notarytool`, a release build script, the
-chosen updater and crash reporter, and a README section. Use the same
-implementer → reviewer → fix → verify → commit loop described in
-`AGENTS.md`, and ask the owner before starting.
+The build order is complete. Candidates, each needing an owner decision:
+the Ghostty second renderer (below), the open items below, a public home
+for an update feed, and the untested macOS 27 prompt cases listed under
+"Menu bar mode (step 8)".
 
 ## Open items carried forward
 
@@ -131,8 +137,7 @@ Menu bar mode (step 8), from its review
 Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
-- `DEVELOPMENT_TEAM` empty; signing is "sign to run locally".
-- No `scripts/notarize.sh`, no crash reporting, no updater.
+- No updater and no crash reporting (decided for v1, October 19, 2026).
 
 ## Investigations (October 19, 2026), decisions pending
 
@@ -321,8 +326,12 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   path `/tmp/armadale-bgtest/bin/ctty-exec-0.1.0` during the disclaim
   test; harmless.
 - Notification permission for `com.tinylittleapps.armadale` is granted in
-  System Settings (done during step 7 testing); it applies to any build
-  with that bundle id.
+  System Settings (done during step 7 testing); notification
+  authorization is per bundle id, so it covers ad-hoc and Developer ID
+  builds alike. Privacy (TCC) grants keyed by code requirement, and
+  macOS 27's stored background decision, may differ between the two.
+- The Developer ID certificate for team YJ8LXVCB3T expires on February 1,
+  2027; the notarization keychain profile is `armadale-notary`.
 - The Lima VM `default` is stopped and has no `~/.armadale` inside it.
 - Claude Code 2.1.292 and Codex 0.163.0 are installed; `docs/DESIGN.md`
   §10 records what each offers and the source lines consulted. Re-check

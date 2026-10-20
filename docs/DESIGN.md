@@ -1711,7 +1711,7 @@ armadale/
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
-│                                    render-app-icon.swift (notarize.sh arrives with step 9)
+│                                    render-app-icon.swift, release.sh (step 9)
 ├── docs/                            DESIGN.md, icon/AppIcon.svg (generated master vector)
 ├── AGENTS.md                        how to work in this repository (process, rules, test hosts)
 └── HANDOFF.md                       where development stopped (status, next step, open items)
@@ -1762,10 +1762,144 @@ armadale/
   `ASSETCATALOG_COMPILER_APPICON_NAME` is `AppIcon` in `project.yml`. The
   lit coral is meant to become the in-app attention colour as well; today
   the badge and status glyphs use their own colours (open item).
-- Signing: hardened runtime, no sandbox entitlement, `zmx` helper signed as
-  part of the bundle. Today `project.yml` signs to run locally with an
-  empty `DEVELOPMENT_TEAM`; Developer ID signing and notarization via
-  `notarytool` (`scripts/notarize.sh`) are step 9 and not yet written.
+- Signing: hardened runtime, no sandbox entitlement, `zmx` and `ctty-exec`
+  helpers signed as part of the bundle. Debug builds are ad hoc; Release
+  builds are signed with Developer ID by the release pipeline (step 9,
+  next subsection).
+
+### Release pipeline (step 9)
+
+Decisions (October 19, 2026): team **YJ8LXVCB3T** (an individual
+Developer Program enrolment; Gatekeeper names "Donny Kurniawan"); **no
+updater** and **no crash reporting** in v1 (the repository is private, so
+a Sparkle feed has nowhere public to live; macOS keeps crash reports
+under `~/Library/Logs/DiagnosticReports`); the artifact is a **notarized,
+stapled DMG**.
+
+- **Signing settings** (`project.yml`). `DEVELOPMENT_TEAM` is
+  `YJ8LXVCB3T` on the app, `ctty-exec` and the test target. Debug keeps
+  "Sign to Run Locally" (`CODE_SIGN_IDENTITY = -`) so the build and test
+  gate never depends on the keychain; Release signs with `Developer ID
+  Application` (manual style), hardened runtime, secure timestamp. Both
+  helpers stay without entitlements (the `project.yml` comments explain
+  why); `embed-zmx.sh` already follows the build's identity and hardened
+  flag. `armadale-notify` is a shell script in Resources and is not
+  Mach-O; the Linux `zmx` binaries are data. Nothing else in the bundle
+  needs signing. A Release build must launch and run sessions: the
+  AMFI concern (a restricted entitlement on a helper) is what
+  `scripts/check-quit.sh` against the Release app proves absent.
+- **`scripts/release.sh`** builds the artifact from a clean working
+  tree (refuses a dirty one unless `--allow-dirty`), in this order:
+  1. `xcodegen generate`; `xcodebuild archive` (Release) into
+     `build/release/` (git-ignored); the app is taken from the archive's
+     `Products/Applications` (no provisioning profile is involved, so
+     `-exportArchive` adds nothing).
+  2. Verification before anything leaves the machine: `codesign
+     --verify --deep --strict --verbose=2` on the app; the app, `zmx` and
+     `ctty-exec` are signed by the Developer ID identity with the
+     hardened runtime (`codesign -d -vv` shows `runtime`); the helpers
+     carry no entitlements and the app carries only the sandbox-off
+     entitlement; `Contents/Helpers/zmx` is universal.
+  3. Notarize the app first: zip it (`ditto -c -k --keepParent`),
+     `xcrun notarytool submit --keychain-profile armadale-notary --wait`,
+     fail on anything but `Accepted` (print the log on failure), then
+     `xcrun stapler staple` the app.
+  4. Build the DMG from the stapled app with `hdiutil` (volume
+     "Armadale", the app and an `Applications` symlink, UDZO), sign the
+     DMG with the same identity, notarize it the same way, staple it.
+  5. Final checks: `spctl --assess --type execute` on the app and
+     `spctl --assess --type open --context context:primary-signature` on
+     the DMG; `stapler validate` on both. Output
+     `build/release/Armadale-<MARKETING_VERSION>.dmg`; print the
+     suggested `git tag v<version>` command rather than tagging.
+  `--skip-notarize` stops after step 2 plus an unnotarized DMG, for
+  checking the pipeline without credentials.
+- **Credentials.** The keychain profile `armadale-notary` is created
+  once, interactively, by the owner:
+  `xcrun notarytool store-credentials armadale-notary --apple-id <id>
+  --team-id YJ8LXVCB3T` with an app-specific password. The script
+  explains this when the profile is missing. Nothing in the repository
+  holds credentials.
+- **Versions.** `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` live in
+  `project.yml` and are bumped by hand before a release (the build
+  number must increase every release). A release is a commit; the tag
+  is the owner's.
+- **Identity change.** A Developer ID build has a different code
+  identity (designated requirement) from the ad-hoc development build.
+  Notification permission is kept per bundle identifier, so it carries
+  over. Privacy (TCC) grants, which are keyed by the code requirement, may
+  need granting again, and macOS 27's stored "Allow in the Background"
+  decision may be asked again. Not a defect; noted for testing.
+
+**Implementation (step 9).** Where the build differs from the plan above,
+or adds to it:
+
+- *Signing style.* All three targets use `CODE_SIGN_STYLE = Manual`, Debug
+  included (with `CODE_SIGN_IDENTITY = -`, still "Sign to Run Locally"), so
+  Xcode never consults an Apple account or looks for a provisioning
+  profile. Release sets `CODE_SIGN_IDENTITY = Developer ID Application`
+  and `OTHER_CODE_SIGN_FLAGS = --timestamp` on the app and `ctty-exec`
+  (the archive log shows `codesign --force --sign <Developer ID SHA-1>
+  --timestamp -o runtime` and no `--timestamp=none`). The test target is
+  ad hoc in every configuration; it never ships. `embed-zmx.sh` needed no
+  change: under Release it receives the Developer ID SHA-1 as
+  `EXPANDED_CODE_SIGN_IDENTITY` and `ENABLE_HARDENED_RUNTIME = YES`, so
+  `zmx` is signed with the same identity, `--options runtime` and
+  `--timestamp`. The sign-on-copy of `ctty-exec` keeps its runtime flag
+  and its empty entitlements. On this Mac the first Developer ID signing
+  raised no keychain prompt.
+- *Architectures.* The app and `ctty-exec` are arm64 only: macOS 27 has
+  no Intel support, and with a macOS 27 deployment target Xcode 27's
+  `ARCHS_STANDARD` is `arm64`. `Contents/Helpers/zmx` stays universal, and
+  the script checks that, because it is also the binary deployed to
+  macOS SSH hosts (`HelperLocator.remoteZmx`, section 6); its x86_64 slice
+  is what an Intel Mac host (macOS 26 or earlier) receives.
+- *Profile action.* The scheme's Profile action builds Release, which now
+  needs the Developer ID certificate and carries no `get-task-allow`, so
+  Instruments cannot attach to it; profile a Debug build instead, or
+  change the action's configuration locally.
+- *`release.sh` additions.* A preflight, before anything is built,
+  checks for `xcodegen`, checks the working tree with `git status
+  --porcelain --untracked-files=normal` (so a `status.showUntrackedFiles`
+  setting cannot hide untracked files), resolves the signing identity and
+  (unless `--skip-notarize`) checks that `xcrun notarytool history
+  --keychain-profile armadale-notary` works; a missing profile prints the
+  `store-credentials` command. The identity is the SHA-1 of the single
+  valid `Developer ID Application: … (YJ8LXVCB3T)` identity; with none the
+  script fails, and with several (a renewed certificate next to the old
+  one) it fails asking for `ARMADALE_SIGNING_IDENTITY=<sha1>`, which is
+  honoured when set and must name one of them. Xcode still picks the
+  app's identity by name; the script then requires the app's leaf
+  certificate (`codesign --extract-certificates`) to be that identity, and
+  signs the DMG with its SHA-1. After reading the version, the script
+  fails if the tag `v<version>` already exists (bump the versions first)
+  unless `--allow-existing-tag` is given. The archive uses its own
+  DerivedData under `build/release/` (the whole directory is removed at
+  the start of every run), so a release never reuses development
+  intermediates; its log is kept as `build/release/archive.log`. The
+  version and build number are read from the archived app's
+  `Info.plist`. Verification also requires a secure timestamp on each of
+  the three signatures and that all three name the same signer; the DMG
+  is signed with the resolved identity, checked with `codesign --verify
+  --strict` and `hdiutil verify`. The DMG's file system is HFS+. A
+  notarized DMG is built as `Armadale-<version>-pending.dmg` and renamed
+  to `Armadale-<version>.dmg` only after the final `spctl` and `stapler
+  validate` checks pass (the stapled ticket is inside the file, so the
+  rename does not affect it); a failed run never leaves a file with the
+  release name. Every check (signatures, stapling, `hdiutil`) fails with
+  a message rather than ending the script silently under `set -e`.
+- *`--skip-notarize`* still signs the DMG and runs the Gatekeeper checks
+  (which reject it with "source=Unnotarized Developer ID"), and names it
+  `Armadale-<version>-unnotarized.dmg`, so it cannot be mistaken for a
+  release. The suggested tag is an annotated `git tag -a v<version>` on
+  the commit that was built; after an `--allow-dirty` build the script
+  says to commit and rebuild instead of suggesting a tag (based on the
+  tree's state at the start of the run). The notary log
+  is fetched for accepted submissions too, and any issues (warnings) in
+  it are printed.
+- *`hdiutil` on macOS 27* prints a deprecation warning for `create`,
+  pointing at `diskutil image create from` (whose folder images are
+  APFS). `hdiutil` still works and is kept; the switch is a later chore.
 
 ---
 
@@ -1775,8 +1909,8 @@ Each step was built by an implementer agent, reviewed by a separate
 reviewer agent (code reading plus live keystroke checks of the running
 app), fixed, verified with the full build and test command, and committed
 on `main`. Steps 1–7 are done: d0c4587, 93019d8, f6cedbb, 76a4e4e,
-4d3ab86, 7302a12, dac547f (October 16–18, 2026); step 8 on October 19. Step 9 is
-open.
+4d3ab86, 7302a12, dac547f (October 16–18, 2026); steps 8 and 9 on October 19.
+The build order is complete.
 
 1. **Skeleton** — XcodeGen project, packages, `ArmadaleCore` model,
    `PaneLayout` operations with tests, `StateStore` with migrations.
@@ -1796,10 +1930,9 @@ open.
 8. **Menu bar mode** — the quit question, the General preference,
    accessory mode with a status item, End Sessions and Quit (section 8,
    "Quitting with running sessions"). *Done.*
-9. **Ship** — notarization pipeline, crash reporting decision, update
-   mechanism decision (Sparkle is the obvious candidate). *Not started.*
-   Needs the owner's Developer ID team identifier and decisions on crash
-   reporting and updates; see `HANDOFF.md`.
+9. **Ship** — Developer ID signing, `scripts/release.sh` (archive,
+   verify, notarize, staple, DMG), README release section (section 11,
+   "Release pipeline"). No updater and no crash reporting in v1. *Done.*
 
 ---
 
@@ -1893,5 +2026,6 @@ open.
   configuration a user may rely on (API keys, config directories, provider
   switches); a new agent version adding markers would need adding to the
   list.
-- **Team ID** is not yet set; `project.yml` carries an empty placeholder.
-  The bundle identifier is `com.tinylittleapps.armadale`.
+- **Team ID** is YJ8LXVCB3T (step 9); the bundle identifier is
+  `com.tinylittleapps.armadale`, a prefix the owner chose, not a
+  registered organisation name.

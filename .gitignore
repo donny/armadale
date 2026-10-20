@@ -26,3 +26,6 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# Release artifacts (scripts/release.sh)
+/build/

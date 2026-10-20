@@ -122,12 +122,17 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
-        # Signing: "Sign to Run Locally" so the project builds without a team.
-        # Set DEVELOPMENT_TEAM (and switch CODE_SIGN_IDENTITY to
-        # "Developer ID Application" for release) once a team is chosen.
-        DEVELOPMENT_TEAM: ""
-        CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
+        # Signing (docs/DESIGN.md section 11, "Release pipeline"). Manual
+        # style throughout, so Xcode never reaches for an account or a
+        # provisioning profile. Debug is "Sign to Run Locally" (ad hoc), so
+        # the build and test gate never needs the keychain; Xcode then turns
+        # the hardened runtime off by itself. Release (what `xcodebuild
+        # archive` and scripts/release.sh build) signs with the team's
+        # Developer ID Application certificate, hardened runtime and a
+        # secure timestamp, as notarization requires. The Embed zmx phase
+        # and the sign-on-copy of ctty-exec follow this identity.
+        DEVELOPMENT_TEAM: YJ8LXVCB3T
+        CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
         # Our own code must be warning-free. Packages enable the same via
@@ -135,6 +140,12 @@ targets:
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
         COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_IDENTITY: Developer ID Application
+          OTHER_CODE_SIGN_FLAGS: --timestamp
 
   # The trampoline that gives spawned sessions their controlling terminal
   # (docs/DESIGN.md section 7). Same source as the SwiftPM executable target
@@ -160,13 +171,22 @@ targets:
         # would fail to start. Sign-on-copy preserves whatever is here.
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
         ENTITLEMENTS_REQUIRED: NO
-        DEVELOPMENT_TEAM: ""
-        CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
+        # Signed like the app (Debug ad hoc, Release Developer ID with the
+        # hardened runtime and a timestamp); the sign-on-copy into
+        # Contents/Helpers re-signs it with the app's identity and keeps
+        # these flags.
+        DEVELOPMENT_TEAM: YJ8LXVCB3T
+        CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: YES
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
         SKIP_INSTALL: YES
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_IDENTITY: Developer ID Application
+          OTHER_CODE_SIGN_FLAGS: --timestamp
 
   # Tests for the app target's own code (split tree view, close-risk rule,
   # window controller lifetime). Unhosted on purpose: the app is never
@@ -195,8 +215,10 @@ targets:
         # sources): its NSPrincipalClass makes xctest create a second
         # NSApplication.
         INFOPLIST_FILE: ""
-        DEVELOPMENT_TEAM: ""
-        CODE_SIGN_STYLE: Automatic
+        # Always ad hoc: the bundle is only ever built for the Debug test
+        # run and never ships, so it never needs the keychain.
+        DEVELOPMENT_TEAM: YJ8LXVCB3T
+        CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES

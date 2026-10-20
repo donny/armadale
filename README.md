@@ -11,11 +11,12 @@ versioned JSON in `~/Library/Application Support/Armadale/`.
 
 ## Status
 
-Steps 1–8 of the build order in [docs/DESIGN.md](docs/DESIGN.md) section 12
-are implemented and committed on `main` (October 2026); step 8 is menu bar
-mode, asking before quitting with running sessions. Step 9 (Ship:
-Developer ID signing, notarization, crash reporting and an update
-mechanism) has not been started, so the app runs from a local build only.
+All nine steps of the build order in [docs/DESIGN.md](docs/DESIGN.md)
+section 12 are implemented and committed on `main` (October 2026). Step 8
+is menu bar mode, asking before quitting with running sessions; step 9 is
+Developer ID signing and `scripts/release.sh`, which builds a notarized,
+stapled DMG (see [Releasing](#releasing)). There is no updater and no
+crash reporting in v1.
 Where development stopped, what is next and the open items are in
 [HANDOFF.md](HANDOFF.md); the rules for working in the repository are in
 [AGENTS.md](AGENTS.md).
@@ -368,6 +369,76 @@ its own suite, named by an absolute path inside a fresh temporary folder
 (CFPreferences then keeps the plist there, not in `~/Library/Preferences`),
 and removes the folder at the end.
 
+## Releasing
+
+A release is a Developer ID signed, notarized and stapled DMG built by
+`scripts/release.sh` (docs/DESIGN.md section 11, "Release pipeline").
+Debug builds, including the build and test command above, are signed ad
+hoc ("Sign to Run Locally") and never need the keychain; only the Release
+configuration, which `xcodebuild archive` uses, signs with Developer ID.
+
+Prerequisites, once per Mac:
+
+- The team's **Developer ID Application** certificate (team `YJ8LXVCB3T`)
+  with its private key in the login keychain. `security find-identity -v
+  -p codesigning` must list `Developer ID Application: … (YJ8LXVCB3T)`.
+  The first signing may ask to let `codesign` use the key; choose Always
+  Allow. If several valid ones are listed (for example a renewed
+  certificate next to the old one), the script stops and asks you to
+  choose one with `ARMADALE_SIGNING_IDENTITY=<its SHA-1>`; the app must
+  then be signed with that same certificate (remove the old one from the
+  keychain if Xcode picks it).
+- A notary keychain profile named `armadale-notary`, created
+  interactively with an app-specific password (account.apple.com › Sign-In
+  and Security › App-Specific Passwords):
+
+  ```sh
+  xcrun notarytool store-credentials armadale-notary \
+    --apple-id <apple id> --team-id YJ8LXVCB3T
+  ```
+
+  No credentials live in the repository.
+
+To release:
+
+1. Bump `MARKETING_VERSION` (the version users see, e.g. `0.2.0`) and
+   `CURRENT_PROJECT_VERSION` (the build number, which must increase with
+   every release) in the app target's settings in `project.yml`, and
+   commit.
+2. From a clean working tree, run `scripts/release.sh`. It refuses a tree
+   with uncommitted or untracked changes unless given `--allow-dirty`,
+   and a version whose tag `v<version>` already exists unless given
+   `--allow-existing-tag`. **Every run first deletes `build/release/`,
+   including a DMG from an earlier run, so move a finished DMG out of it
+   before running the script again.** It archives the Release
+   configuration into `build/release/` (git-ignored, with its own
+   DerivedData, so a release starts from scratch and takes several
+   minutes), checks the
+   signatures of the app and both helpers (Developer ID of `YJ8LXVCB3T`,
+   hardened runtime, secure timestamp, no entitlements on the helpers, only
+   the sandbox-off entitlement on the app, a universal persistence
+   helper), notarizes and staples the app, builds the DMG (volume
+   "Armadale" with the app and an Applications link), signs, notarizes
+   and staples it, and checks both with Gatekeeper (`spctl`) and `stapler
+   validate`. Notarization usually takes a few minutes per submission; a
+   rejected submission fails the script and prints the notary log.
+3. The result is `build/release/Armadale-<version>.dmg`. Until every
+   check has passed the DMG is called `Armadale-<version>-pending.dmg`, so
+   a file with that name is not a release. The script prints the suggested
+   `git tag` command; tagging and publishing are up to you.
+
+`scripts/release.sh --skip-notarize` (no credentials needed) stops after
+the signature checks and builds `build/release/Armadale-<version>-unnotarized.dmg`,
+signed but not notarized: Gatekeeper rejects it ("source=Unnotarized
+Developer ID"), so it is for checking the pipeline only. To check that a
+Release build starts sessions, run `scripts/check-quit.sh
+build/release/Armadale.xcarchive/Products/Applications/Armadale.app`.
+
+A Developer ID build has a different code identity from a development
+build. Notification permission is kept per bundle identifier and carries
+over; privacy grants, which macOS ties to the code identity, and macOS
+27's "Allow in the Background" decision may be asked for again.
+
 ## Layout
 
 | Path | Contents |
@@ -379,5 +450,5 @@ and removes the folder at the end.
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
-| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
+| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `release.sh` (the release DMG, see [Releasing](#releasing)), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |
