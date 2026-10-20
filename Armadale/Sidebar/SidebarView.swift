@@ -48,7 +48,6 @@ struct SidebarView: View {
                         } label: {
                             TabGroupRow(
                                 group: group,
-                                isSelected: group.id == workspace.selectedTabGroupID,
                                 attentionCount: registry.attention?.count(in: model.sessionIDs(ofTabGroup: group.id)) ?? 0,
                                 actions: actions)
                                 .tag(SidebarItem.tabGroup(group.id))
@@ -179,7 +178,6 @@ private struct WorkspaceRow: View {
 
 private struct TabGroupRow: View {
     let group: TabGroup
-    let isSelected: Bool
     /// Panes of the group needing attention.
     let attentionCount: Int
     let actions: WorkspaceActions
@@ -187,7 +185,7 @@ private struct TabGroupRow: View {
 
     var body: some View {
         HStack {
-            Label(group.name, systemImage: isSelected ? "folder.fill" : "folder")
+            Label(group.name, systemImage: "folder")
             Spacer(minLength: 4)
             AttentionCount(count: attentionCount)
             Text("\(group.tabs.count)")
