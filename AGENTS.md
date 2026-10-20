@@ -69,6 +69,19 @@ Screenshot only the app's window, never the full screen, and delete
 screenshots afterwards. In an earlier round an agent typed into the lock
 screen; these rules exist because of that.
 
+Probes that need no input and are safe at any time: the Dock's items
+through System Events (`tell process "Dock" to return name of every UI
+element of list 1`; an item left after the app exited whose
+`AXIsApplicationRunning` is true is macOS 27's "Running in Background"),
+a status item (`tell process "Armadale" to menu bar 2`), an alert's text
+(`value of every static text of window 1`). System Events reports
+`frontmost` as false for an accessory (menu bar only) app even when it
+is active, so for clicks on Armadale's own status menu in that state the
+check is: screen unlocked and at least 20 s of HID idle time (`ioreg -c
+IOHIDSystem`, `HIDIdleTime`). `osascript -e 'quit app "Armadale"'`
+behaves like ⌘Q and returns "User canceled" when the quit alert's answer
+cancels the quit; that is expected.
+
 **Isolation for test runs.** Launch with `ARMADALE_STATE_DIR=/tmp/armadale-<name>`
 (a short path: Unix socket paths are limited to 104 bytes) and
 `ARMADALE_DEFAULTS_SUITE=armadale-<name>` so the owner's real state and
@@ -114,3 +127,15 @@ agent configuration files. Design deviations are written into
   them when either is upgraded.
 - `scripts/check-quit.sh /path/to/Armadale.app` checks the SIGTERM quit
   path in two scenarios; run it when touching `AppDelegate` quit code.
+- `scripts/release.sh` (Developer ID signed, notarized, stapled DMG) and
+  `scripts/install-release.sh` (the same, then installed to
+  `~/Applications`) need the Developer ID certificate in the login
+  keychain and the notary profile `armadale-notary`; both exist on this
+  Mac. Never store or print credentials; never create keychain profiles
+  on the owner's behalf. A release run deletes `build/release/`, takes
+  several minutes and submits to Apple, so do not run it casually; the
+  Debug gate never touches the keychain. Running the Release app for a
+  check (`check-quit.sh` against it) is live UI testing.
+- Never run or replace the owner's installed `~/Applications/Armadale.app`
+  during tests; test builds come from DerivedData with an isolated state
+  directory.

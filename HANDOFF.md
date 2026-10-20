@@ -28,10 +28,21 @@ generates the Icon Composer document, the asset catalog rasters and
 `docs/icon/AppIcon.svg` from one geometric description. Concept and
 refinement pages used to choose it are not in the repository.
 
+After step 9, cf9305c added `scripts/install-release.sh`, which runs the
+release pipeline and installs the app from the DMG into `~/Applications`.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
-warnings; 467 at step 8). The working tree was clean and nothing was
-running when work paused.
+warnings; 467 from step 8 on). The working tree was clean and nothing was
+running when work paused (October 19, 2026, evening).
+
+**Releases.** Armadale 0.1.0 (build 1) was built, notarized and stapled
+twice on October 19, 2026 from the committed tree (the second time by
+`install-release.sh` with `--allow-dirty` while that script itself was
+still uncommitted; the app's sources were those of 72cf014). No tag was
+created: `git tag -a v0.1.0 -m "Armadale 0.1.0" 72cf014 && git push
+origin v0.1.0` is the owner's call. The DMG is not kept in the
+repository (`build/` is ignored and wiped by the script).
 
 Step 8 (October 19, 2026) came out of the macOS 27 investigation below:
 Armadale asks before quitting with running sessions and can stay in the
@@ -331,7 +342,15 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   builds alike. Privacy (TCC) grants keyed by code requirement, and
   macOS 27's stored background decision, may differ between the two.
 - The Developer ID certificate for team YJ8LXVCB3T expires on February 1,
-  2027; the notarization keychain profile is `armadale-notary`.
+  2027; the notarization keychain profile is `armadale-notary` (created
+  by the owner on October 19, 2026; the notary history under that account
+  lists the accepted submissions). Debug builds never need either.
+- `~/Applications/Armadale.app` is the notarized 0.1.0 (build 1) installed
+  by `scripts/install-release.sh` on October 19, 2026. It has a different
+  code identity from Debug builds, so privacy prompts from inside its
+  sessions may appear once more; it uses the real state directory
+  (`~/Library/Application Support/Armadale`), never a test one. Do not
+  replace it or run it during tests without the owner's say-so.
 - The Lima VM `default` is stopped and has no `~/.armadale` inside it.
 - Claude Code 2.1.292 and Codex 0.163.0 are installed; `docs/DESIGN.md`
   §10 records what each offers and the source lines consulted. Re-check

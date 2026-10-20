@@ -4,11 +4,11 @@ Armadale is a native macOS terminal for running and supervising a fleet of
 persistent agent sessions. Sessions survive app restarts, live locally or on
 SSH hosts, and are organised as **Workspace → Tab Group → Tab → Pane**.
 
-**Status (October 19, 2026).** Steps 1–7 of the build order (section 12) are
-implemented, reviewed and committed on `main`; step 8 (Menu bar mode: the
-quit question, accessory mode with a status item) is built and in review;
-step 9 (Ship) has not been started. This document is the contract the code was built against and was
-kept in step with it: paragraphs marked *Step N* or *Implementation (step N)*
+**Status (October 19, 2026).** All nine steps of the build order (section
+12) are implemented, reviewed and committed on `main`: step 8 is menu bar
+mode (the quit question, accessory mode with a status item), step 9 is
+Developer ID signing and the release pipeline (section 11). This document
+is the contract the code was built against and was kept in step with it: paragraphs marked *Step N* or *Implementation (step N)*
 record what that step built and where it deviated from the original plan.
 Current status, next steps and open items are in `HANDOFF.md` at the
 repository root; the rules for working in the repository are in `AGENTS.md`.
