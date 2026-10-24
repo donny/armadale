@@ -6,9 +6,11 @@ import Testing
 
 /// The clean-exit rule in the registry (docs/DESIGN.md section 4, "Ended"):
 /// a session that ends with status 0 takes its pane with it, through the
-/// same model intent as the placeholder's Close Pane, unless the pane is
-/// its workspace's last; and restored sessions recorded as exited cleanly
-/// lose their panes at launch. No process is started.
+/// same model intent as the placeholder's Close Pane, wherever the pane is
+/// (a workspace's only pane takes the workspace with it); and restored
+/// sessions recorded as exited cleanly lose their panes at launch. No
+/// process is started. The window side of the only pane's clean exit is in
+/// `WindowLifetimeTests`.
 @Suite("Clean exits close panes")
 @MainActor
 struct CleanExitTests {
@@ -57,21 +59,48 @@ struct CleanExitTests {
         #expect(registry.controller(for: shell) == nil, "the registry let it go, as Close Pane does")
     }
 
-    @Test func theLastPaneOfAWorkspaceKeepsThePlaceholder() throws {
+    /// The only pane of the only workspace: a clean exit empties the model
+    /// and retires the session, as Close Pane would.
+    @Test func theOnlyPaneOfTheOnlyWorkspaceClosesOnACleanExit() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        let shell = try #require(model.sessionIDs(in: workspace).first)
+        let (registry, settings) = makeRegistry(model)
+        defer { settings.removeTestDefaults() }
+        var retired: [SessionID] = []
+        registry.onSessionRetired = { retired.append($0) }
+
+        try #require(registry.paneView(for: shell)).controller.markEnded(exitCode: 0)
+        #expect(model.workspace(workspace) == nil)
+        #expect(model.workspaces.isEmpty && model.sessions.isEmpty)
+        #expect(registry.controller(for: shell) == nil, "the registry let it go, as Close Pane does")
+        for _ in 0..<40 where retired.isEmpty { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(retired == [shell])
+    }
+
+    /// A program's failure, a death by signal or an unknown end in a
+    /// workspace's only pane keeps the placeholder (`nil`: a signal or an
+    /// unknown end of the shell itself).
+    @Test(arguments: zip(
+        [Profile.claudeCode.id, Profile.claudeCode.id, Profile.claudeCode.id, nil, nil] as [ProfileID?],
+        [ProgramExit.exited(3), .signaled(15), nil, .signaled(15), nil] as [ProgramExit?]))
+    func theOnlyPaneKeepsThePlaceholderWhenTheEndIsNotClean(profile: ProfileID?, exit: ProgramExit?) throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let workspace = model.newWorkspace(name: "W", profile: profile)
         let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
         let (registry, settings) = makeRegistry(model)
         defer { settings.removeTestDefaults() }
         let controller = try #require(registry.paneView(for: try session(of: pane, in: model))).controller
-        controller.markEnded(exitCode: 0)
+        controller.markEnded(exitCode: exit)
         #expect(model.tab(containing: pane) != nil)
-        #expect(controller.state == .ended(exitCode: 0))
+        #expect(model.workspace(workspace) != nil)
+        #expect(controller.state == .ended(exitCode: exit))
     }
 
     /// At launch: restored sessions recorded as exited cleanly lose their
-    /// panes in the model's order, until only the workspace's last pane is
-    /// left; sessions not restored, or not recorded as 0, are untouched.
+    /// panes in the model's order, a workspace's only pane included (the
+    /// workspace goes with it); sessions not restored, or not recorded as
+    /// a clean exit, are untouched.
     @Test func restoredSessionsThatExitedCleanlyAreClosedAtLaunch() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
@@ -88,10 +117,47 @@ struct CleanExitTests {
         defer { settings.removeTestDefaults() }
 
         let closed = registry.closePanesOfSessionsThatEndedCleanly([s1: 1, s2: .signaled(1), s3: 0, lone: 0])
-        #expect(closed == [s1, s3])
+        #expect(closed == [s1, s3, lone])
         #expect(model.tabGroup(group)?.tabs.map(\.id) == [tab2], "a hangup keeps its tab")
-        #expect(model.session(lone) != nil, "a workspace's only pane stays")
-        #expect(registry.closePanesOfSessionsThatEndedCleanly([s2: 0]).isEmpty, "now the workspace's last pane")
+        #expect(model.workspace(other) == nil, "the workspace of an only pane goes with it")
+        #expect(registry.closePanesOfSessionsThatEndedCleanly([s2: 0]) == [s2], "the workspace's last pane too")
+        #expect(model.workspaces.isEmpty)
+    }
+
+    /// A launch where every restored session exited cleanly while Armadale
+    /// was not running: the closes run first (AppDelegate, before any
+    /// window shows) and empty the model, then
+    /// ``AppModel/ensureWorkspacesToOpen()`` makes one fresh "Workspace",
+    /// whose new session the pass never saw, and that is all that opens.
+    @Test func whenEveryRestoredSessionExitedCleanlyOneFreshWorkspaceOpens() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "armadale-cx-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let runtime = ZmxRuntime(directory: directory)
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let first = model.newWorkspace(name: "Workspace")
+        let second = model.newWorkspace(name: "Other")
+        let group = try #require(model.workspace(first)?.selectedTabGroupID)
+        _ = model.newTab(in: group)
+        _ = model.newTabGroup(in: second)
+        let restored = model.sessionOrder
+        #expect(restored.count == 4)
+        for (index, id) in restored.enumerated() {
+            model.setRuntimeVersion("0.8.1", for: id)
+            try (index.isMultiple(of: 2) ? "0\n" : "130\n")
+                .write(toFile: runtime.exitFilePath(for: id), atomically: true, encoding: .utf8)
+        }
+        let (registry, settings) = makeRegistry(model, restored: Set(restored))
+        defer { settings.removeTestDefaults() }
+
+        #expect(registry.closeLocalSessionsThatEndedCleanly(recordedIn: runtime) == restored)
+        #expect(model.workspaces.isEmpty && model.sessions.isEmpty)
+        let opened = model.ensureWorkspacesToOpen()
+        #expect(opened.count == 1)
+        #expect(model.workspaces.map(\.id) == opened)
+        #expect(model.workspaces.first?.name == "Workspace", "the name is free again")
+        #expect(model.sessions.count == 1)
+        #expect(Set(model.sessions.map(\.id)).isDisjoint(with: restored))
     }
 
     /// The launch pass reads the local exit files (AppDelegate calls this
@@ -149,6 +215,30 @@ struct CleanExitTests {
         #expect(model.session(failed) != nil)
         // The shown pane (unavailable here: no remote support in tests) is not asked about.
         #expect(await backend.asked == [clean, failed])
+    }
+
+    /// A host's first listing can empty a workspace: its only pane, a
+    /// restored remote session found gone and recorded as a clean exit,
+    /// closes and the workspace goes; another workspace stays.
+    @Test func aHostsFirstListingCanEmptyAWorkspace() async throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let other = model.newWorkspace(name: "Other")
+        let workspace = model.newWorkspace(name: "W")
+        let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
+        let localTab = try #require(model.selectedTab(in: workspace)?.id)
+        let host = model.addHost(name: "VM", sshDestination: "vm")
+        let tab = try #require(model.newTab(in: group, onHost: host))
+        model.closeTab(localTab)
+        let remote = try session(of: try #require(model.tab(tab)?.focusedPaneID), in: model)
+        model.setRuntimeVersion("0.8.1", for: remote)
+        let (registry, settings) = makeRegistry(model, restored: [remote])
+        defer { settings.removeTestDefaults() }
+
+        await registry.closeRestoredSessionsThatEndedCleanly(
+            on: host, backend: RecordingBackend(recorded: [remote: 0]), live: [])
+        #expect(model.session(remote) == nil)
+        #expect(model.workspace(workspace) == nil)
+        #expect(model.workspaces.map(\.id) == [other])
     }
 }
 

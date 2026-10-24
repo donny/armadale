@@ -224,13 +224,169 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             for await presentation in presentations {
                 guard let self else { return }
                 guard presentation.isOpen else {
-                    self.close()
+                    self.closeOutsideFullScreenTransition()
                     return
                 }
                 self.window?.title = presentation.title
                 self.window?.subtitle = presentation.subtitle
             }
         }
+    }
+
+    /// Set when the workspace left the model or was marked closed while
+    /// the window was in full screen or in a transition: it closes once it
+    /// has left full screen (its turn in ``fullScreenSteps``), and enters
+    /// full screen no more.
+    private(set) var isClosePending = false
+
+    /// Every full-screen toggle goes through it, one at a time, app-wide
+    /// (``FullScreenSerializer``); set by the app delegate. Without one (in
+    /// tests) a step runs at once.
+    var fullScreenSteps: FullScreenSerializer?
+
+    private func serialized(ahead: Bool = false, _ step: @escaping FullScreenSerializer.Step) {
+        if let fullScreenSteps {
+            fullScreenSteps.enqueue(ahead: ahead, step)
+        } else {
+            step {}
+        }
+    }
+
+    /// Closes the window (its workspace left the model or was marked
+    /// closed). A normal window closes at once. A window in full screen,
+    /// or in a transition, is never closed as it is (DESIGN §8, "Closing
+    /// in full screen"; measured on macOS 27): closed mid-transition, or
+    /// closed in full screen while another window's transition runs, it
+    /// comes back on screen at its normal frame, empty, and the other
+    /// window is left out of full screen. So it waits for its turn in
+    /// ``fullScreenSteps`` (no transition anywhere), leaves full screen,
+    /// and closes when that has ended. The app delegate holds the
+    /// controller until `windowWillClose`, and the step holds it too.
+    private func closeOutsideFullScreenTransition() {
+        guard !isClosed, !isClosePending else { return }
+        guard isInFullScreen else { return close() }
+        isClosePending = true
+        serialized(ahead: true) { [self] done in
+            self.leaveFullScreenAndClose(then: done)
+        }
+    }
+
+    /// Out of full screen first if the window is in it, then closes, then
+    /// calls `done`. A window AppKit will not take out of full screen (on
+    /// another Space, or refusing every time) is closed in full screen.
+    private func leaveFullScreenAndClose(then done: @escaping @MainActor () -> Void) {
+        leaveFullScreen { [weak self] left in
+            guard let self, !self.isClosed else { return done() }
+            if left {
+                self.close()
+                done()
+            } else {
+                self.closeInFullScreen(then: done)
+            }
+        }
+    }
+
+    /// Set while a window closed in full screen waits for the exit AppKit
+    /// runs after `windowWillClose`.
+    private var isClosingInFullScreen = false
+
+    /// Closes the window as it is, in full screen, and calls `done` when
+    /// the exit AppKit then runs has ended (or after a while: the
+    /// controller may be gone by then, and the step must end). Only from a
+    /// serialized step, so no other transition overlaps that exit.
+    private func closeInFullScreen(then done: @escaping @MainActor () -> Void) {
+        guard let window, !isClosed else { return done() }
+        guard window.styleMask.contains(.fullScreen) else {
+            close()
+            return done()
+        }
+        isClosingInFullScreen = true
+        // That exit is not counted as a transition (the window is closed),
+        // so its end is noted for the serializer's settle time.
+        var isFinished = false
+        let finish: @MainActor () -> Void = { [weak steps = fullScreenSteps] in
+            guard !isFinished else { return }
+            isFinished = true
+            steps?.noteTransitionEnded()
+            done()
+        }
+        afterFullScreenTransition = finish
+        close()
+        afterDelay(Self.closeExitAllowance, finish)
+    }
+
+    /// Exits that failed are tried again this many times in all.
+    private static let exitAttempts = 4
+    private static let exitRetryDelay: TimeInterval = 0.3
+    /// How long a step waits for the exit AppKit runs after closing a
+    /// full-screen window (measured: about 0.1 s).
+    private static let closeExitAllowance: TimeInterval = 1.5
+
+    /// Whether the last transition failed (`windowDidFail…FullScreen`;
+    /// after a failed exit the style mask may already read normal, and
+    /// AppKit puts the window back into full screen).
+    private var lastTransitionFailed = false
+
+    /// Leaves full screen; `completion(true)` once the window is out of
+    /// it, `false` if it closed meanwhile, is in full screen on another
+    /// Space (measured on macOS 27: its exit fails, and AppKit puts it back
+    /// into full screen) or AppKit kept refusing. A failed exit is tried
+    /// again after a short wait, once any transition of the window ended.
+    ///
+    /// `bringingForward`: a window on another Space is brought forward
+    /// first (its Space becomes the active one) instead of giving up.
+    private func leaveFullScreen(
+        attempt: Int = 0, bringingForward: Bool = false, then completion: @escaping @MainActor (Bool) -> Void
+    ) {
+        guard let window, !isClosed else { return completion(false) }
+        guard window.styleMask.contains(.fullScreen) else { return completion(true) }
+        guard attempt < Self.exitAttempts else { return completion(false) }
+        guard window.isOnActiveSpace else {
+            guard bringingForward else { return completion(false) }
+            window.makeKeyAndOrderFront(nil)
+            return whenOnActiveSpace(waitingUpTo: 20) { [weak self] isActive in
+                guard let self, isActive else { return completion(false) }
+                self.leaveFullScreen(attempt: attempt, then: completion)
+            }
+        }
+        afterFullScreenTransition = { [weak self] in
+            guard let self, let window = self.window, !self.isClosed else { return completion(false) }
+            guard self.lastTransitionFailed || window.styleMask.contains(.fullScreen) else { return completion(true) }
+            self.afterDelay(Self.exitRetryDelay) { [weak self] in
+                guard let self else { return completion(false) }
+                guard self.fullScreenTarget != nil else {
+                    return self.leaveFullScreen(attempt: attempt + 1, then: completion)
+                }
+                self.afterCurrentTransition { [weak self] in
+                    guard let self else { return completion(false) }
+                    self.leaveFullScreen(attempt: attempt + 1, then: completion)
+                }
+            }
+        }
+        lastTransitionFailed = false
+        window.toggleFullScreen(nil)
+        // AppKit refused without starting a transition (no delegate call).
+        if fullScreenTarget == nil { finishFullScreenTransition() }
+    }
+
+    /// Calls `completion(true)` once the window is on the active Space
+    /// (checked every 0.1 s), `false` after `checks` tries or if it closed.
+    private func whenOnActiveSpace(waitingUpTo checks: Int, _ completion: @escaping @MainActor (Bool) -> Void) {
+        guard let window, !isClosed else { return completion(false) }
+        guard !window.isOnActiveSpace else { return completion(true) }
+        guard checks > 0 else { return completion(false) }
+        afterDelay(0.1) { [weak self] in
+            guard let self else { return completion(false) }
+            self.whenOnActiveSpace(waitingUpTo: checks - 1, completion)
+        }
+    }
+
+    /// Runs `action` after `delay`, in the default run-loop mode.
+    private func afterDelay(_ delay: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+        let timer = Timer(timeInterval: delay, repeats: false) { _ in
+            MainActor.assumeIsolated { action() }
+        }
+        RunLoop.main.add(timer, forMode: .default)
     }
 
     // MARK: Menu commands (DESIGN §9)
@@ -450,7 +606,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             return
         }
         isFullScreenEntryPending = false
-        guard let window, !isClosed, window.isVisible, !isInFullScreen else {
+        guard let window, !isClosed, !isClosePending, window.isVisible, !isInFullScreen else {
             completion()
             return
         }
@@ -481,41 +637,56 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
     /// Menu bar mode: orders the window out. What it records stays as it
     /// is now until ``didShowAfterMenuBarMode()``. A window in full screen
-    /// leaves it first and is ordered out once it has: a full-screen
+    /// (or in a transition) leaves it first, in its turn in
+    /// ``fullScreenSteps``, and is ordered out once it has: a full-screen
     /// window ordered out and back in keeps full screen but loses its
     /// title bar and toolbar (they come back as a zero-sized window).
     func hideForMenuBarMode() {
         stateWhileHidden = captureWindowState(isOpen: true)
-        orderOutWhenNormal()
+        guard isInFullScreen else {
+            window?.orderOut(nil)
+            return
+        }
+        serialized { [weak self] done in
+            guard let self else { return done() }
+            self.leaveFullScreenAndOrderOut(then: done)
+        }
     }
 
-    private func orderOutWhenNormal() {
-        guard let window, stateWhileHidden != nil else { return }
-        guard isInFullScreen else {
-            window.orderOut(nil)
-            return
-        }
-        // Out of full screen (after an entry under way has ended), then
-        // ordered out, unless menu bar mode ended meanwhile.
-        guard fullScreenTarget == nil else {
-            afterCurrentTransition { [weak self] in self?.orderOutWhenNormal() }
-            return
-        }
-        afterFullScreenTransition = { [weak self] in self?.orderOutWhenNormal() }
-        window.toggleFullScreen(nil)
-        if fullScreenTarget == nil {
-            // AppKit refused to start the transition: hide it as it is.
-            afterFullScreenTransition = nil
-            window.orderOut(nil)
+    /// Unless menu bar mode ended meanwhile (or the window closed): out of
+    /// full screen, then ordered out; ordered out as it is if AppKit keeps
+    /// refusing to leave. Then calls `done`.
+    private func leaveFullScreenAndOrderOut(then done: @escaping @MainActor () -> Void) {
+        guard !isClosed, stateWhileHidden != nil else { return done() }
+        leaveFullScreen { [weak self] left in
+            if let self, !self.isClosed, self.stateWhileHidden != nil {
+                self.window?.orderOut(nil)
+                if !left, self.window?.styleMask.contains(.fullScreen) == true { self.isOrderedOutInFullScreen = true }
+            }
+            done()
         }
     }
+
+    /// Ordered out for menu bar mode while still in full screen (it was on
+    /// another Space, where its exit fails): shown again it would lack its
+    /// title bar and toolbar, so ``didShowAfterMenuBarMode()`` takes it out
+    /// of full screen first, and the caller's queued entry puts it back.
+    private var isOrderedOutInFullScreen = false
 
     /// The window is on screen again after menu bar mode. Returns whether
     /// it was in full screen: the caller queues it to re-enter, one window
-    /// after another as at launch.
+    /// after another as at launch. One ordered out while in full screen
+    /// leaves it first, in its turn.
     func didShowAfterMenuBarMode() -> Bool {
         guard let hidden = stateWhileHidden else { return false }
         stateWhileHidden = nil
+        if isOrderedOutInFullScreen {
+            isOrderedOutInFullScreen = false
+            serialized { [weak self] done in
+                guard let self else { return done() }
+                self.leaveFullScreen(bringingForward: true) { _ in done() }
+            }
+        }
         return hidden.isFullScreen
     }
 
@@ -524,20 +695,25 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     func windowWillEnterFullScreen(_ notification: Notification) {
         if !isInFullScreen, let window { frameBeforeFullScreen = window.frame }
         fullScreenTarget = true
+        if !isClosed { fullScreenSteps?.transitionBegan(self) }
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
         finishFullScreenTransition()
         reportOpenState()
+        fullScreenSteps?.transitionEnded(self)
     }
 
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        lastTransitionFailed = true
         frameBeforeFullScreen = nil
         finishFullScreenTransition()
+        fullScreenSteps?.transitionEnded(self)
     }
 
     func windowWillExitFullScreen(_ notification: Notification) {
         fullScreenTarget = false
+        if !isClosed { fullScreenSteps?.transitionBegan(self) }
     }
 
     /// The frame is the normal one again: record it.
@@ -545,10 +721,13 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         frameBeforeFullScreen = nil
         finishFullScreenTransition()
         reportOpenState()
+        fullScreenSteps?.transitionEnded(self)
     }
 
     func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        lastTransitionFailed = true
         finishFullScreenTransition()
+        fullScreenSteps?.transitionEnded(self)
     }
 
     /// An inline rename field edits with its own field editor, never the
@@ -582,6 +761,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         stateTask?.cancel()
         stateTask = nil
         onWindowStateChange?(self, captureWindowState(isOpen: false))
+        // A closed window holds no full-screen step up: what waited for a
+        // transition of it runs now (unless it waits for the exit AppKit
+        // runs after closing a full-screen window), and the serializer
+        // forgets it (the callbacks AppKit may still send are not counted).
+        if !isClosingInFullScreen { finishFullScreenTransition() }
+        fullScreenSteps?.transitionEnded(self)
     }
 
     // MARK: NSToolbarDelegate

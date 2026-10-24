@@ -94,10 +94,44 @@ goes at the next launch of a build with this change. After a move
 empties the group the window showed, the target group is shown when it
 is in the same workspace. `docs/DESIGN.md` sections 1, 3 and 8; README.
 
+Then (October 23, 2026, evening, implementer → reviewer loop, three
+live passes) **a clean exit closes a workspace's only pane too**: the
+last-pane exception of `EndedSessionRule` is gone, so the close
+cascades through tab, tab group and workspace, the window closes, and
+with no workspace left the app keeps running with its Dock icon (or
+stays in menu bar mode with "0 sessions running" and the tooltip
+"Armadale": owner's decision, the app never leaves menu bar mode or
+quits on its own). At launch, restored sessions that all exited
+cleanly give one fresh "Workspace". Two bugs fixed on the way. First,
+a window closing itself while any window was entering or leaving full
+screen came back as an empty orphan and the next queued window never
+entered full screen: the launch queue in `AppDelegate` is replaced by
+`Windows/FullScreenSerializer.swift`, which runs every full-screen
+toggle one at a time (launch entries, menu bar exits and re-entries,
+exits before a close), starting only when no window is in a transition
+and 0.3 s after the last one ended; a full-screen window that has to
+close leaves full screen first (an exit AppKit reports as failed is
+retried up to four times; a window on an inactive Space cannot leave
+and is closed in full screen as its own step); closes go ahead of
+entries; entries for deleted workspaces are skipped; still no timeout
+if AppKit never ends a transition. Menu bar mode with several
+full-screen windows also changed: switching to accessory mode moves
+full-screen windows off the active Space, so on return each one is
+brought forward, leaves and re-enters full screen instead of coming
+back without its title bar (a visible Space switch, about 2.5 s for
+two windows; the usual case after ⌘Q → Keep Running). Known gap: ⇧⌘W on a
+full-screen window, whose exit after the close the serializer does not
+see (`docs/DESIGN.md` section 8, "Full screen", "Closing in full
+screen", "Menu bar mode"; `FullScreenSerializerTests`). Second, Return
+never pressed the placeholder's Respawn / Reconnect / Retry button,
+since step 2, because the ended terminal view kept keyboard focus; the
+pane itself is first responder while a placeholder is shown
+(`PlaceholderKeyboardTests`). `docs/DESIGN.md` sections 4 and 8; README.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
-empty-workspace change). The working tree was clean and nothing was
+empty-workspace change; 551 at the last-pane change). The working tree was clean and nothing was
 running when work paused (October 19, 2026, evening).
 
 **Releases.** Armadale 0.1.0 (build 1) was built, notarized and stapled
@@ -202,12 +236,18 @@ Session layer
 Hierarchy and UI
 - One extra SIGWINCH reaches each pane after relaunch (harmless at a
   prompt; full-screen programs redraw once).
-- Full screen restore (October 20, 2026): windows enter full screen one
-  after another through a queue in `AppDelegate`; if a transition never
-  ended (no live trigger was found; closing a window mid-transition
-  still delivers the exit callbacks) the queue would stall and later
-  entries, including returns from menu bar mode, would not run. No
-  timeout exists.
+- Full screen (October 20 and 23, 2026): every toggle goes through
+  `FullScreenSerializer`, one at a time. The stall trigger is narrower
+  than before (closes, refused toggles and reported failures all end
+  their step; only a transition AppKit never ends, for which no live
+  trigger was found, would stall it) but the effect is wider: every
+  later toggle Armadale makes would wait, including menu bar mode's
+  exits, so a full-screen window would never be ordered out. No
+  timeout exists. Entries never retry: a refused or failed restore
+  entry leaves the window normal, saved as not full screen. ⇧⌘W on a
+  full-screen window bypasses the serializer (known gap, benign when
+  tried: closed, nothing stuck; DESIGN section 8). A hand toggle during
+  a serialized step can still overlap it.
 - Inline rename (October 20, 2026): in one of seven runs of a chained
   rename (a group from the sidebar's context menu, then a tab from the
   tab bar's), the first keystroke typed 0.4 s after Return was lost;
@@ -235,10 +275,7 @@ Hierarchy and UI
   tested live: menu bar mode with zero workspaces (it needs running
   sessions, which a deleted workspace cannot have; the code falls back
   to `newWindow`).
-- Clean exit (October 23, 2026): clicking the dimmed area around a
-  placeholder's card to focus that pane was built and gate-tested but
-  not seen live (the screen check failed when the implementer got to
-  it, since the owner was using the Mac). On hosts a shell that exits
+- Clean exit (October 23, 2026): on hosts a shell that exits
   right after an interrupted command (`$?` 130) keeps its placeholder,
   because `$?` cannot tell that from a death by SIGINT (documented,
   DESIGN section 4). A recorder killed by SIGKILL or ended by a reboot

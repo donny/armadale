@@ -42,7 +42,8 @@ What works today:
   pane, replaying its screen and scrollback. A session that ends cleanly
   (any program exiting with status 0, or the shell leaving by `exit` or
   ^D, whatever status it reports) closes its pane, as Close Pane would,
-  unless it is the only pane left in its workspace; a program that fails,
+  even the only pane left in its workspace, which then goes with its
+  window (the app keeps running); a program that fails,
   anything killed by a signal, or an end nobody saw shows *Session Ended*
   over its last screen, with the status or signal when it is known, and
   Respawn / Close Pane. **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended

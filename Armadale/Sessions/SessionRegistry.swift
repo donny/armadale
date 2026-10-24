@@ -270,9 +270,9 @@ final class SessionRegistry {
     /// docs/DESIGN.md section 4, "Ended"): after a clean exit (status 0, or
     /// any normal exit of the user's shell) its pane closes the way the
     /// placeholder's Close Pane closes it (no question: nothing runs), which
-    /// closes the tab with its last pane and the tab group with its last
-    /// tab, unless it is the only pane of the only tab of the only tab group
-    /// of its workspace. Returns whether it closed.
+    /// closes the tab with its last pane, the tab group with its last tab
+    /// and the workspace with its last tab group (its window then closes
+    /// itself). Returns whether it closed.
     @discardableResult
     func closePaneIfEndedCleanly(_ sessionID: SessionID, exit: ProgramExit?) -> Bool {
         guard !finishedSessionIDs.contains(sessionID),

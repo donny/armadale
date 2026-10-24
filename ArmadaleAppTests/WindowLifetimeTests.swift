@@ -80,11 +80,15 @@ struct WindowLifetimeTests {
     }
 
     /// Closing a workspace's last pane deletes the workspace (DESIGN §8,
-    /// October 23, 2026), with another workspace left or none: its window
-    /// closes exactly once, reports its close once, and the controller is
-    /// released by its owner as `AppDelegate` releases it.
-    @Test(arguments: [true, false])
-    func closingTheLastPaneDeletesTheWorkspaceAndClosesItsWindowOnce(otherWorkspace: Bool) async throws {
+    /// October 23, 2026), with another workspace left or none, by ⌘W or by
+    /// its session's clean exit (DESIGN §4, "Ended"): its window closes
+    /// exactly once, reports its close once, the controller is released by
+    /// its owner as `AppDelegate` releases it, and the session is retired
+    /// once (its log and exit file go then).
+    @Test(arguments: [true, false], [false, true])
+    func closingTheLastPaneDeletesTheWorkspaceAndClosesItsWindowOnce(
+        otherWorkspace: Bool, byCleanExit: Bool
+    ) async throws {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let other = otherWorkspace ? model.newWorkspace(name: "Other") : nil
@@ -102,6 +106,7 @@ struct WindowLifetimeTests {
 
         // Who holds the controller, and what it reported: as in AppDelegate.
         let log = CloseLog()
+        registry.onSessionRetired = { [log] id in log.retired.append(id) }
         weak var weakController: WorkspaceWindowController?
         weak var weakWindow: NSWindow?
         var observer: (any NSObjectProtocol)?
@@ -125,8 +130,17 @@ struct WindowLifetimeTests {
             }
             #expect(await eventually { registry.paneView(for: session)?.window === controller.window })
 
-            // ⌘W on the only pane (no question: nothing runs in it).
-            controller.actions.closePane(pane, confirm: false)
+            if byCleanExit {
+                // The shell in the only pane leaves with `exit`: its
+                // controller reports it ended with status 0 (the shown
+                // pane's controller has tried to start, so it is reported
+                // through the delegate call it makes).
+                let sessionController = try #require(registry.controller(for: session))
+                registry.sessionController(sessionController, didChangeState: .ended(exitCode: 0))
+            } else {
+                // ⌘W on the only pane (no question: nothing runs in it).
+                controller.actions.closePane(pane, confirm: false)
+            }
         }
         defer { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
@@ -138,12 +152,15 @@ struct WindowLifetimeTests {
         #expect(log.reportsAfterDeletion == 1, "only the close report, which AppDelegate does not record")
         #expect(log.owners.isEmpty)
         #expect(registry.paneView(for: session) == nil, "the closed pane's view is gone")
+        #expect(registry.controller(for: session) == nil)
+        #expect(await eventually { log.retired == [session] }, "the session was retired")
         #expect(await eventually { weakController == nil }, "WorkspaceWindowController deinit")
         #expect(await eventually { weakWindow == nil }, "window released")
         try await Task.sleep(for: .milliseconds(200))
         #expect(log.willCloseCount == 1, "closed exactly once")
         #expect(log.closeReports == 1)
         #expect(log.reportsAfterDeletion == 1, "nothing reported after the close")
+        #expect(log.retired == [session], "retired exactly once")
     }
 }
 
@@ -206,6 +223,7 @@ private final class CloseLog {
     var closeReports = 0
     var reportsAfterDeletion = 0
     var willCloseCount = 0
+    var retired: [SessionID] = []
 }
 
 @Suite("SessionRegistry close risk")

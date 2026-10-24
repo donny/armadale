@@ -318,9 +318,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Before any window shows: restored local sessions whose programs
     /// exited cleanly while Armadale was not running lose their panes
-    /// (DESIGN §4, "Ended"). Their recorders' files say so; a file is only
-    /// written once the program has ended, so this needs no listing and
-    /// does not wait for the live probe.
+    /// (DESIGN §4, "Ended"), which may delete workspaces, every one
+    /// included: it runs before ``AppModel/ensureWorkspacesToOpen()``, which
+    /// then makes a fresh one. Their recorders' files say so; a file is
+    /// only written once the program has ended, so this needs no listing
+    /// and does not wait for the live probe.
     private func closePanesOfSessionsThatEndedCleanly() {
         guard let runtime = zmxRuntime else { return }
         let closed = registry.closeLocalSessionsThatEndedCleanly(recordedIn: runtime)
@@ -381,12 +383,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return
         }
 
-        // Before any workspace is made: a fresh one has no restored sessions.
+        // Before any workspace is made: a fresh one has no restored sessions,
+        // and one is made if these closes leave none.
         closePanesOfSessionsThatEndedCleanly()
         for id in model.ensureWorkspacesToOpen() {
             openWindow(for: id, restoringFullScreen: true)
         }
-        restoreFullScreenWindows()
 
         saver.onWriteFailure = { [weak self] error, _ in
             self?.reportSaveFailure(error)
@@ -629,6 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
         controller.actions.showWorkspace = { [weak self] id in self?.showWorkspace(id) }
         controller.actions.actionsOfWorkspace = { [weak self] id in self?.windowControllers[id]?.actions }
+        controller.fullScreenSteps = fullScreenSteps
         // Cascade from the current window instead of opening exactly on top.
         if !controller.hadSavedFrame, let reference, let window = controller.window, window !== reference {
             window.cascadeTopLeft(from: reference.cascadeTopLeft(from: .zero))
@@ -661,45 +664,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Queues a workspace's window to enter full screen; its reported flag
-    /// stays true until it does. ``restoreFullScreenWindows()`` runs the queue.
+    /// Every full-screen toggle, one at a time (``FullScreenSerializer``):
+    /// windows entering full screen at launch or after menu bar mode,
+    /// leaving it for menu bar mode, and leaving it before closing.
+    private let fullScreenSteps = FullScreenSerializer()
+
+    /// Queues a workspace's window to enter full screen (opened at launch,
+    /// or shown again after menu bar mode); its reported flag stays true
+    /// until it does. The windows that were in full screen go back one
+    /// after another (each becomes its own Space; a second toggle while one
+    /// animates can be refused). Each window was shown at its normal frame
+    /// first, and its visible sessions started at that size; full screen
+    /// then resizes them once. An entry whose turn comes in menu bar mode,
+    /// or for a workspace deleted meanwhile (its last pane's session exited
+    /// cleanly, say), is skipped.
     private func queueFullScreen(_ id: WorkspaceID) {
         windowControllers[id]?.markFullScreenEntryPending()
-        if !pendingFullScreen.contains(id) { pendingFullScreen.append(id) }
-    }
-
-    /// Workspaces whose window is to enter full screen (opened at launch,
-    /// or shown again after menu bar mode), in order; see
-    /// ``restoreFullScreenWindows()``.
-    private var pendingFullScreen: [WorkspaceID] = []
-
-    /// Puts the windows that were in full screen back into it, one after
-    /// another (each becomes its own Space; a second toggle while one is
-    /// animating can be refused). Each window was shown at its normal
-    /// frame first, and its visible sessions started at that size; full
-    /// screen then resizes them once. Runs in the default run-loop mode,
-    /// so not under a launch alert's modal session but once it is closed.
-    private func restoreFullScreenWindows() {
-        guard !isEnteringQueuedFullScreen, !pendingFullScreen.isEmpty else { return }
-        isEnteringQueuedFullScreen = true
-        RunLoop.main.perform(inModes: [.default]) { [weak self] in
-            MainActor.assumeIsolated { self?.enterNextQueuedFullScreen() }
-        }
-    }
-
-    /// Whether the queue is running (an entry is scheduled or under way),
-    /// so a second ``restoreFullScreenWindows()`` does not run it twice.
-    private var isEnteringQueuedFullScreen = false
-
-    private func enterNextQueuedFullScreen() {
-        isEnteringQueuedFullScreen = false
-        guard !pendingFullScreen.isEmpty else { return }
-        let id = pendingFullScreen.removeFirst()
-        guard let controller = windowControllers[id] else { return restoreFullScreenWindows() }
-        isEnteringQueuedFullScreen = true
-        controller.enterFullScreen { [weak self] in
-            self?.isEnteringQueuedFullScreen = false
-            self?.restoreFullScreenWindows()
+        fullScreenSteps.enqueue { [weak self] done in
+            guard let self, self.menuBarItem == nil, self.model.workspace(id) != nil,
+                  let controller = self.windowControllers[id], !controller.isClosePending
+            else { return done() }
+            controller.enterFullScreen(then: done)
         }
     }
 
@@ -767,7 +752,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Dock (accessory activation policy) and shows the status item.
     private func enterMenuBarMode() {
         guard menuBarItem == nil else { return }
-        pendingFullScreen = []
+        // Entries still queued are skipped in their turn (menu bar mode).
         for controller in windowControllers.values {
             controller.hideForMenuBarMode()
         }
@@ -796,11 +781,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.unhide(nil)
         NSApp.setActivationPolicy(.regular)
         NSApp.dockTile.badgeLabel = AttentionBadge.label(total: attention.total)
-        for (id, controller) in windowControllers {
+        // A window whose workspace is gone is closing, not shown again.
+        for (id, controller) in windowControllers where model.workspace(id) != nil && !controller.isClosePending {
             controller.showWindow(nil)
             if controller.didShowAfterMenuBarMode() { queueFullScreen(id) }
         }
-        restoreFullScreenWindows()
     }
 
     /// Closing Settings (⌘W) in menu bar mode would leave an active

@@ -113,12 +113,15 @@ struct QuitDecisionTests {
         #expect(MenuBarText.runningLine(0) == "0 sessions running")
         #expect(MenuBarText.buttonTitle(attentionTotal: 0).isEmpty)
         #expect(MenuBarText.buttonTitle(attentionTotal: 2) == "2")
-        #expect(MenuBarText.toolTip(attentionTotal: 1) == "Armadale: 1 session needs attention")
+        #expect(MenuBarText.toolTip(attentionTotal: 1, isRunning: true) == "Armadale: 1 session needs attention")
+        #expect(MenuBarText.toolTip(attentionTotal: 0, isRunning: true) == "Armadale: sessions running")
+        #expect(MenuBarText.toolTip(attentionTotal: 0, isRunning: false) == "Armadale", "no session running")
         let visible = [
             MenuBarText.alertMessage(running: 2), MenuBarText.alertInformative, MenuBarText.keepButton,
             MenuBarText.endButton, MenuBarText.cancelButton, MenuBarText.runningLine(2), MenuBarText.open,
             MenuBarText.settings, MenuBarText.quitKeepingSessions, MenuBarText.endSessionsAndQuit,
-            MenuBarText.toolTip(attentionTotal: 0), MenuBarText.toolTip(attentionTotal: 2), MenuBarText.ending,
+            MenuBarText.toolTip(attentionTotal: 0, isRunning: true), MenuBarText.toolTip(attentionTotal: 2, isRunning: true),
+            MenuBarText.ending,
         ] + Choice.allCases.map(\.title)
         for text in visible {
             #expect(!text.lowercased().contains("zmx"), "the persistence runtime is never named: \(text)")

@@ -46,6 +46,10 @@ final class PaneView: NSView {
     private var lastPlaceholderState: PlaceholderState?
 
     private var placeholder: NSHostingView<SessionPlaceholderView>?
+    /// The placeholder's primary button (Respawn, Reconnect, Retry), which
+    /// Return presses while the pane has keyboard focus; `nil` without a
+    /// placeholder or when it has no such button.
+    private var primaryAction: (() -> Void)?
     private let focusOverlay = PassThroughView()
     private var stateObservation: Task<Void, Never>?
     private var appearanceObservation: Task<Void, Never>?
@@ -107,7 +111,7 @@ final class PaneView: NSView {
     /// The controller replaced its surface: show the new one where the old
     /// one was, keeping keyboard focus.
     func surfaceWasReplaced(_ old: any TerminalSurface) {
-        let hadFocus = window.map { $0.firstResponder === old.view } ?? false
+        let hadFocus = window.map { $0.firstResponder === old.view || $0.firstResponder === self } ?? false
         old.view.removeFromSuperview()
         addTerminalView(controller.surface.view)
         if let pendingRendererID {
@@ -128,10 +132,38 @@ final class PaneView: NSView {
         appearanceObservation?.cancel()
     }
 
-    /// Makes the terminal the window's first responder.
+    /// Gives the pane keyboard focus: the terminal, or the pane itself
+    /// while a placeholder is shown (the session's terminal is dead then,
+    /// and would swallow Return; see ``keyDown(with:)``).
     func focusTerminal() {
-        guard let window, window.firstResponder !== controller.surface.view else { return }
-        window.makeFirstResponder(controller.surface.view)
+        guard let window else { return }
+        let target: NSView = placeholder != nil ? self : controller.surface.view
+        guard window.firstResponder !== target else { return }
+        window.makeFirstResponder(target)
+    }
+
+    /// Only while a placeholder is shown: the pane then holds keyboard
+    /// focus instead of its terminal.
+    override var acceptsFirstResponder: Bool { placeholder != nil }
+
+    /// While a placeholder is shown (the pane is first responder), Return
+    /// or keypad Enter presses its primary button, unless another pane of
+    /// a split is the focused one (DESIGN §4, "Ended"). Every other key is
+    /// ignored: nothing runs in the pane to receive it. Key equivalents
+    /// (menu shortcuts) never get here.
+    override func keyDown(with event: NSEvent) {
+        guard placeholder != nil else { return super.keyDown(with: event) }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.numericPad, .function, .capsLock])
+        guard Self.isReturn(event.keyCode), modifiers.isEmpty, !event.isARepeat,
+              focusStyle != .unfocused, let primaryAction
+        else { return }
+        primaryAction()
+    }
+
+    /// Return (36) or keypad Enter (76).
+    private static func isReturn(_ keyCode: UInt16) -> Bool {
+        keyCode == 36 || keyCode == 76
     }
 
     /// Whether the terminal (or anything inside this pane) is first responder.
@@ -223,25 +255,35 @@ final class PaneView: NSView {
         case .disconnected: kind = change.isReconnecting ? .reconnecting : .disconnected
         case .unavailable(let reason): kind = reason == SessionRegistry.hostRemovedReason ? .hostRemoved : .unavailable
         case .detached, .attaching, .attached:
-            placeholder?.removeFromSuperview()
+            guard let shown = placeholder else { return }
+            shown.removeFromSuperview()
             placeholder = nil
+            primaryAction = nil
+            // The terminal is live again: keyboard focus goes back to it.
+            if let window, window.firstResponder === self { window.makeFirstResponder(controller.surface.view) }
             return
         }
+        let primary: () -> Void = { [weak self] in
+            guard let self else { return }
+            switch kind {
+            case .ended: Task { await self.controller.respawn() }
+            case .disconnected, .reconnecting: Task { await self.controller.reconnect() }
+            case .unavailable, .hostRemoved: self.onRetryPersistence?()
+            }
+            self.focusTerminal()
+        }
+        // Return reaches `keyDown` (the pane holds keyboard focus while the
+        // placeholder is shown). The button keeps its default-action
+        // shortcut for its look; a key equivalent that is handled never
+        // reaches `keyDown`, so the action runs once either way.
+        primaryAction = kind == .hostRemoved ? nil : primary
         let view = SessionPlaceholderView(
             kind: kind,
             title: titleProvider(),
             failure: failure,
             exitStatus: exitStatus,
             isDefaultActionEnabled: focusStyle != .unfocused,
-            primary: { [weak self] in
-                guard let self else { return }
-                switch kind {
-                case .ended: Task { await self.controller.respawn() }
-                case .disconnected, .reconnecting: Task { await self.controller.reconnect() }
-                case .unavailable, .hostRemoved: self.onRetryPersistence?()
-                }
-                self.focusTerminal()
-            },
+            primary: primary,
             closePane: { [weak self] in self?.onClosePane?() },
             focusPane: { [weak self] in self?.focusTerminal() })
         if let placeholder {
@@ -252,6 +294,9 @@ final class PaneView: NSView {
             hosting.autoresizingMask = [.width, .height]
             addSubview(hosting, positioned: .below, relativeTo: focusOverlay)
             placeholder = hosting
+            // The dead terminal had keyboard focus: the pane takes it, so
+            // Return reaches ``keyDown(with:)``.
+            if let window, window.firstResponder === controller.surface.view { window.makeFirstResponder(self) }
         }
     }
 }

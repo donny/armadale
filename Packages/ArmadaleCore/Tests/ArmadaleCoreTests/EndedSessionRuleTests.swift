@@ -2,14 +2,14 @@ import Foundation
 import Testing
 @testable import ArmadaleCore
 
-/// A clean exit closes the pane, except the last pane of a workspace
-/// (docs/DESIGN.md section 4, "Ended").
+/// A clean exit closes the pane, wherever it is; a workspace's only pane
+/// included, which deletes the workspace (docs/DESIGN.md section 4, "Ended").
 @Suite("Ended session rule")
 @MainActor
 struct EndedSessionRuleTests {
     @Test func whatClosesAndWhatKeepsThePlaceholder() {
-        func action(_ exit: ProgramExit?, shell: Bool, last: Bool = false) -> EndedPaneAction {
-            EndedSessionRule.action(exit: exit, runsShell: shell, isLastPaneInWorkspace: last)
+        func action(_ exit: ProgramExit?, shell: Bool) -> EndedPaneAction {
+            EndedSessionRule.action(exit: exit, runsShell: shell)
         }
         // Status 0 closes any program's pane.
         #expect(action(.exited(0), shell: false) == .closePane)
@@ -25,9 +25,6 @@ struct EndedSessionRuleTests {
             #expect(action(exit, shell: true) == .keepPlaceholder)
             #expect(action(exit, shell: false) == .keepPlaceholder)
         }
-        // The workspace's last pane always stays.
-        #expect(action(.exited(0), shell: true, last: true) == .keepPlaceholder)
-        #expect(action(.exited(130), shell: true, last: true) == .keepPlaceholder)
     }
 
     @Test func whatCountsAsTheUsersShell() {
@@ -59,13 +56,35 @@ struct EndedSessionRuleTests {
         try #require(model.tab(containing: pane)?.pane(pane)?.sessionID)
     }
 
-    @Test func theLastPaneOfAWorkspaceStays() throws {
-        let (model, _, _, tab) = try makeModel()
+    /// The only pane of the only tab of the only group: a clean exit closes
+    /// it, and the emptied workspace is deleted, the only one included.
+    @Test func theOnlyPaneOfAWorkspaceClosesAndTheWorkspaceGoes() throws {
+        let (model, ws, _, tab) = try makeModel()
         let pane = tab.focusedPaneID
-        #expect(model.isLastPaneInWorkspace(pane))
-        #expect(model.closePaneIfSessionEndedCleanly(try session(of: pane, in: model), exit: 0) == nil)
-        #expect(model.tab(containing: pane) != nil)
-        #expect(!model.isLastPaneInWorkspace(PaneID.generate()), "not in the model")
+        let session = try session(of: pane, in: model)
+        #expect(model.closePaneIfSessionEndedCleanly(session, exit: .signaled(15)) == nil, "a signal keeps it")
+        #expect(model.closePaneIfSessionEndedCleanly(session, exit: nil) == nil, "so does an unknown end")
+        #expect(model.closePaneIfSessionEndedCleanly(session, exit: 3) == pane, "the shell's exit, whatever its status")
+        #expect(model.workspace(ws) == nil, "the emptied workspace is deleted")
+        #expect(model.workspaces.isEmpty)
+        #expect(model.sessions.isEmpty)
+        #expect(model.closePaneIfSessionEndedCleanly(session, exit: 0) == nil, "not in the model any more")
+    }
+
+    /// A program's failure in a workspace's only pane keeps the placeholder.
+    @Test func aProgramsFailureInTheOnlyPaneKeepsIt() throws {
+        let model = AppModel(defaultWorkingDirectory: "/work")
+        let ws = model.newWorkspace(name: "W")
+        let group = try #require(model.workspace(ws)?.selectedTabGroupID)
+        let agentTab = try #require(model.newTab(in: group, profile: Profile.claudeCode.id))
+        let shellTab = try #require(model.workspace(ws)?.tabGroups.first?.tabs.first?.id)
+        model.closeTab(shellTab)
+        let agent = try session(of: try #require(model.tab(agentTab)?.focusedPaneID), in: model)
+        #expect(model.closePaneIfSessionEndedCleanly(agent, exit: 1) == nil)
+        #expect(model.closePaneIfSessionEndedCleanly(agent, exit: .signaled(2)) == nil)
+        #expect(model.workspace(ws) != nil)
+        #expect(model.closePaneIfSessionEndedCleanly(agent, exit: 0) != nil)
+        #expect(model.workspace(ws) == nil)
     }
 
     /// A split pane closes alone; its sibling stays.
@@ -73,7 +92,6 @@ struct EndedSessionRuleTests {
         let (model, _, _, tab) = try makeModel()
         let first = tab.focusedPaneID
         let second = try #require(model.splitPane(first, axis: .vertical))
-        #expect(!model.isLastPaneInWorkspace(first) && !model.isLastPaneInWorkspace(second))
         let ended = try session(of: second, in: model)
         #expect(model.closePaneIfSessionEndedCleanly(ended, exit: .signaled(15)) == nil, "a signal keeps its pane")
         #expect(model.closePaneIfSessionEndedCleanly(ended, exit: nil) == nil, "so does an unknown status")
@@ -81,13 +99,11 @@ struct EndedSessionRuleTests {
         #expect(model.tab(containing: second) == nil)
         #expect(model.session(ended) == nil)
         #expect(model.tab(tab.id)?.panes.map(\.id) == [first])
-        // Now the survivor is the workspace's last pane.
-        #expect(model.isLastPaneInWorkspace(first))
     }
 
     /// A failing program keeps its pane; the shell's failing exit does not.
     @Test func aShellsNonZeroExitClosesAProgramsDoesNot() throws {
-        let (model, _, group, tab) = try makeModel()
+        let (model, ws, group, tab) = try makeModel()
         let agentTab = try #require(model.newTab(in: group, profile: Profile.claudeCode.id))
         let agent = try session(of: try #require(model.tab(agentTab)?.focusedPaneID), in: model)
         #expect(model.closePaneIfSessionEndedCleanly(agent, exit: 1) == nil)
@@ -95,7 +111,8 @@ struct EndedSessionRuleTests {
         let shell = try session(of: tab.focusedPaneID, in: model)
         #expect(model.closePaneIfSessionEndedCleanly(shell, exit: .signaled(1)) == nil)
         #expect(model.closePaneIfSessionEndedCleanly(shell, exit: 130) == tab.focusedPaneID)
-        #expect(model.closePaneIfSessionEndedCleanly(agent, exit: 0) == nil, "now the workspace's last pane")
+        #expect(model.closePaneIfSessionEndedCleanly(agent, exit: 0) != nil, "the workspace's last pane closes too")
+        #expect(model.workspace(ws) == nil)
     }
 
     /// The last pane of a tab closes the tab (another tab remains), and the
@@ -103,23 +120,21 @@ struct EndedSessionRuleTests {
     @Test func aCleanExitClosesTheTabAndTheGroupWhenOthersRemain() throws {
         let (model, ws, group, tab) = try makeModel()
         let secondTab = try #require(model.newTab(in: group))
-        #expect(!model.isLastPaneInWorkspace(tab.focusedPaneID))
         #expect(model.closePaneIfSessionEndedCleanly(try session(of: tab.focusedPaneID, in: model), exit: 0) != nil)
         #expect(model.tab(tab.id) == nil)
         #expect(model.tabGroup(group)?.tabs.map(\.id) == [secondTab])
 
         let otherGroup = try #require(model.newTabGroup(in: ws))
         let pane = try #require(model.tab(secondTab)?.focusedPaneID)
-        #expect(!model.isLastPaneInWorkspace(pane))
         #expect(model.closePaneIfSessionEndedCleanly(try session(of: pane, in: model), exit: 0) == pane)
         #expect(model.tabGroup(group) == nil, "the emptied group is removed")
         #expect(model.workspace(ws)?.tabGroups.map(\.id) == [otherGroup])
         #expect(model.workspace(ws)?.window?.isOpen == true, "the window stays")
     }
 
-    /// The ending pane is the only pane of one of two tab groups: its group
-    /// closes and the workspace stays (it never reaches the deletion of an
-    /// emptied workspace: the last-pane rule keeps the workspace's last pane).
+    /// The ending pane is the only pane of one of two tab groups: only its
+    /// group goes and the workspace stays; the remaining group's last pane
+    /// then takes the workspace with it, and another workspace is untouched.
     @Test func aCleanExitInOneOfTwoGroupsKeepsTheWorkspace() throws {
         let (model, ws, group, tab) = try makeModel()
         let other = model.newWorkspace(name: "Other")
@@ -130,19 +145,10 @@ struct EndedSessionRuleTests {
         #expect(model.workspace(ws)?.tabGroups.map(\.id) == [second])
         #expect(model.workspace(ws)?.selectedTabGroupID == second)
         #expect(model.workspaces.map(\.id) == [ws, other])
-        // Its last pane now stays, so the workspace cannot be emptied this way.
         let last = try #require(model.tabGroup(second)?.tabs.first?.focusedPaneID)
-        #expect(model.closePaneIfSessionEndedCleanly(try session(of: last, in: model), exit: 0) == nil)
-        #expect(model.workspace(ws) != nil)
-    }
-
-    /// Another workspace's panes do not count: each workspace keeps its
-    /// last pane.
-    @Test func eachWorkspaceKeepsItsLastPane() throws {
-        let (model, _, _, tab) = try makeModel()
-        let other = model.newWorkspace(name: "Other")
-        let otherPane = try #require(model.workspace(other)?.tabGroups.first?.tabs.first?.focusedPaneID)
-        #expect(model.isLastPaneInWorkspace(tab.focusedPaneID))
-        #expect(model.isLastPaneInWorkspace(otherPane))
+        #expect(model.closePaneIfSessionEndedCleanly(try session(of: last, in: model), exit: 0) == last)
+        #expect(model.workspace(ws) == nil)
+        #expect(model.workspaces.map(\.id) == [other])
+        #expect(model.sessionIDs(in: other).count == 1)
     }
 }

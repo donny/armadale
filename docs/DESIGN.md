@@ -610,10 +610,15 @@ replay and is accepted.
   argument and ^D report the last command's status: 130 after ^C at the
   prompt, 1 after a failed command (measured with zsh 5.9), and leaving the
   shell is what the user did. Closing works the way the placeholder's
-  Close Pane does, without asking (nothing runs), which closes the tab with
-  its last pane and the tab group with its last tab, like ⌘W; except the
-  only pane of the only tab of the only tab group of its workspace, which
-  keeps the placeholder, so a window never vanishes under the user. A
+  Close Pane does, without asking (nothing runs), wherever the pane is:
+  like ⌘W it closes the tab with its last pane, the tab group with its last
+  tab and the workspace with its last tab group (section 8), whose window
+  then closes; with no workspace left the app keeps running with its Dock
+  icon (or its status item in menu bar mode) and ⌘N, a Dock click or *Open
+  Armadale* makes a fresh one. It never quits the app. (Since October 23,
+  2026, owner's request; until then the only pane of the only tab of the
+  only tab group of its workspace kept the placeholder, so a window never
+  closed by itself.) A
   non-shell program's non-zero exit, a death by signal and an unknown end
   keep the *Session Ended* placeholder (icon, "The session “<title>” exited
   with status N." or "… was ended by signal N (status 128 + N).", else
@@ -629,18 +634,34 @@ replay and is accepted.
   (`PaneView.focusStyle`), so Return typed into another pane's terminal
   never respawns or reconnects it; a click on the dimmed pane around the
   placeholder's card focuses that pane, as a click on a terminal does.
+  While a placeholder is shown the pane itself (`PaneView`), not its
+  terminal, holds keyboard focus: the dead terminal used to keep it and
+  swallow Return, so the button's default-action shortcut was never
+  consulted and Return did nothing (found in review, October 23, 2026).
+  The pane takes focus when the placeholder appears over a focused
+  terminal, and every way of focusing the pane (`focusTerminal()`: a
+  click, the model's focus, the window appearing) targets it while the
+  placeholder is up; Return or keypad Enter, without modifiers, presses
+  the primary button unless another pane of the split is the focused one,
+  and every other key is ignored. When the session runs again (attaching
+  or attached) the terminal gets focus back if the pane held it.
   **At launch**, before any window shows, the app reads the exit files of
   the restored local persistent sessions (a file exists only once the
   program has ended, so no listing is needed;
   `SessionRegistry.closeLocalSessionsThatEndedCleanly`) and closes, by the
   same rule and in the model's order, the panes of those that ended cleanly
-  while Armadale was not running. A restored session found gone when its
+  while Armadale was not running. That may delete workspaces, all of them
+  included; it runs before `AppModel.ensureWorkspacesToOpen()`, so a launch
+  where every restored session ended cleanly opens one fresh "Workspace"
+  and nothing else. A restored session found gone when its
   pane is first shown (or an attach that finds it gone) is marked ended
   with its record, and the same rule applies then. Remote restored
   sessions cannot hold up the launch: when a host's first listing
   arrives, its restored sessions that are gone and were never shown have
   their records read in one command, and those that ended cleanly lose
-  their panes then.
+  their panes then; a workspace emptied that way is deleted and its
+  window, if open, closes then (accepted: the listing comes within seconds
+  of the launch).
 - **Daemon killed from outside** (SIGKILL, reboot): `ls` reports the stale
   socket as an error entry, cleans it up, and `ls --short` omits it. The pane
   ends up in the same ended state, with no record (status unknown): the
@@ -1519,8 +1540,12 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   gone). The window closes the way Delete Workspace closes it: its
   controller sees the workspace leave the model, closes once, reports its
   close (which the app delegate does not record, the workspace being gone)
-  and is released; `ArmadaleAppTests` checks this. A clean exit never gets
-  here: the last-pane rule (section 4) keeps a workspace's last pane. A
+  and is released; `ArmadaleAppTests` checks this, for ⌘W and for a clean
+  exit. A clean exit in a workspace's last pane gets here too (section 4,
+  "Ended", since October 23, 2026), through the same `closePane` followed
+  by the registry's close, which retires the session and removes its log
+  and exit file; in menu bar mode the hidden window closes the same way
+  and *Open Armadale* with no workspace left makes a fresh one. A
   workspace closed *with* tab groups (the window's close button, ⇧⌘W) is
   unchanged: it stays, dimmed, its sessions running, and can be reopened.
 - A new workspace's window (⌘N), or a reopened one without a saved frame,
@@ -1542,9 +1567,32 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   (after layout, as always), and then, from the default run-loop mode (so
   after any launch alert is dismissed), it enters full screen. Several
   such windows enter one after another, each when the previous one's
-  transition ends (one queue, also used on return from menu bar mode;
-  two toggles in the same turn leave the second window normal); each
-  becomes its own Space. From being queued until its entry starts a
+  transition ends (two toggles in the same turn leave the second window
+  normal); each becomes its own Space. Since October 23, 2026 every
+  full-screen toggle Armadale makes goes through one app-wide serializer
+  (`FullScreenSerializer`, owned by the app delegate): launch entries,
+  entries on return from menu bar mode, exits for menu bar mode and exits
+  before a close. A step starts only when the previous one has finished
+  (its transition's completion has run and, for a close, the window has
+  closed) and no window is in a transition, a toggle by hand included
+  (every window reports its transitions), and always from the default
+  run-loop mode on a later turn. A close goes ahead of queued entries; an
+  entry whose turn comes in menu bar mode, or for a workspace deleted
+  meanwhile, is skipped; a refused toggle still ends its step. Every path
+  ends its step, a window closing ends whatever step waited on it, and a
+  transition AppKit never ends would hold the queue (no timeout exists).
+  A window closed in full screen from outside Armadale's own path
+  (⇧⌘W in a full-screen window) still gets AppKit's exit after
+  `windowWillClose`, which the serializer does not see (benign in
+  review). When Armadale itself closes a window in full screen it notes
+  the end of that exit, so the next step still waits the settle time.
+  Entries are never retried: a refused or failed restore entry leaves the
+  window normal, and it is then saved as not in full screen. Worst-case
+  timings measured in review: entries end about 0.6 + 0.9 × (N − 1) s
+  after launch for N windows (three windows: 0.63, 1.51 and 2.39 s); a
+  close of a full-screen window can take about 4–5 s in the worst case
+  (its turn, failed exits retried, the closing exit); a return from menu
+  bar mode can wait up to 2 s more per window for its Space. From being queued until its entry starts a
   window reports `isFullScreen` true, so a quit before then (under a
   launch alert, say) keeps the flag although showing the window at its
   normal frame reports a move. Entering full screen
@@ -1559,7 +1607,32 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   a resize and `windowDidExitFullScreen` (the window no longer visible).
   So a controller reports nothing after `windowWillClose` (its
   `isOpen: false` report is the last), and the app delegate ignores
-  reports from a controller that is no longer the workspace's.
+  reports from a controller that is no longer the workspace's. A window
+  whose workspace leaves the model (or is marked closed) **while it is in
+  full screen or in a transition** is never closed as it is (October 23,
+  2026, review of the clean-exit change; measured on macOS 27). Closed
+  mid-transition, its controller was released and AppKit finished the
+  transition on its own, putting the window back on screen at its normal
+  frame, titled and empty, and the launch queue, waiting for that
+  transition, stalled, so the next window never entered full screen and
+  was saved as not in full screen. Closed in full screen while another
+  window's transition ran (the launch queue's next entry), it came back
+  the same way: the close brings an exit, and the two overlapped. So such
+  a window takes its turn in the serializer (no transition anywhere),
+  leaves full screen, and closes when that has ended, as a normal window.
+  Measured on macOS 27: the exit of a full-screen window that is not on
+  the active Space fails (`windowDidFailToExitFullScreen`, with the style
+  mask already reading normal, and AppKit then puts the window back into
+  full screen), so such a window is closed in full screen instead, as its
+  own step, which stays open until the exit AppKit runs after the close
+  has ended (about 0.1 s; at most 1.5 s). A failed exit on the active
+  Space is tried again after 0.3 s, up to four times, then the window is
+  closed in full screen. The serializer also waits 0.3 s after the last
+  transition before starting a step: an exit 9 ms after another window's
+  entry failed. It enters full
+  screen no more meanwhile, and leaving menu bar mode does not show it
+  again. The app delegate keeps the controller until `windowWillClose`,
+  and the step holds it too. A normal window closes at once.
 - **Saved frames and screens.** A saved frame whose title bar (the top
   40 pt of the frame) overlaps any screen's visible frame is applied as
   saved: Armadale does not constrain it. AppKit still does, when the
@@ -1632,13 +1705,32 @@ the menu bar.
   2026: a full-screen window ordered out and shown again does come back
   in full screen, but its title bar and toolbar do not (AppKit's
   full-screen toolbar window comes back zero-sized), so it is taken out
-  of full screen first. The saved frame and flag were sane either way. The status item shows the
+  of full screen first. The saved frame and flag were sane either way.
+  Each such exit is a step of the full-screen serializer ("Full
+  screen"). A full-screen window on another Space cannot be taken out of
+  full screen (measured on macOS 27, October 23, 2026: its exit fails and
+  AppKit puts it back), so it is ordered out as it is, and on return it
+  is brought forward (its Space becomes the active one), leaves full
+  screen and re-enters it, which restores its title bar and toolbar
+  (checked live with two full-screen windows). This is the usual case,
+  not a rare one: switching to the accessory activation policy moves the
+  frontmost full-screen window off the active Space too, so after ⌘Q →
+  Keep Running every full-screen window gets this treatment on *Open
+  Armadale*, one after another, each with a visible Space switch (about
+  2.5 s for two windows, measured in review), plus up to 2 s per window
+  waiting for its Space to become active. The status item shows the
   app icon's three-pane glyph as a template image, generated by
   `scripts/render-app-icon.swift` into the asset catalog as a
   `StatusItem` image set (18 pt, 1x and 2x), with the attention count as
   text next to it when it is non-zero. Its menu: "N sessions running"
   (disabled), then **Open Armadale**, **Settings…**, a separator,
-  **Quit, Keep Sessions Running**, **End Sessions and Quit**. Attention
+  **Quit, Keep Sessions Running**, **End Sessions and Quit**. Its tooltip
+  names attention when there is some, else "Armadale: sessions running",
+  or just "Armadale" when none is running. Menu bar mode stays when the
+  last session ends (a clean exit may even delete every workspace
+  meanwhile): the status item remains, reading "0 sessions running", and
+  the app never leaves menu bar mode or quits on its own (owner's
+  decision, October 23, 2026). Attention
   notifications still post, and clicking one reopens the app on that
   session. Reopening (the status item, a notification, `open -a`,
   Finder, `applicationShouldHandleReopen`) restores the regular policy,

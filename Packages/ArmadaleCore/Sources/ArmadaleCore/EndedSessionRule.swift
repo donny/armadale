@@ -31,7 +31,8 @@ public enum ProgramExit: Sendable, Hashable, ExpressibleByIntegerLiteral, Custom
 /// What happens to a pane when its session's program ends.
 public enum EndedPaneAction: Sendable, Hashable {
     /// Close the pane, as its Close Pane button would (nothing runs in it,
-    /// so without asking). That may close its tab, and its tab group.
+    /// so without asking). That may close its tab, its tab group, and its
+    /// workspace with its window.
     case closePane
     /// Keep the pane, showing the Session Ended placeholder over the last
     /// screen, with how the program ended when that is known.
@@ -44,9 +45,10 @@ public enum EndedPaneAction: Sendable, Hashable {
 /// command's status (130 after a ^C at the prompt, 1 after a failed
 /// command), and leaving the shell is what the user did. Anything else keeps
 /// the placeholder, so what went wrong stays readable: a non-shell program's
-/// non-zero status, a death by signal, an unknown end. The one exception
-/// keeps a window from vanishing under the user: the only pane of the only
-/// tab of the only tab group in its workspace stays, with the placeholder.
+/// non-zero status, a death by signal, an unknown end. Where the pane is
+/// does not matter: a workspace's only pane closes too, and with it the
+/// workspace and its window (October 23, 2026; until then it kept the
+/// placeholder).
 public enum EndedSessionRule {
     /// Program names (basenames) that count as the user's shell when a
     /// profile names one explicitly.
@@ -60,37 +62,21 @@ public enum EndedSessionRule {
         return shellNames.contains(name.hasPrefix("-") ? String(name.dropFirst()) : name)
     }
 
-    public static func action(exit: ProgramExit?, runsShell: Bool, isLastPaneInWorkspace: Bool) -> EndedPaneAction {
-        guard !isLastPaneInWorkspace, case .exited(let status)? = exit else { return .keepPlaceholder }
+    public static func action(exit: ProgramExit?, runsShell: Bool) -> EndedPaneAction {
+        guard case .exited(let status)? = exit else { return .keepPlaceholder }
         return status == 0 || runsShell ? .closePane : .keepPlaceholder
     }
 }
 
 extension AppModel {
-    /// Whether `pane` is the only pane of the only tab of the only tab
-    /// group of its workspace (closing it would close the window). `false`
-    /// for a pane that is not in the model.
-    public func isLastPaneInWorkspace(_ pane: PaneID) -> Bool {
-        for workspace in workspaces {
-            for group in workspace.tabGroups {
-                for tab in group.tabs where tab.pane(pane) != nil {
-                    return workspace.tabGroups.count == 1 && group.tabs.count == 1 && tab.panes.count == 1
-                }
-            }
-        }
-        return false
-    }
-
     /// Applies ``EndedSessionRule`` to the pane showing `session`, whose
     /// program ended as `exit` says: closes it (``closePane(_:)``, which may
-    /// close its tab and tab group too) or leaves it. Returns the closed
-    /// pane, if any.
+    /// close its tab, its tab group and its workspace too) or leaves it.
+    /// Returns the closed pane, if any.
     @discardableResult
     public func closePaneIfSessionEndedCleanly(_ session: SessionID, exit: ProgramExit?) -> PaneID? {
         guard let place = place(of: session), let launch = self.session(session)?.launch,
-              EndedSessionRule.action(
-                exit: exit, runsShell: EndedSessionRule.runsShell(launch),
-                isLastPaneInWorkspace: isLastPaneInWorkspace(place.pane)) == .closePane
+              EndedSessionRule.action(exit: exit, runsShell: EndedSessionRule.runsShell(launch)) == .closePane
         else { return nil }
         closePane(place.pane)
         return place.pane

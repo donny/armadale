@@ -86,9 +86,11 @@ enum MenuBarText {
         AttentionBadge.label(total: attentionTotal) ?? ""
     }
 
-    static func toolTip(attentionTotal: Int) -> String {
+    /// What the status item says on hover: attention first, else whether
+    /// sessions are running (none once the last one ended or closed).
+    static func toolTip(attentionTotal: Int, isRunning: Bool) -> String {
         switch attentionTotal {
-        case 0: "Armadale: sessions running"
+        case 0: isRunning ? "Armadale: sessions running" : "Armadale"
         case 1: "Armadale: 1 session needs attention"
         default: "Armadale: \(attentionTotal) sessions need attention"
         }
@@ -139,10 +141,10 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             button.image = image
             button.imagePosition = .imageLeading
         }
-        show(attentionTotal: attention.total)
+        show(attentionTotal: attention.total, isRunning: runningCount() > 0)
         attentionTask = Task { [weak self] in
-            for await total in Observations({ attention.total }) {
-                self?.show(attentionTotal: total)
+            for await (total, isRunning) in Observations({ (attention.total, runningCount() > 0) }) {
+                self?.show(attentionTotal: total, isRunning: isRunning)
             }
         }
     }
@@ -154,9 +156,9 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         NSStatusBar.system.removeStatusItem(item)
     }
 
-    private func show(attentionTotal: Int) {
+    private func show(attentionTotal: Int, isRunning: Bool) {
         item.button?.title = MenuBarText.buttonTitle(attentionTotal: attentionTotal)
-        item.button?.toolTip = MenuBarText.toolTip(attentionTotal: attentionTotal)
+        item.button?.toolTip = MenuBarText.toolTip(attentionTotal: attentionTotal, isRunning: isRunning)
     }
 
     /// End Sessions and Quit is running: the count line says so and every
