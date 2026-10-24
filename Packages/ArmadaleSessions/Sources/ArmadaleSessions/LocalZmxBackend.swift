@@ -106,14 +106,26 @@ public actor LocalZmxBackend: PersistenceBackend {
         try await driver.history(id, version: versions[id])
     }
 
-    /// Ended if the session is no longer listed; detached if it is (only
-    /// the client went away) or if listing fails.
+    /// Ended if the session is no longer listed, with the status its
+    /// recorder wrote (`<runtime>/a-<id>.exit`) if there is one; detached
+    /// if it is listed (only the client went away) or if listing fails.
+    /// The recorder writes the file before it exits, and the daemon ends
+    /// after it, so a session no longer listed has its file already.
     public func resolveExit(of session: Session) async -> ExitResolution {
         do {
-            return try await exists(session.id) ? .detached : .ended
+            if try await exists(session.id) { return .detached }
+            return .ended(exitStatus: configuration.runtime.recordedExitStatus(for: session.id))
         } catch {
             return .detached
         }
+    }
+
+    public func recordedExitStatuses(of ids: Set<SessionID>) async -> [SessionID: ProgramExit] {
+        var statuses: [SessionID: ProgramExit] = [:]
+        for id in ids {
+            statuses[id] = configuration.runtime.recordedExitStatus(for: id)
+        }
+        return statuses
     }
 }
 
@@ -130,11 +142,14 @@ struct LocalZmxEndpoint: ZmxEndpoint {
     /// ctty-exec sets argv[0] (`-zsh` for a login shell), which zmx's argv
     /// cannot express, and removes zmx's variables from the program's
     /// environment; it is harmless in the daemon's child, which already has
-    /// the PTY as its controlling terminal.
+    /// the PTY as its controlling terminal. With `--exit-file` it stays as
+    /// the program's parent and records its exit status next to the
+    /// session's socket (docs/DESIGN.md section 4, "Ended").
     func sessionProgram(for session: Session) throws -> [String] {
         let launch = configuration.resolver.resolve(session)
         let unset = LocalZmxBackend.variablesHiddenFromSessions.flatMap { ["--unset", $0] }
-        return [try cttyExecPath()] + unset + [launch.program, launch.argv0] + launch.arguments
+        let record = ["--exit-file", configuration.runtime.exitFilePath(for: session.id)]
+        return [try cttyExecPath()] + unset + record + [launch.program, launch.argv0] + launch.arguments
     }
 
     func spawnClient(_ arguments: [String], for session: Session, version: String?, size: PTYSize) throws -> PTYProcess {

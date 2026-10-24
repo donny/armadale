@@ -203,7 +203,7 @@ actor KillRecordingBackend: PersistenceBackend {
         alive.remove(id)
     }
     func history(_ id: SessionID) async throws -> Data { throw BackendError.historyUnavailable(id) }
-    func resolveExit(of session: Session) async -> ExitResolution { .ended }
+    func resolveExit(of session: Session) async -> ExitResolution { .ended(exitStatus: nil) }
 }
 
 @Suite("SessionRegistry running count and End Sessions")

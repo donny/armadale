@@ -104,7 +104,7 @@ final class LocalZmxBackendTests {
         }
         #expect(try await backend.liveSessions().isEmpty)
         #expect(sandbox.listedNames.isEmpty)
-        #expect(await backend.resolveExit(of: session) == .ended)
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: nil))
     }
 
     @Test func programExitEndsTheSession() async throws {
@@ -116,7 +116,9 @@ final class LocalZmxBackendTests {
         // A zmx client's exit status means nothing, so none is reported.
         #expect(await handle.exitStatus == nil)
         await output.waitForEnd()
-        #expect(await backend.resolveExit(of: session) == .ended)
+        // The recorder around the shell wrote its status next to the socket.
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: 7))
+        #expect(sandbox.runtime.recordedExitStatus(for: session.id) == 7)
         #expect(try await backend.liveSessions().isEmpty)
         #expect(try await backend.exists(session.id) == false)
         // The client's reset sequence ends the raw stream; the filter drops it.
@@ -128,6 +130,51 @@ final class LocalZmxBackendTests {
         }
         #expect(!shown.isEmpty)
         #expect(!shown.suffix(ZmxOutputFilter.detachSequence.count).elementsEqual(ZmxOutputFilter.detachSequence))
+    }
+
+    /// `exit` in a fresh shell: status 0, recorded next to the socket
+    /// (where `ls` does not see it), and read both when the client goes and
+    /// later, by the launch path that never attached (`recordedExitStatuses`).
+    @Test func aCleanExitIsRecordedAsZero() async throws {
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(ZmxSandbox.prompt) }
+        handle.write(Array("exit\r".utf8))
+        await output.waitForEnd()
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: 0))
+        let other = SessionID.generate()
+        #expect(await backend.recordedExitStatuses(of: [session.id, other]) == [session.id: 0])
+        #expect(FileManager.default.fileExists(atPath: sandbox.directory + "/a-\(session.id.raw).exit"))
+        #expect(sandbox.listedNames.isEmpty, "the exit file is not a session")
+        sandbox.runtime.removeExitStatus(for: session.id)
+        #expect(await backend.recordedExitStatuses(of: [session.id]).isEmpty)
+    }
+
+    /// Under the recorder the shell keeps job control inside zmx: ^C ends
+    /// its foreground job, not the shell; and zmx's kill (SIGHUP to its
+    /// child, the recorder) still ends the shell.
+    @Test func controlCAndKillReachTheShellThroughTheRecorder() async throws {
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(ZmxSandbox.prompt) }
+        handle.write(Array("echo $$ > \(sandbox.directory)/pid; /bin/sleep 30\r".utf8))
+        let shellPID = try await readPID()
+        try await Task.sleep(for: .milliseconds(300))
+        handle.write([0x03])
+        handle.write(Array("echo after=$?-$((1+1))\r".utf8))
+        await output.wait { $0.contains("after=130-2\n") }
+        #expect(try await backend.exists(session.id))
+        #expect(kill(shellPID, 0) == 0)
+
+        try await backend.kill(session.id)
+        await output.waitForEnd()
+        #expect(await eventually { kill(shellPID, 0) != 0 }, "the shell outlived the kill")
+        #expect(try await backend.liveSessions().isEmpty)
+        // Ended from outside: the recorder passed the hangup on and wrote nothing.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(sandbox.runtime.recordedExitStatus(for: session.id) == nil)
     }
 
     @Test func killEndsALiveSessionAndToleratesAMissingOne() async throws {
@@ -258,7 +305,8 @@ final class SessionControllerZmxTests {
         #expect(await eventually { surface.text.contains(ZmxSandbox.prompt) })
         surface.delegate?.surface(surface, didInput: Array("echo bye-now; exit\r".utf8))
         #expect(await eventually { controller.state.isEnded })
-        #expect(controller.state == .ended(exitCode: nil))
+        // The recorder's status (a plain `exit` after `echo`: 0).
+        #expect(controller.state == .ended(exitCode: 0))
         #expect(surface.text.contains("bye-now"))
         #expect(!surface.text.contains("\u{1b}c"), "RIS must not reach the surface")
         #expect(sandbox.listedNames.isEmpty)

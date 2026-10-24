@@ -79,7 +79,30 @@ final class SSHIntegrationTests {
         try await backend.kill(session.id)
         await replay.waitForEnd()
         #expect(try await backend.liveSessions().contains(session.id) == false)
-        #expect(await backend.resolveExit(of: session) == .ended)
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: nil), "killed: nothing recorded")
+    }
+
+    /// The session's wrapper on the host records the shell's exit status
+    /// (`~/.armadale/run/a-<id>.exit`): `exit 3` records 3, an `exit` after
+    /// a successful command records 0, and both end the session with it.
+    /// Closing (kill) removes the records.
+    @Test func theShellsExitStatusIsRecordedOnTheHost() async throws {
+        for (command, status) in [("exit 3", Int32(3)), ("true; exit", Int32(0))] {
+            let session = Session(location: .remote(host: host.id), profileID: Profile.shell.id, launch: LaunchSpec(), workingDirectory: "~")
+            let handle = try await backend.create(session, size: size)
+            let output = OutputCollector(handle.output)
+            handle.write(Array("echo ready-$((20+1))\r".utf8))
+            await output.wait(timeout: .seconds(20)) { $0.contains("ready-21") }
+            handle.write(Array((command + "\r").utf8))
+            await output.waitForEnd(timeout: .seconds(20))
+            let file = "~/.armadale/run/a-\(session.id.raw).exit"
+            let record = try await transport.run(host, "cat \(file)")
+            #expect(record.stdoutText == "\(status)\n", "\(command): \(record.stdoutText) \(record.stderrText)")
+            #expect(await backend.resolveExit(of: session) == .ended(exitStatus: .exited(status)), "\(command)")
+            try await backend.kill(session.id)
+            let gone = try await transport.run(host, "test -e \(file) && echo present || echo absent")
+            #expect(gone.stdoutText.contains("absent"), "closing removes the record")
+        }
     }
 
     /// The upload's ssh client is killed mid-transfer (as a dropped link

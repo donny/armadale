@@ -1,3 +1,4 @@
+import ArmadaleCore
 import SwiftUI
 
 /// Shown over a pane's last terminal contents when its session is not
@@ -23,9 +24,18 @@ struct SessionPlaceholderView: View {
     let title: String
     /// Why the session could not be started, if that is why it ended.
     let failure: String?
+    /// How the ended program ended, when that is known.
+    var exitStatus: ProgramExit?
+    /// Whether Return presses the primary button: only in the focused pane
+    /// (or the only one on screen), so Return typed into another pane's
+    /// terminal never respawns or reconnects this one.
+    var isDefaultActionEnabled = true
     /// Respawn, Reconnect or Retry.
     let primary: () -> Void
     let closePane: () -> Void
+    /// A click on the dimmed pane around the card focuses the pane, as a
+    /// click on a live terminal does (and so gives Return to the button).
+    var focusPane: () -> Void = {}
 
     private var heading: String {
         switch kind {
@@ -39,7 +49,12 @@ struct SessionPlaceholderView: View {
 
     private var message: String {
         switch kind {
-        case .ended: "The session “\(title)” is no longer running."
+        case .ended:
+            switch exitStatus {
+            case .exited(let status)?: "The session “\(title)” exited with status \(status)."
+            case .signaled(let signal)?: "The session “\(title)” was ended by signal \(signal) (status \(128 + signal))."
+            case nil: "The session “\(title)” is no longer running."
+            }
         case .disconnected: "Armadale lost its connection to this session. It may still be running."
         case .reconnecting: "Armadale lost its connection to this session and keeps trying to reconnect. "
             + "The session may still be running."
@@ -73,6 +88,8 @@ struct SessionPlaceholderView: View {
             Rectangle()
                 .fill(.black.opacity(0.18))
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: focusPane)
             VStack(spacing: 10) {
                 Image(systemName: symbol)
                     .font(.system(size: 34, weight: .regular))
@@ -103,7 +120,7 @@ struct SessionPlaceholderView: View {
                     }
                     if kind != .hostRemoved {
                         Button(primaryTitle, action: primary)
-                            .keyboardShortcut(.defaultAction)
+                            .keyboardShortcut(isDefaultActionEnabled ? .defaultAction : nil)
                     }
                 }
                 .controlSize(.large)
@@ -121,6 +138,11 @@ struct SessionPlaceholderView: View {
 
 #Preview("Ended") {
     SessionPlaceholderView(kind: .ended, title: "zsh", failure: nil, primary: {}, closePane: {})
+        .frame(width: 640, height: 400)
+}
+
+#Preview("Ended with a status") {
+    SessionPlaceholderView(kind: .ended, title: "zsh", failure: nil, exitStatus: 1, primary: {}, closePane: {})
         .frame(width: 640, height: 400)
 }
 

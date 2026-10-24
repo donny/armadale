@@ -91,6 +91,51 @@ struct ZmxRuntimeTests {
         #expect(ZmxRuntime(directory: directory + "/missing").collectGarbageLogs(live: [], referenced: []).isEmpty)
     }
 
+    /// Exit files (`<runtime>/a-<id>.exit`, docs/DESIGN.md section 4): read,
+    /// removed with their session, and collected at launch when their
+    /// session is neither live nor referenced; sockets, logs and foreign
+    /// files are left alone.
+    @Test func exitFilesAreReadRemovedAndCollected() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "armadale-exits-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let runtime = ZmxRuntime(directory: directory)
+        try FileManager.default.createDirectory(atPath: runtime.logDirectory, withIntermediateDirectories: true)
+        let live = SessionID.generate(), referenced = SessionID.generate()
+        let dead = SessionID.generate(), dead2 = SessionID.generate()
+        #expect(runtime.exitFilePath(for: live) == directory + "/a-\(live.raw).exit")
+        let files = [
+            "a-\(live.raw).exit", "a-\(referenced.raw).exit", "a-\(dead.raw).exit", "a-\(dead2.raw).exit.tmp",
+            "a-\(dead.raw)", "work.exit", "a-short.exit", "a-\(dead2.raw).log",
+        ]
+        for file in files {
+            FileManager.default.createFile(atPath: directory + "/" + file, contents: Data("3\n".utf8))
+        }
+        #expect(runtime.recordedExitStatus(for: referenced) == 3)
+        #expect(runtime.recordedExitStatus(for: dead2) == nil, "a temporary file is not a record")
+        let removed = runtime.collectGarbageExitStatuses(live: [live], referenced: [referenced])
+        #expect(Set(removed.map { ($0 as NSString).lastPathComponent }) == ["a-\(dead.raw).exit", "a-\(dead2.raw).exit.tmp"])
+        let left = try Set(FileManager.default.contentsOfDirectory(atPath: directory))
+        #expect(left == Set(files + ["logs"]).subtracting(["a-\(dead.raw).exit", "a-\(dead2.raw).exit.tmp"]))
+        runtime.removeExitStatus(for: referenced)
+        #expect(runtime.recordedExitStatus(for: referenced) == nil)
+        #expect(runtime.recordedExitStatus(for: live) == 3)
+        // Contents: a decimal status and a newline; anything else is no record.
+        // Local records: `N` is a normal exit, `signal N` a death by signal.
+        #expect(ZmxRuntime.parseExitRecord("0\n") == .exited(0))
+        #expect(ZmxRuntime.parseExitRecord("130\n") == .exited(130))
+        #expect(ZmxRuntime.parseExitRecord("signal 9\n") == .signaled(9))
+        #expect(ZmxRuntime.parseExitRecord("") == nil)
+        #expect(ZmxRuntime.parseExitRecord("x\n") == nil)
+        #expect(ZmxRuntime.parseExitRecord("signal x\n") == nil)
+        // Remote records are `$?`: 128 and above is taken as a signal.
+        #expect(ZmxRuntime.parseShellExitStatus("1\n") == .exited(1))
+        #expect(ZmxRuntime.parseShellExitStatus("127\n") == .exited(127))
+        #expect(ZmxRuntime.parseShellExitStatus("130\n") == .signaled(2))
+        #expect(ZmxRuntime.parseShellExitStatus("x") == nil)
+        #expect(ProgramExit.signaled(2).status == 130 && ProgramExit.exited(3).status == 3)
+        #expect(ZmxRuntime(directory: directory + "/missing").collectGarbageExitStatuses(live: [], referenced: []).isEmpty)
+    }
+
     @Test func prepareCreatesAPrivateDirectoryAndRefusesASymlink() throws {
         let base = FileManager.default.temporaryDirectory.appending(path: "armadale-prep-\(UUID().uuidString)").path
         defer { try? FileManager.default.removeItem(atPath: base) }

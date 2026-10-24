@@ -219,7 +219,7 @@ final class SessionRegistry {
             guard controller.state == .detached else { return }
             switch policy.action(for: controller.session, restored: true, live: live) {
             case .create, .attach: await controller.start(.attach)
-            case .markEnded: controller.markEnded()
+            case .markEnded: await markEnded(controller)
             case .markUnavailable: controller.markUnavailable(reason: "Persistent sessions are unavailable.")
             }
         }
@@ -248,11 +248,64 @@ final class SessionRegistry {
             // An unanswered probe (host down) attaches anyway: the attach
             // then fails as unreachable and is retried, never ended.
             if let live, !live.contains(controller.session.id) {
-                controller.markEnded()
+                await markEnded(controller)
             } else {
                 await controller.start(.attach)
             }
         }
+    }
+
+    /// Shows a restored session that is gone as ended, with the exit status
+    /// its backend recorded (a clean exit then closes its pane: see
+    /// ``closePaneIfEndedCleanly(_:exitStatus:)``).
+    private func markEnded(_ controller: SessionController) async {
+        let id = controller.session.id
+        let status = await controller.activeBackend.recordedExitStatuses(of: [id])[id]
+        controller.markEnded(exitCode: status)
+    }
+
+    // MARK: Clean exits
+
+    /// The rule for a session whose program ended (``EndedSessionRule``,
+    /// docs/DESIGN.md section 4, "Ended"): after a clean exit (status 0, or
+    /// any normal exit of the user's shell) its pane closes the way the
+    /// placeholder's Close Pane closes it (no question: nothing runs), which
+    /// closes the tab with its last pane and the tab group with its last
+    /// tab, unless it is the only pane of the only tab of the only tab group
+    /// of its workspace. Returns whether it closed.
+    @discardableResult
+    func closePaneIfEndedCleanly(_ sessionID: SessionID, exit: ProgramExit?) -> Bool {
+        guard !finishedSessionIDs.contains(sessionID),
+              model.closePaneIfSessionEndedCleanly(sessionID, exit: exit) != nil
+        else { return false }
+        close(sessionID)
+        return true
+    }
+
+    /// At launch, before any window shows: closes the panes of restored
+    /// sessions whose programs exited cleanly while Armadale was not
+    /// running (`statuses`: what their recorders wrote), by the same rule,
+    /// in the model's order. Returns the sessions closed.
+    @discardableResult
+    func closePanesOfSessionsThatEndedCleanly(_ statuses: [SessionID: ProgramExit]) -> [SessionID] {
+        var closed: [SessionID] = []
+        for id in model.sessionOrder where restoredSessionIDs.contains(id) {
+            if let exit = statuses[id], closePaneIfEndedCleanly(id, exit: exit) { closed.append(id) }
+        }
+        return closed
+    }
+
+    /// ``closePanesOfSessionsThatEndedCleanly(_:)`` for the restored local
+    /// persistent sessions, from the exit files in `runtime`. A file is only
+    /// written once the program has ended, so this needs no listing and
+    /// does not wait for the live probe.
+    @discardableResult
+    func closeLocalSessionsThatEndedCleanly(recordedIn runtime: ZmxRuntime) -> [SessionID] {
+        var statuses: [SessionID: ProgramExit] = [:]
+        for session in model.sessions where session.remoteHostID == nil && RestorePolicy.isPersistent(session) {
+            statuses[session.id] = runtime.recordedExitStatus(for: session.id)
+        }
+        return closePanesOfSessionsThatEndedCleanly(statuses)
     }
 
     /// Ends a session whose pane was closed and forgets it. A session that
@@ -540,9 +593,27 @@ final class SessionRegistry {
         let probe = Self.probe(backend)
         remoteProbes[host] = probe
         Task { [weak self] in
-            if let live = await probe.value { self?.remoteLive[host] = live }
+            guard let live = await probe.value, let self else { return }
+            self.remoteLive[host] = live
+            await self.closeRestoredSessionsThatEndedCleanly(on: host, backend: backend, live: live)
         }
         return probe
+    }
+
+    /// Restored sessions on `host` whose panes have not been shown and that
+    /// the host's first listing found gone: those whose programs exited
+    /// cleanly (their wrapper recorded 0) lose their panes, as at launch for
+    /// local sessions. Shown panes get the same rule through their
+    /// controllers (``markEnded(_:)``).
+    func closeRestoredSessionsThatEndedCleanly(on host: HostID, backend: any PersistenceBackend, live: Set<SessionID>) async {
+        let candidates = Set(model.sessions.filter { session in
+            session.remoteHostID == host && restoredSessionIDs.contains(session.id) && RestorePolicy.isPersistent(session)
+                && !live.contains(session.id) && (controller(for: session.id)?.state ?? .detached) == .detached
+        }.map(\.id))
+        guard !candidates.isEmpty else { return }
+        let statuses = await backend.recordedExitStatuses(of: candidates)
+        let unshown = statuses.filter { panes[$0.key] == nil }
+        closePanesOfSessionsThatEndedCleanly(unshown)
     }
 
     /// The hosts of some sessions (a tab's panes), in order, without repeats.
@@ -676,6 +747,13 @@ final class SessionRegistry {
 }
 
 extension SessionRegistry: SessionControllerDelegate {
+    func sessionController(_ controller: SessionController, didChangeState state: SessionState) {
+        // A clean exit takes its pane with it (DESIGN §4, "Ended").
+        if case .ended(let exit?) = state {
+            closePaneIfEndedCleanly(controller.session.id, exit: exit)
+        }
+    }
+
     func sessionController(_ controller: SessionController, didSetTitle title: String) {
         model.setTitle(title, for: controller.session.id)
     }

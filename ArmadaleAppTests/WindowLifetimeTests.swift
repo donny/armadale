@@ -18,7 +18,7 @@ actor InertBackend: PersistenceBackend {
     func liveSessions() async throws -> Set<SessionID> { [] }
     func kill(_ id: SessionID) async throws {}
     func history(_ id: SessionID) async throws -> Data { throw BackendError.historyUnavailable(id) }
-    func resolveExit(of session: Session) async -> ExitResolution { .ended }
+    func resolveExit(of session: Session) async -> ExitResolution { .ended(exitStatus: nil) }
 }
 
 /// A closed workspace window must let go of everything: its controllers

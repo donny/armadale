@@ -117,18 +117,19 @@ public actor RemoteZmxBackend: PersistenceBackend {
         return try await driver.liveSessions().union(plain)
     }
 
-    /// Kills the session and removes its log on the host. A session that
-    /// no longer exists is not an error.
+    /// Kills the session and removes its log and exit file on the host. A
+    /// session that no longer exists is not an error.
     public func kill(_ id: SessionID) async throws {
         if let plain = plainSessions.removeValue(forKey: id) {
             await plain.terminate()
             return
         }
         try await driver.kill(id, version: versions[id])
-        let log = configuration.transport
         let layout = RemoteLayout(directory: host.remoteDirectory)
-        _ = try? await log.run(host, RemoteShell.sh(
-            "rm -f " + RemoteShell.path(layout.logDirectory + "/" + ZmxRuntime.sessionName(for: id) + ".log")))
+        let exitFile = layout.exitFile(for: id)
+        let files = [layout.logDirectory + "/" + ZmxRuntime.sessionName(for: id) + ".log", exitFile, exitFile + ".tmp"]
+        _ = try? await configuration.transport.run(host, RemoteShell.sh(
+            "rm -f " + files.map(RemoteShell.path).joined(separator: " ")))
     }
 
     public func history(_ id: SessionID) async throws -> Data {
@@ -136,19 +137,35 @@ public actor RemoteZmxBackend: PersistenceBackend {
         return try await driver.history(id, version: versions[id])
     }
 
-    /// Ended only when the host says the session is gone; detached when it
-    /// is alive or the host cannot be asked (the connection may simply be
-    /// down). A plain ssh session ends with its client.
+    /// Ended only when the host says the session is gone, with the status
+    /// the session's wrapper recorded there (one more command over the
+    /// shared connection, only then); detached when it is alive or the host
+    /// cannot be asked (the connection may simply be down). A plain ssh
+    /// session ends with its client, whose status is the session's own.
     public func resolveExit(of session: Session) async -> ExitResolution {
         if plainSessions[session.id] != nil {
             plainSessions[session.id] = nil
-            return .ended
+            return .ended(exitStatus: nil)
         }
         do {
-            return try await driver.exists(session.id) ? .detached : .ended
+            if try await driver.exists(session.id) { return .detached }
         } catch {
             return .detached
         }
+        return .ended(exitStatus: await recordedExitStatuses(of: [session.id])[session.id])
+    }
+
+    /// Reads the exit files of `ids` on the host in one command; nothing
+    /// if the host cannot be asked.
+    public func recordedExitStatuses(of ids: Set<SessionID>) async -> [SessionID: ProgramExit] {
+        let persistent = ids.filter { plainSessions[$0] == nil }
+        guard !persistent.isEmpty else { return [:] }
+        let layout = RemoteLayout(directory: host.remoteDirectory)
+        guard let result = try? await configuration.transport.run(
+            host, RemoteZmxEndpoint.exitStatusCommand(for: persistent, layout: layout)),
+            SSHFailure.classify(result) == nil, result.status == 0
+        else { return [:] }
+        return RemoteZmxEndpoint.parseExitStatuses(result.stdoutText)
     }
 
     // MARK: Connecting
@@ -265,7 +282,9 @@ struct RemoteZmxEndpoint: ZmxEndpoint {
     }
 
     func sessionProgram(for session: Session) -> [String] {
-        ["/bin/sh", "-c", Self.sessionScript(for: session, appVersion: configuration.appVersion, unsetRuntimeVariables: true)]
+        ["/bin/sh", "-c", Self.sessionScript(
+            for: session, appVersion: configuration.appVersion, unsetRuntimeVariables: true,
+            exitFile: layout.exitFile(for: session.id))]
     }
 
     func spawnClient(_ arguments: [String], for session: Session, version: String?, size: PTYSize) throws -> PTYProcess {
@@ -304,6 +323,29 @@ struct RemoteZmxEndpoint: ZmxEndpoint {
 
     private static let unsetInherited = "unset ZMX_SESSION ZMX_SESSION_PREFIX; "
 
+    /// Prints `a-<id> <status>` for each of `ids` that has an exit file in
+    /// the host's runtime directory; always exits 0 (no directory, no
+    /// files: nothing printed).
+    static func exitStatusCommand(for ids: Set<SessionID>, layout: RemoteLayout) -> String {
+        let names = ids.sorted().map { ZmxRuntime.sessionName(for: $0) }.joined(separator: " ")
+        return RemoteShell.sh("cd \(RemoteShell.path(layout.runDirectory)) 2>/dev/null || exit 0; for n in \(names); do "
+            + "if test -f \"$n\(ZmxRuntime.exitFileSuffix)\"; then printf '%s ' \"$n\"; cat \"$n\(ZmxRuntime.exitFileSuffix)\"; echo; fi; "
+            + "done; exit 0")
+    }
+
+    /// The output of ``exitStatusCommand(for:layout:)``.
+    static func parseExitStatuses(_ text: String) -> [SessionID: ProgramExit] {
+        var statuses: [SessionID: ProgramExit] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let fields = line.split(separator: " ", maxSplits: 1)
+            guard fields.count == 2, let id = ZmxRuntime.sessionID(fromName: fields[0]),
+                  let status = ZmxRuntime.parseShellExitStatus(fields[1])
+            else { continue }
+            statuses[id] = status
+        }
+        return statuses
+    }
+
     private static func zmxInvocation(layout: RemoteLayout, binary: String) -> String {
         "env ZMX_DIR=\(RemoteShell.path(layout.runDirectory)) ZMX_NO_DETACH_KEY=1 \(binary)"
     }
@@ -314,7 +356,19 @@ struct RemoteZmxEndpoint: ZmxEndpoint {
     /// profile's environment, and then the user's login shell, or the
     /// profile's program through it (`$SHELL -l -c 'exec <program> …'`),
     /// like a local session. A single line, like every remote command.
-    static func sessionScript(for session: Session, appVersion: String, unsetRuntimeVariables: Bool) -> String {
+    ///
+    /// With `exitFile` the script records how the shell ended (docs/DESIGN.md
+    /// section 4, "Ended"; section 6): instead of `exec`, it runs the shell
+    /// as its child, then writes `$?` (128 + N after a death by signal N) to
+    /// `exitFile` through a temporary file and a rename, and exits with it.
+    /// It traps (rather than ignores) SIGINT, SIGQUIT and SIGTSTP, so ^C,
+    /// ^\ and ^Z cannot end or stop it while the shell, which gets the
+    /// default actions back when it starts, runs; it does no terminal I/O.
+    /// A SIGHUP (zmx ending the session) ends it with its default action,
+    /// and the shell then gets the terminal's hangup: nothing is recorded.
+    static func sessionScript(
+        for session: Session, appVersion: String, unsetRuntimeVariables: Bool, exitFile: String? = nil
+    ) -> String {
         var lines: [String] = []
         if unsetRuntimeVariables {
             lines.append("unset " + LocalZmxBackend.variablesHiddenFromSessions.joined(separator: " "))
@@ -333,15 +387,25 @@ struct RemoteZmxEndpoint: ZmxEndpoint {
         if !profile.isEmpty {
             lines.append("export " + profile.map { "\($0.key)=\(RemoteShell.quote($0.value))" }.joined(separator: " "))
         }
+        // Without a recorder the script becomes the shell; with one it
+        // stays as the shell's parent.
+        let exec = exitFile == nil ? "exec " : ""
+        if exitFile != nil { lines.append("trap : INT QUIT TSTP") }
         if let program = session.launch.program, !program.isEmpty {
             let command = ([program] + session.launch.arguments).map(RemoteShell.quote).joined(separator: " ")
             // csh and tcsh refuse `-l` with other flags; they read their rc
             // file for `-c` anyway.
             let run = RemoteShell.quote("exec " + command)
-            lines.append("case \"${SHELL##*/}\" in csh|tcsh) exec \"$SHELL\" -c \(run);; "
-                + "*) exec \"${SHELL:-/bin/sh}\" -l -c \(run);; esac")
+            lines.append("case \"${SHELL##*/}\" in csh|tcsh) \(exec)\"$SHELL\" -c \(run);; "
+                + "*) \(exec)\"${SHELL:-/bin/sh}\" -l -c \(run);; esac")
         } else {
-            lines.append("exec \"${SHELL:-/bin/sh}\" -l" + session.launch.arguments.map { " " + RemoteShell.quote($0) }.joined())
+            lines.append(exec + "\"${SHELL:-/bin/sh}\" -l" + session.launch.arguments.map { " " + RemoteShell.quote($0) }.joined())
+        }
+        if let exitFile {
+            lines.append("s=$?")
+            lines.append("f=\(RemoteShell.path(exitFile))")
+            lines.append("{ printf '%s\\n' \"$s\" > \"$f.tmp\" && mv -f \"$f.tmp\" \"$f\"; } 2>/dev/null")
+            lines.append("exit \"$s\"")
         }
         // One line: sshd hands remote commands to the user's login shell,
         // and csh-family shells reject a newline inside quotes.

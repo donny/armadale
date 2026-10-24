@@ -81,7 +81,7 @@ private actor FakeBackend: PersistenceBackend {
     var createError: (any Error)?
     /// Thrown by attach (when attaching is possible at all).
     var attachError: (any Error)?
-    /// Answers to resolveExit, in order; `.ended` once used up.
+    /// Answers to resolveExit, in order; `.ended(exitStatus: nil)` once used up.
     var resolutions: [ExitResolution] = []
     /// Whether attach succeeds (a persistent backend) or throws noSuchSession.
     var canAttach = false
@@ -104,6 +104,12 @@ private actor FakeBackend: PersistenceBackend {
     func setRuntimeVersion(_ value: String?) { runtimeVersion = value }
     func setAlive(_ ids: Set<SessionID>) { alive = ids }
     func setAttachDelay(_ delay: Duration?) { attachDelay = delay }
+    /// What `recordedExitStatuses` answers.
+    var recorded: [SessionID: ProgramExit] = [:]
+    func setRecorded(_ statuses: [SessionID: ProgramExit]) { recorded = statuses }
+    func recordedExitStatuses(of ids: Set<SessionID>) async -> [SessionID: ProgramExit] {
+        recorded.filter { ids.contains($0.key) }
+    }
 
     func create(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
         if let createDelay { try await Task.sleep(for: createDelay) }
@@ -130,7 +136,7 @@ private actor FakeBackend: PersistenceBackend {
 
     func resolveExit(of session: Session) async -> ExitResolution {
         resolved.append(session.id)
-        return resolutions.isEmpty ? .ended : resolutions.removeFirst()
+        return resolutions.isEmpty ? .ended(exitStatus: nil) : resolutions.removeFirst()
     }
 
     func exists(_ id: SessionID) async throws -> Bool { alive.contains(id) }
@@ -289,6 +295,35 @@ struct SessionControllerTests {
         await controller.start(.create)
         try await handle().exit(0)
         await eventually { controller.state == .ended(exitCode: 0) }
+    }
+
+    /// A backend that recorded the program's status (a zmx session's
+    /// recorder) wins over the client's own, which means nothing there.
+    @Test func theRecordedStatusEndsTheSession() async throws {
+        await backend.setResolutions([.ended(exitStatus: 4)])
+        let controller = makeController()
+        controller.drainTimeout = .milliseconds(20)
+        await controller.start(.create)
+        let handle = try await handle()
+        handle.finishOutput()
+        handle.exit(nil)
+        await eventually { controller.state == .ended(exitCode: 4) }
+        #expect(delegate.states == [.attaching, .attached, .ended(exitCode: 4)])
+    }
+
+    /// A restored session found gone: ended with its recorded status, both
+    /// when the app already knows it is gone and when an attach finds out.
+    @Test func aGoneSessionShowsItsRecordedStatus() async {
+        let gone = makeController()
+        gone.markEnded(exitCode: 2)
+        #expect(gone.state == .ended(exitCode: 2))
+        let attached = makeController()
+        await backend.setRecorded([attached.session.id: 0])
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.noSuchSession(attached.session.id))
+        await attached.start(.attach)
+        #expect(attached.state == .ended(exitCode: 0))
+        #expect(attached.failure == nil)
     }
 
     @Test func attachToAGoneSessionEnds() async {

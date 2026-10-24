@@ -60,9 +60,10 @@ public actor EphemeralBackend: PersistenceBackend {
         throw BackendError.historyUnavailable(id)
     }
 
-    /// The process is the session, so its exit always ends it.
+    /// The process is the session, so its exit always ends it. Its status
+    /// is the process's own, which the controller already has.
     public func resolveExit(of session: Session) async -> ExitResolution {
-        .ended
+        .ended(exitStatus: nil)
     }
 
     private func pruneExited() {

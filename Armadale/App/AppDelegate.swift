@@ -161,10 +161,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self.zmxRuntime = sessions.runtime
             return sessions.setup
         }
-        // Logs of sessions retired during this run go at once, not only at
-        // the next launch.
+        // Logs and exit files of sessions retired during this run go at
+        // once, not only at the next launch.
         registry.onSessionRetired = { [weak self] id in
             self?.zmxRuntime?.removeLog(for: id)
+            self?.zmxRuntime?.removeExitStatus(for: id)
         }
         registry.onRuntimeVersionRecorded = { [weak self] in
             self?.saveNow()
@@ -309,10 +310,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
+    /// Before any window shows: restored local sessions whose programs
+    /// exited cleanly while Armadale was not running lose their panes
+    /// (DESIGN §4, "Ended"). Their recorders' files say so; a file is only
+    /// written once the program has ended, so this needs no listing and
+    /// does not wait for the live probe.
+    private func closePanesOfSessionsThatEndedCleanly() {
+        guard let runtime = zmxRuntime else { return }
+        let closed = registry.closeLocalSessionsThatEndedCleanly(recordedIn: runtime)
+        if !closed.isEmpty {
+            NSLog("Armadale: closed %d pane(s) whose sessions exited cleanly while Armadale was not running", closed.count)
+        }
+    }
+
     /// Launch housekeeping once the live probe has answered: ends live
     /// sessions no saved session refers to (only when the state loaded
-    /// cleanly; see ``OrphanReclaimer``), then removes the runtime's log files
-    /// of sessions that are neither alive nor in the model.
+    /// cleanly; see ``OrphanReclaimer``), then removes the runtime's log
+    /// and exit files of sessions that are neither alive nor in the model.
     private func collectGarbageAfterProbe() {
         guard let runtime = zmxRuntime else { return }
         let model = model
@@ -330,6 +344,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let removed = runtime.collectGarbageLogs(live: live.subtracting(killed), referenced: referenced)
             if !removed.isEmpty {
                 NSLog("Armadale: removed %d log file(s) of ended sessions", removed.count)
+            }
+            let exitFiles = runtime.collectGarbageExitStatuses(live: live.subtracting(killed), referenced: referenced)
+            if !exitFiles.isEmpty {
+                NSLog("Armadale: removed %d exit file(s) of ended sessions", exitFiles.count)
             }
         }
     }
@@ -360,6 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if model.workspaces.isEmpty {
             model.newWorkspace()
         }
+        closePanesOfSessionsThatEndedCleanly()
         let open = model.workspaces.filter { $0.window?.isOpen ?? true }
         for workspace in open.isEmpty ? Array(model.workspaces.prefix(1)) : open {
             openWindow(for: workspace.id, restoringFullScreen: true)

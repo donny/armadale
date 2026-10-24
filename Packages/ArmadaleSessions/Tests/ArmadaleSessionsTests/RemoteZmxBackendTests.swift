@@ -52,6 +52,54 @@ struct RemoteZmxBackendUnitTests {
         #expect(Array(program.prefix(2)) == ["/bin/sh", "-c"])
     }
 
+    /// With an exit file (every zmx session) the script does not exec the
+    /// shell: it waits for it, records its status and exits with it, and
+    /// traps the keyboard signals so ^C cannot end it.
+    @Test func aSessionScriptRecordsTheShellsExitStatus() {
+        let file = layout.exitFile(for: id)
+        #expect(file == "~/.armadale/run/a-abcdefghijklmnop.exit")
+        let script = RemoteZmxEndpoint.sessionScript(
+            for: session(), appVersion: "1.0", unsetRuntimeVariables: true, exitFile: file)
+        #expect(!script.contains("\n"))
+        let lines = script.components(separatedBy: "; ")
+        #expect(lines.contains("trap : INT QUIT TSTP"))
+        #expect(!script.contains("exec \"${SHELL"))
+        #expect(script.hasSuffix("; \"${SHELL:-/bin/sh}\" -l; s=$?; f=\"$HOME\"/.armadale/run/a-abcdefghijklmnop.exit; "
+            + "{ printf '%s\\n' \"$s\" > \"$f.tmp\" && mv -f \"$f.tmp\" \"$f\"; } 2>/dev/null; exit \"$s\""), "\(script)")
+        let withProgram = RemoteZmxEndpoint.sessionScript(
+            for: session(LaunchSpec(program: "claude")), appVersion: "1.0", unsetRuntimeVariables: true, exitFile: file)
+        let run = RemoteShell.quote("exec claude")
+        #expect(withProgram.contains("case \"${SHELL##*/}\" in csh|tcsh) \"$SHELL\" -c \(run);; *) \"${SHELL:-/bin/sh}\" -l -c \(run);; esac; s=$?"))
+        // What a create starts: the recording script.
+        let program = RemoteZmxEndpoint(configuration: RemoteZmxBackend.Configuration(host: host, transport: FakeTransport { _ in .ok() }))
+            .sessionProgram(for: session())
+        #expect(program.last?.hasSuffix("exit \"$s\"") == true)
+    }
+
+    @Test func exitStatusesAreReadInOneCommand() async {
+        let other = SessionID(raw: "qrstuvwxyz234567")
+        let command = RemoteZmxEndpoint.exitStatusCommand(for: [other, id], layout: layout)
+        #expect(command.hasPrefix("exec /bin/sh -c "))
+        #expect(command.contains("for n in a-abcdefghijklmnop a-qrstuvwxyz234567; do"))
+        #expect(RemoteZmxEndpoint.parseExitStatuses("a-abcdefghijklmnop 3\na-qrstuvwxyz234567 0\nnoise\na-bogus 1\na-abcdefghijklmnoq x\n")
+            == [id: 3, other: 0])
+        // `$?` of 128 and above is taken as a death by signal on hosts.
+        #expect(RemoteZmxEndpoint.parseExitStatuses("a-abcdefghijklmnop 130\n") == [id: .signaled(2)])
+
+        // The host lists nothing and has the session's record: ended, with it.
+        let (recorded, transport) = backend { command in
+            if command.contains("ls --short") { return .ok("") }
+            if command.contains(".exit") { return .ok("a-abcdefghijklmnop 3\n") }
+            return .ok()
+        }
+        #expect(await recorded.resolveExit(of: session()) == .ended(exitStatus: 3))
+        #expect(transport.commands.contains { $0.contains(".exit") })
+        // A host that cannot be asked for the record: ended, status unknown.
+        let (unreadable, _) = backend { command in command.contains("ls --short") ? .ok("") : .refused }
+        #expect(await unreadable.resolveExit(of: session()) == .ended(exitStatus: nil))
+        #expect(await unreadable.recordedExitStatuses(of: [id]).isEmpty)
+    }
+
     @Test func aProgramRunsThroughTheLoginShellWithTheProfilesEnvironment() {
         let launch = LaunchSpec(program: "claude", arguments: ["--model", "it's"], environment: [
             "FOO": "a b", "ZMX_DIR": "/evil", "ARMADALE_X": "1", "1BAD": "x",
@@ -157,7 +205,7 @@ struct RemoteZmxBackendUnitTests {
         let (listed, _) = backend { _ in .ok("a-abcdefghijklmnop\n") }
         #expect(await listed.resolveExit(of: session()) == .detached)
         let (gone, _) = backend { _ in .ok("") }
-        #expect(await gone.resolveExit(of: session()) == .ended)
+        #expect(await gone.resolveExit(of: session()) == .ended(exitStatus: nil))
         let (down, _) = backend { _ in .refused }
         #expect(await down.resolveExit(of: session()) == .detached, "an unreachable host proves nothing")
     }
@@ -223,8 +271,44 @@ final class RemoteZmxBackendLoopbackTests {
         try await backend.kill(session.id)
         await replay.waitForEnd()
         #expect(try await backend.liveSessions().isEmpty)
-        #expect(await backend.resolveExit(of: session) == .ended)
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: nil), "killed: nothing recorded")
         #expect(!FileManager.default.fileExists(atPath: sandbox.runDirectory + "/logs/a-\(session.id.raw).log"))
+    }
+
+    /// The session's wrapper on the host records the shell's exit status
+    /// (`<dir>/run/a-<id>.exit`), which ends the session with it; ^C still
+    /// reaches the shell's job and not the wrapper. Closing the session
+    /// removes the record.
+    @Test func theShellsExitStatusIsRecordedOnTheHost() async throws {
+        let sandbox = try makeSandbox()
+        let backend = sandbox.backend
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(remotePrompt) }
+        handle.write(Array("/bin/sleep 30\r".utf8))
+        try await Task.sleep(for: .milliseconds(400))
+        handle.write([0x03])
+        handle.write(Array("echo after=$?-$((1+1))\r".utf8))
+        await output.wait { $0.contains("after=130-2\n") }
+        handle.write(Array("exit 3\r".utf8))
+        await output.waitForEnd()
+        let file = sandbox.runDirectory + "/a-\(session.id.raw).exit"
+        #expect((try? String(contentsOfFile: file, encoding: .utf8)) == "3\n")
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: 3))
+        #expect(sandbox.listedNames.isEmpty)
+        try await backend.kill(session.id)
+        #expect(!FileManager.default.fileExists(atPath: file), "closing removes the record")
+
+        let clean = sandbox.session()
+        let second = try await backend.create(clean, size: size)
+        let secondOutput = OutputCollector(second.output)
+        await secondOutput.wait { $0.contains(remotePrompt) }
+        second.write(Array("exit\r".utf8))
+        await secondOutput.waitForEnd()
+        #expect(await backend.resolveExit(of: clean) == .ended(exitStatus: 0))
+        #expect(await backend.recordedExitStatuses(of: [clean.id, session.id]) == [clean.id: 0])
+        try await backend.kill(clean.id)
     }
 
     @Test func attachToAMissingSessionThrowsAndLeavesNothing() async throws {

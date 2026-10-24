@@ -37,9 +37,14 @@ What works today:
 - **Persistence.** Sessions outlive Armadale (see [Quitting and the menu
   bar](#quitting-and-the-menu-bar)); a relaunch
   restores windows, layouts and selections and reattaches every visible
-  pane, replaying its screen and scrollback. A session whose program exited
-  shows *Session Ended* with Respawn / Close Pane; **Workspace › Respawn All
-  Ended** (⌥⌘R) respawns every ended pane of a workspace.
+  pane, replaying its screen and scrollback. A session that ends cleanly
+  (any program exiting with status 0, or the shell leaving by `exit` or
+  ^D, whatever status it reports) closes its pane, as Close Pane would,
+  unless it is the only pane left in its workspace; a program that fails,
+  anything killed by a signal, or an end nobody saw shows *Session Ended*
+  over its last screen, with the status or signal when it is known, and
+  Respawn / Close Pane. **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended
+  pane of a workspace.
 - **Settings** (⌘,): General (default profile and directory, close
   confirmation, quitting with running sessions, notifications), Appearance
   (font, size, light and dark themes, Ghostty theme import, cursor,
@@ -191,7 +196,8 @@ optionally names an ssh config file for it (`ssh -F`). They deploy the
 helper to `~/.armadale` on the host (and leave it there), create, detach,
 reattach and kill a session, check that the shared connection is reused
 (`ssh -O check`), kill an upload's ssh mid-transfer and check that nothing
-was installed, and check that a truncated helper on the host is replaced. For example, against a Lima VM:
+was installed, check that a truncated helper on the host is replaced, and
+check that a session's shell exit status is recorded on the host. For example, against a Lima VM:
 
 ```sh
 limactl start default
@@ -242,7 +248,13 @@ through `ctty-exec`, and `ctty-exec` also starts the session program inside
 the zmx daemon: it sets its argv[0] (`-zsh` for a login shell), which zmx's
 own command line cannot express, and removes zmx's variables from its
 environment (`ctty-exec --unset VAR … <path> <argv0> [args…]`), so `zmx`
-run inside a pane never sees Armadale's private sessions.
+run inside a pane never sees Armadale's private sessions. There it also
+records how the program ended (`--exit-file <run dir>/a-<id>.exit`:
+`N` for a normal exit, `signal N` for a death by signal): instead of
+exec'ing the program it starts it as its child, ignores ^C, ^\ and ^Z
+itself (the program gets them as usual), passes SIGHUP and SIGTERM on (and
+then writes nothing: the session is being ended from outside), and writes
+the record when the program ends by itself (DESIGN §4 and §7).
 
 When you check PTY behaviour by hand, use zsh or a bare program, never
 `/bin/sh`. macOS's `/bin/sh` is bash, which acquires the controlling

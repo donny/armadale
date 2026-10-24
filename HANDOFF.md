@@ -5,7 +5,7 @@ whenever work pauses. The durable rules for working in this repository are
 in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
 instructions are in `README.md`.
 
-## Status (October 20, 2026)
+## Status (October 23, 2026)
 
 Steps 1–9 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
@@ -51,9 +51,34 @@ exists (`docs/DESIGN.md` section 8, "Full screen" and "Saved frames and
 screens"). Built with the implementer → reviewer loop and two live
 passes.
 
+October 23, 2026: the About panel puts "All rights reserved." on its own
+line and unfocused panes are no longer dimmed, only the focused pane's
+accent border remains (9e47bee, owner's request). Then **a clean exit
+closes the pane** (same day, implementer → reviewer loop, two live
+passes, Lima VM for the host side): an exit recorder sits between the
+persistence daemon and the program, locally `ctty-exec --exit-file`
+(`posix_spawn` instead of `execv`; `N` for a normal exit, `signal N` for
+a death by signal) and on hosts the session's `sh` script (`$?`, so 128
+and above reads as a signal), writing `<run dir>/a-<id>.exit` through a
+temporary file and a rename. `ExitResolution.ended` carries a
+`ProgramExit`; `EndedSessionRule` (ArmadaleCore, pure) closes the pane
+through the Close Pane path when the program exited normally with 0, or
+with any status when the session runs the user's shell (^D after ^C is
+130; `exit` after a failed command is 1), and keeps the *Session Ended*
+placeholder, now with "exited with status N" or "was ended by signal N",
+for a signal death, an unknown end, or a non-shell program's non-zero
+exit; the only pane of a workspace always keeps the placeholder. At
+launch, restored local sessions that ended cleanly while the app was
+closed lose their panes before any window shows; remote ones when their
+host first answers. The placeholder's Respawn button answers Return only
+in the focused pane, and a click around the placeholder's card focuses
+the pane. `docs/DESIGN.md` sections 4, 6, 7 and 13; README. The owner's
+request to remove the "Ask Siri" field from the sidebar's context menus
+was **withdrawn** the same day (open items, Hierarchy and UI).
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
-warnings; 467 from step 8 on). The working tree was clean and nothing was
+warnings; 467 from step 8 on; 523 at the clean-exit change). The working tree was clean and nothing was
 running when work paused (October 19, 2026, evening).
 
 **Releases.** Armadale 0.1.0 (build 1) was built, notarized and stapled
@@ -170,7 +195,27 @@ Hierarchy and UI
   six further runs lost nothing. Not reproduced; watch for it. Return
   on a selected sidebar row does not start a rename (the List never
   has keyboard focus); only double-click and the context menu do.
-- A system "Ask Siri" item appears in the workspace row's context menu.
+- macOS 27 puts an "Ask Siri" field at the top of the sidebar's context
+  menus (workspace, tab group and tab rows). Investigated October 23,
+  2026: it is AppKit's "assistant field", not a context menu plug-in
+  (`allowsContextMenuPlugIns = false` leaves it; SwiftUI's
+  `contextMenuIntelligentAssistantBehavior` is not public). It appears
+  only in context menus inside a SwiftUI `List`, not for `.contextMenu`
+  outside a List (the tab bar) nor for AppKit `popUpContextMenu`,
+  `popUp(positioning:)` or `NSTableView.menu`. The only working removal
+  was a private AppKit setter on each menu as it is built; the owner
+  ruled out private API and **withdrew the request**. If it comes back,
+  the public route is AppKit-built pop-up menus for the sidebar rows,
+  which means mapping the click to its row.
+- Clean exit (October 23, 2026): clicking the dimmed area around a
+  placeholder's card to focus that pane was built and gate-tested but
+  not seen live (the screen check failed when the implementer got to
+  it, since the owner was using the Mac). On hosts a shell that exits
+  right after an interrupted command (`$?` 130) keeps its placeholder,
+  because `$?` cannot tell that from a death by SIGINT (documented,
+  DESIGN section 4). A recorder killed by SIGKILL or ended by a reboot
+  leaves no record, so that pane shows "is no longer running." and
+  stays.
 - A tab whose shell exited keeps its last terminal title.
 - The font panel lists proportional fonts; Armadale refuses them only after
   selection.
@@ -450,10 +495,13 @@ gained one sentence.
 
 Documented in README ("The `ctty-exec` helper") and `docs/DESIGN.md`
 section 7; summarised here because the two items above both touch it.
-It is Armadale's own ~30-line trampoline
+It is Armadale's own small trampoline
 (`Packages/ArmadaleSessions/Sources/ctty-exec/main.swift`), shipped at
 `Contents/Helpers/ctty-exec`. Spawned on a fresh PTY, it claims the PTY as
-controlling terminal (`ioctl(TIOCSCTTY)`) and `execv`s the real program.
+controlling terminal (`ioctl(TIOCSCTTY)`) and `execv`s the real program;
+with `--exit-file <path>` (October 23, 2026) it instead `posix_spawn`s it,
+stays as its parent out of the way of job control, and records how it
+ended in that file (DESIGN section 7, "Exit recorder").
 It exists because on macOS 27 `posix_spawn` with `SETSID` plus the slave on
 fds 0 to 2 no longer acquires a controlling terminal, so without it ^C
 (SIGINT) and resizes (SIGWINCH) never reach the program; `forkpty` would
@@ -485,8 +533,9 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   2027; the notarization keychain profile is `armadale-notary` (created
   by the owner on October 19, 2026; the notary history under that account
   lists the accepted submissions). Debug builds never need either.
-- `~/Applications/Armadale.app` is the notarized 0.1.0 (build 1) installed
-  by `scripts/install-release.sh` on October 19, 2026. It has a different
+- `~/Applications/Armadale.app` is the notarized 0.1.0 (build 2) installed
+  by `scripts/install-release.sh` on October 23, 2026 (it predates the
+  clean-exit change). It has a different
   code identity from Debug builds, so privacy prompts from inside its
   sessions may appear once more; it uses the real state directory
   (`~/Library/Application Support/Armadale`), never a test one. Do not

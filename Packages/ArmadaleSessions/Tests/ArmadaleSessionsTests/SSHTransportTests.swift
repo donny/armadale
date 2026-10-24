@@ -143,7 +143,8 @@ struct SSHTransportTests {
             id: SessionID(raw: "abcdefghijklmnop"), location: .remote(host: host.id), profileID: Profile.shell.id,
             launch: LaunchSpec(program: "claude", arguments: ["--say", "it's \"quoted\" $HOME `x`"], environment: ["FOO": "a; b"]),
             workingDirectory: "~/src/my app")
-        let script = RemoteZmxEndpoint.sessionScript(for: session, appVersion: "1.0", unsetRuntimeVariables: true)
+        let script = RemoteZmxEndpoint.sessionScript(
+            for: session, appVersion: "1.0", unsetRuntimeVariables: true, exitFile: layout.exitFile(for: session.id))
         let commands = [
             RemoteZmxEndpoint.clientCommand(["attach", "a-abcdefghijklmnop", "/bin/sh", "-c", script], layout: layout, version: "0.8.1"),
             RemoteZmxEndpoint.clientCommand(["attach", "a-abcdefghijklmnop", "true"], layout: layout, version: "0.8.1"),
@@ -153,6 +154,7 @@ struct SSHTransportTests {
             RemoteShell.sh(RemoteDeployer.presenceCheck(layout.binary(version: "0.8.1"))),
             RemoteShell.sh(RemoteZmxEndpoint.sessionScript(for: session, appVersion: "1.0", unsetRuntimeVariables: false)),
             RemoteShell.sh("exit 0"),
+            RemoteZmxEndpoint.exitStatusCommand(for: [session.id, SessionID(raw: "qrstuvwxyz234567")], layout: layout),
         ]
         let runner = CommandRunner()
         for command in commands {

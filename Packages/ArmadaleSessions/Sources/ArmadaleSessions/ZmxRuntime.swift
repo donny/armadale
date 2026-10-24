@@ -151,6 +151,77 @@ public struct ZmxRuntime: Sendable, Hashable {
     }
 }
 
+// MARK: Exit statuses
+
+extension ZmxRuntime {
+    /// The suffix of a session's exit file, `<runtime>/a-<id>.exit`.
+    /// `zmx ls` lists sockets only and leaves regular files alone (verified
+    /// with zmx 0.8.1: `ls --short` ignores the file, and neither `ls` nor
+    /// `kill` removes it).
+    public static let exitFileSuffix = ".exit"
+
+    /// Where `ctty-exec --exit-file` records the exit status of session
+    /// `id`'s program (docs/DESIGN.md section 4, "Ended").
+    public func exitFilePath(for id: SessionID) -> String {
+        directory + "/" + Self.sessionName(for: id) + Self.exitFileSuffix
+    }
+
+    /// The exit status recorded for session `id`, if its program has ended
+    /// and the recorder wrote it.
+    public func recordedExitStatus(for id: SessionID) -> ProgramExit? {
+        guard let data = FileManager.default.contents(atPath: exitFilePath(for: id)) else { return nil }
+        return Self.parseExitRecord(String(decoding: data, as: UTF8.self))
+    }
+
+    /// Removes the exit file of a session that has been closed or retired.
+    public func removeExitStatus(for id: SessionID) {
+        let path = exitFilePath(for: id)
+        unlink(path)
+        unlink(path + ".tmp")
+    }
+
+    /// Removes exit files (and a recorder's leftover temporary file) whose
+    /// session is neither live nor referenced by the model. Other files are
+    /// left alone. Returns the paths removed.
+    @discardableResult
+    public func collectGarbageExitStatuses(live: Set<SessionID>, referenced: Set<SessionID>) -> [String] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return [] }
+        var removed: [String] = []
+        for name in names.sorted() {
+            let stem: Substring
+            if name.hasSuffix(Self.exitFileSuffix) {
+                stem = name.dropLast(Self.exitFileSuffix.count)
+            } else if name.hasSuffix(Self.exitFileSuffix + ".tmp") {
+                stem = name.dropLast(Self.exitFileSuffix.count + 4)
+            } else {
+                continue
+            }
+            guard let id = Self.sessionID(fromName: stem), !live.contains(id), !referenced.contains(id) else { continue }
+            let path = directory + "/" + name
+            if unlink(path) == 0 { removed.append(path) }
+        }
+        return removed
+    }
+
+    /// A local exit file's contents, as `ctty-exec --exit-file` writes them:
+    /// `N` and a newline for a normal exit with status N, `signal N` and a
+    /// newline for a death by signal N.
+    static func parseExitRecord(_ text: some StringProtocol) -> ProgramExit? {
+        let fields = text.split(whereSeparator: \.isWhitespace)
+        if fields.count == 2, fields[0] == "signal", let signal = Int32(fields[1]) { return .signaled(signal) }
+        if fields.count == 1, let status = Int32(fields[0]) { return .exited(status) }
+        return nil
+    }
+
+    /// A remote exit file's contents: `$?` of the shell, which cannot tell
+    /// a normal exit from a death by signal; 128 and above is taken as a
+    /// death by signal N - 128, below as a normal exit.
+    static func parseShellExitStatus(_ text: some StringProtocol) -> ProgramExit? {
+        guard let status = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return status >= 128 ? .signaled(status - 128) : .exited(status)
+    }
+}
+
 /// A file URL's path without percent-encoding or a trailing slash.
 func plainPath(_ url: URL) -> String {
     var path = url.standardizedFileURL.path(percentEncoded: false)

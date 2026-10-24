@@ -1,4 +1,5 @@
 import AppKit
+import ArmadaleCore
 import ArmadaleSessions
 import SwiftUI
 import TerminalSurface
@@ -35,8 +36,14 @@ final class PaneView: NSView {
     }
 
     var focusStyle: FocusStyle = .alone {
-        didSet { if focusStyle != oldValue { updateFocusOverlay() } }
+        didSet {
+            guard focusStyle != oldValue else { return }
+            updateFocusOverlay()
+            // Return presses the placeholder's button only in the focused pane.
+            if placeholder != nil, let lastPlaceholderState { update(lastPlaceholderState) }
+        }
     }
+    private var lastPlaceholderState: PlaceholderState?
 
     private var placeholder: NSHostingView<SessionPlaceholderView>?
     private let focusOverlay = PassThroughView()
@@ -205,10 +212,14 @@ final class PaneView: NSView {
     }
 
     private func update(_ change: PlaceholderState) {
+        lastPlaceholderState = change
         let failure = change.failure
         let kind: SessionPlaceholderView.Kind
+        var exitStatus: ProgramExit?
         switch change.state {
-        case .ended: kind = .ended
+        case .ended(let code):
+            kind = .ended
+            exitStatus = code
         case .disconnected: kind = change.isReconnecting ? .reconnecting : .disconnected
         case .unavailable(let reason): kind = reason == SessionRegistry.hostRemovedReason ? .hostRemoved : .unavailable
         case .detached, .attaching, .attached:
@@ -220,6 +231,8 @@ final class PaneView: NSView {
             kind: kind,
             title: titleProvider(),
             failure: failure,
+            exitStatus: exitStatus,
+            isDefaultActionEnabled: focusStyle != .unfocused,
             primary: { [weak self] in
                 guard let self else { return }
                 switch kind {
@@ -229,7 +242,8 @@ final class PaneView: NSView {
                 }
                 self.focusTerminal()
             },
-            closePane: { [weak self] in self?.onClosePane?() })
+            closePane: { [weak self] in self?.onClosePane?() },
+            focusPane: { [weak self] in self?.focusTerminal() })
         if let placeholder {
             placeholder.rootView = view
         } else {

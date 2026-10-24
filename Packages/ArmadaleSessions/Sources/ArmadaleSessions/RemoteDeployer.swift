@@ -49,6 +49,10 @@ public struct RemoteLayout: Sendable, Hashable {
     public func binary(version: String) -> String { directory + "/bin/zmx-" + version }
     public var runDirectory: String { directory + "/run" }
     public var logDirectory: String { runDirectory + "/logs" }
+    /// Where a session's wrapper records its shell's exit status.
+    public func exitFile(for id: SessionID) -> String {
+        runDirectory + "/" + ZmxRuntime.sessionName(for: id) + ZmxRuntime.exitFileSuffix
+    }
 }
 
 /// The outcome of making sure a host has the helper.

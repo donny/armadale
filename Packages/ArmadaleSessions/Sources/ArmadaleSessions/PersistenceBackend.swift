@@ -24,14 +24,28 @@ public protocol PersistenceBackend: Sendable {
     /// client exits both when its session ends and when it is merely
     /// disconnected (its exit status is always 0), so the backend looks at
     /// the session itself. Never throws: a backend that cannot tell answers
-    /// ``ExitResolution/detached`` and lets one reattach settle it.
+    /// ``ExitResolution/detached`` and lets one reattach settle it. An
+    /// ended session carries its program's exit status when the backend
+    /// recorded one (docs/DESIGN.md section 4, "Ended").
     func resolveExit(of session: Session) async -> ExitResolution
+    /// The exit statuses recorded for sessions that have ended, for those
+    /// of `ids` that have one: a session whose program exited (by itself,
+    /// or killed by a signal) while the recorder around it was running.
+    /// Sessions still running, killed from outside, or never recorded
+    /// (made by an older version) have none. Never throws: a backend that
+    /// cannot tell answers nothing.
+    func recordedExitStatuses(of ids: Set<SessionID>) async -> [SessionID: ProgramExit]
+}
+
+extension PersistenceBackend {
+    public func recordedExitStatuses(of ids: Set<SessionID>) async -> [SessionID: ProgramExit] { [:] }
 }
 
 /// What the exit of a session's client process meant.
 public enum ExitResolution: Sendable, Hashable {
-    /// The session is gone (its program exited, or it was killed).
-    case ended
+    /// The session is gone (its program exited, or it was killed), with how
+    /// its program ended when that was recorded; `nil` when it is unknown.
+    case ended(exitStatus: ProgramExit?)
     /// Only the client went away; the session is still alive and can be
     /// reattached.
     case detached
@@ -153,8 +167,9 @@ public enum SessionState: Sendable, Hashable {
     case attaching
     /// The pane's PTY is running the client.
     case attached
-    /// The session's process has exited.
-    case ended(exitCode: Int32?)
+    /// The session's process has exited: how, when that is known (an
+    /// integer literal is a normal exit with that status).
+    case ended(exitCode: ProgramExit?)
     /// Armadale lost its connection to the session (its client keeps
     /// going away, or cannot attach); the session may still be running.
     case disconnected(reason: String)

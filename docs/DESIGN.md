@@ -385,7 +385,9 @@ detail: nothing in the UI, menus or settings says "zmx".
   be replaced by an update. The daemon's argv[0] is that path, so `pgrep -f`
   can identify Armadale's daemons. Older `zmx-<ver>` copies are kept while a
   session records that version (section 13); older `ctty-exec` copies are
-  removed, since nothing keeps running them.
+  removed. A session's exit recorder (below) keeps running the copy it was
+  started from; removing the file does not disturb it (the running
+  process keeps its inode), and nothing starts it again.
 
 ### `PersistenceBackend` protocol
 
@@ -397,13 +399,18 @@ protocol PersistenceBackend: Sendable {
     func liveSessions() async throws -> Set<SessionID>
     func kill(_ id: SessionID) async throws
     func history(_ id: SessionID) async throws -> Data               // live sessions only
-    func resolveExit(of session: Session) async -> ExitResolution    // .ended | .detached
+    func resolveExit(of session: Session) async -> ExitResolution    // .ended(exitStatus:) | .detached
+    func recordedExitStatuses(of ids: Set<SessionID>) async -> [SessionID: Int32]
 }
 ```
 
 `resolveExit` was added in step 3: a zmx client exits the same way whether
 its session ended or only the client went away, so the backend decides from
 the session itself (`exists(id)`; listing errors count as `.detached`).
+Since October 23, 2026 `.ended` carries the program's exit status when
+the session's recorder wrote one, and `recordedExitStatuses` reads the
+records of sessions that are already gone (the launch path; section
+"Session lifecycle", Ended).
 `ProcessHandle.runtimeVersion` reports the zmx version a create used, which
 the app stores on the `Session`.
 
@@ -425,9 +432,10 @@ Implementations:
   inherits it. Everything after the name is the argv, passed verbatim to
   `execvpe`. There is **no `--` separator**: zmx would try to execute `--`.
   Because zmx uses the program path as argv[0], a login shell could not be
-  started as `-zsh`; the program is therefore `ctty-exec <program> <argv0>
-  <args…>` (the trampoline's `TIOCSCTTY` succeeds silently in the daemon's
-  child, which already owns its PTY).
+  started as `-zsh`; the program is therefore `ctty-exec [--unset …]
+  --exit-file <runtime>/a-<id>.exit <program> <argv0> <args…>` (the
+  trampoline's `TIOCSCTTY` succeeds silently in the daemon's child, which
+  already owns its PTY; `--exit-file` is the exit recorder, below).
 - `RemoteZmxBackend` — same commands wrapped in `ssh` (section 6).
 - `EphemeralBackend` — a plain PTY with no daemon. Used as a fallback when
   the remote host cannot take a zmx deployment, and in UI tests. Its
@@ -536,23 +544,83 @@ replay and is accepted.
 - **Ended**: the client exited and `exists(id)` is false. When the session's
   process exits, the zmx daemon exits too, unlinks its socket and the session
   vanishes from `ls`; there is no "exited but listed" state. The client's own
-  exit code is always 0, so it cannot distinguish detach from end, and the
-  program's exit status is discarded by zmx. The pane shows the *Session
-  Ended* placeholder (icon, "The session “<title>” is no longer running.",
-  **Respawn** / **Close Pane**) **over the surface's last contents**, which
-  the surface retains; `history()` cannot be used because the session no
-  longer exists. Exit codes are not shown in v1. If they turn out to matter,
-  the program can be wrapped by a small recorder; this is deliberately left
-  out for now.
+  exit code is always 0, so it cannot distinguish detach from end, and zmx
+  discards the program's exit status. So since October 23, 2026 a small
+  **exit recorder** sits between the daemon and the program and records how
+  it ended in a file next to the session: locally `ctty-exec --exit-file
+  <runtime>/a-<id>.exit` (section 7), which writes `N` for a normal exit
+  with status N and `signal N` for a death by signal N; remotely the
+  session's `/bin/sh` script, which runs the shell without `exec` and writes
+  `$?` to `<dir>/run/a-<id>.exit` (section 6). Both write through a
+  temporary file and a rename and then exit with the status (128 + N after
+  a signal, as shells report it), so the file exists before the daemon ends
+  and the socket goes. A local recorder that has passed on SIGHUP or
+  SIGTERM (zmx's kill when Armadale closes or respawns the session, or a
+  hangup) writes nothing, like the remote script, which such a signal ends:
+  the session is being ended from outside, and the app removes a closed
+  session's file, which a late write would bring back. zmx 0.8.1's `ls`
+  lists sockets only: `ls --short` ignores the file and neither `ls` nor
+  `kill` removes it (verified). `resolveExit` reads the file once the
+  session is gone (`.ended(exitStatus:)` with a `ProgramExit`: `.exited(N)`
+  or `.signaled(N)`; remotely one more command over the shared connection,
+  only then) and the controller's state becomes `ended(exitCode:)` with
+  it; the ephemeral backend and the plain-ssh fallback keep the client's
+  own status (the process is the session; a client killed by a signal
+  gives none). `$?` on a host cannot tell a normal exit from a death by
+  signal, so there a status of 128 or more is taken as a signal and below
+  128 as a normal exit.
+  **The rule** (`EndedSessionRule` in `ArmadaleCore`, pure and tested;
+  applied by `SessionRegistry` when a controller reports the state): a
+  normal exit with status 0 closes the pane, whatever the program; a
+  normal exit with any status closes it when the session runs the user's
+  shell (no program of its own, or a program named `sh`, `bash`, `zsh`,
+  `fish`, `tcsh`, `csh`, `ksh`, `dash` or `nu`). A shell's `exit` without an
+  argument and ^D report the last command's status: 130 after ^C at the
+  prompt, 1 after a failed command (measured with zsh 5.9), and leaving the
+  shell is what the user did. Closing works the way the placeholder's
+  Close Pane does, without asking (nothing runs), which closes the tab with
+  its last pane and the tab group with its last tab, like ⌘W; except the
+  only pane of the only tab of the only tab group of its workspace, which
+  keeps the placeholder, so a window never vanishes under the user. A
+  non-shell program's non-zero exit, a death by signal and an unknown end
+  keep the *Session Ended* placeholder (icon, "The session “<title>” exited
+  with status N." or "… was ended by signal N (status 128 + N).", else
+  "… is no longer running.", **Respawn** / **Close Pane**) **over the
+  surface's last contents**, which the surface retains; `history()` cannot
+  be used because the session no longer exists. Closing removes the session
+  from the model, which also clears its attention. On hosts a shell that
+  exits right after an interrupted command (`$?` 130 after ^C at the
+  prompt, then ^D) keeps its placeholder: its status reads as a death by
+  SIGINT there, since `$?` carries no more than the number.
+  The placeholder's primary button (Respawn, Reconnect, Retry) answers
+  Return only in the focused pane, or the only one on screen
+  (`PaneView.focusStyle`), so Return typed into another pane's terminal
+  never respawns or reconnects it; a click on the dimmed pane around the
+  placeholder's card focuses that pane, as a click on a terminal does.
+  **At launch**, before any window shows, the app reads the exit files of
+  the restored local persistent sessions (a file exists only once the
+  program has ended, so no listing is needed;
+  `SessionRegistry.closeLocalSessionsThatEndedCleanly`) and closes, by the
+  same rule and in the model's order, the panes of those that ended cleanly
+  while Armadale was not running. A restored session found gone when its
+  pane is first shown (or an attach that finds it gone) is marked ended
+  with its record, and the same rule applies then. Remote restored
+  sessions cannot hold up the launch: when a host's first listing
+  arrives, its restored sessions that are gone and were never shown have
+  their records read in one command, and those that ended cleanly lose
+  their panes then.
 - **Daemon killed from outside** (SIGKILL, reboot): `ls` reports the stale
   socket as an error entry, cleans it up, and `ls --short` omits it. The pane
-  ends up in the same ended state.
+  ends up in the same ended state, with no record (status unknown): the
+  local recorder, the terminal's session leader, gets the hangup, passes it
+  to the shell and writes nothing; a reboot or a SIGKILL of the recorder
+  leaves nothing either.
 - **Respawn**: kills the old session (always: a pane that looks ended may
   still be alive, and a not-found kill is harmless), creates a new session
   with the same directory and location and the profile's current launch
   (step 5; the old `launch` if the profile was deleted), and rebinds the pane to
-  it. The old session ID is retired and its zmx log removed. Close Pane
-  likewise always kills. The
+  it. The old session ID is retired and its zmx log and exit file removed.
+  Close Pane likewise always kills. The
   surface is fully reset first (RIS, scrollback cleared), so modes a dead
   program left on, such as the alternate screen or mouse reporting, do not
   carry over.
@@ -603,9 +671,9 @@ the child. The daemon also passes on the creating client's `ZMX_DIR` and
 user's own `zmx ls` or `zmx attach x` inside a pane would list Armadale's
 private sessions or switch this one away. The program is therefore started
 as `ctty-exec --unset ZMX_DIR --unset ZMX_NO_DETACH_KEY --unset ZMX_SESSION
---unset ZMX_SESSION_PREFIX <program> <argv0> …`, and the trampoline removes
-them before its `execv` (verified: `env | grep ZMX` in a pane prints
-nothing).
+--unset ZMX_SESSION_PREFIX --exit-file <runtime>/a-<id>.exit <program>
+<argv0> …`, and the trampoline removes them before it starts the program
+(verified: `env | grep ZMX` in a pane prints nothing).
 
 ### Housekeeping
 
@@ -613,7 +681,12 @@ zmx writes one log per daemon to `ZMX_DIR/logs/<name>.log` plus a shared
 `zmx.log`, at debug level, each truncated at 2 MB but never deleted. At
 launch Armadale removes log files whose session ID is neither live nor
 referenced by the model, and during a run it removes a session's log as
-soon as it kills or retires the session.
+soon as it kills or retires the session. Exit files (`<runtime>/a-<id>.exit`,
+and a recorder's leftover `.exit.tmp`) are treated the same way: removed
+when the session is closed or retired, and at launch when their session is
+neither live nor referenced. On a host, killing a session (close, respawn)
+removes its log and exit file there; nothing else is collected on hosts,
+whose `~/.armadale` several Macs may share.
 
 At launch, once the live probe has answered, Armadale also ends live
 sessions in its runtime directory that no saved session refers to (for
@@ -794,7 +867,28 @@ which `LocalZmxBackend` and `RemoteZmxBackend` both use.
   `ARMADALE_SESSION_ID`, `LANG=C.UTF-8` if unset and the profile's
   variables, then `exec "$SHELL" -l`, or `exec "$SHELL" -l -c 'exec
   <program> <args…>'` for a profile with a program, as locally (`-c`
-  without `-l` for csh and tcsh). Output over
+  without `-l` for csh and tcsh). *Exit recorder (October 23, 2026):* in a
+  zmx session the script does not `exec` the shell; it runs `trap : INT
+  QUIT TSTP`, then the shell (or `$SHELL -l -c 'exec <program> …'`) as its
+  child, then `s=$?; f=<dir>/run/a-<id>.exit; { printf '%s\n' "$s" >
+  "$f.tmp" && mv -f "$f.tmp" "$f"; } 2>/dev/null; exit "$s"`. Trapped,
+  not ignored: a trapped signal is reset to its default action in the
+  child, so ^C, ^\ and ^Z still reach the shell and its jobs, while the
+  script, waiting for a foreground child, cannot be ended or stopped by
+  them (a bare program stays in the script's process group, which is the
+  terminal's foreground group). `$?` after a death by signal N is 128 + N
+  in POSIX shells. SIGHUP keeps its default action: zmx's kill (SIGHUP to
+  its child) ends the script, the terminal's hangup then ends the shell,
+  and nothing is recorded, which only matters for sessions Armadale is
+  ending anyway. Remotely a `sh` script rather than `ctty-exec` because the
+  helper is a macOS binary; a script needs nothing deployed. The plain-ssh
+  fallback still `exec`s (ssh's own exit status is the shell's). Verified
+  with the loopback host (macOS `/bin/sh`, bash in POSIX mode) and on the
+  Lima VM, whose `/bin/sh` is dash (October 23, 2026: `exit 3` records 3,
+  `true; exit` 0, `false` then ^D 1, `kill -9 $$` 137, `cat` interrupted
+  by ^C 130, `zmx kill` nothing; `SSHIntegrationTests` checks the first
+  two). The app reads 128 and above as a death by signal (section 4,
+  Ended). Output over
   ssh may start with text that is not zmx's (an ssh warning, a noisy remote
   rc file), so the remote classification skips whole lines: zmx's output is
   only looked for at the start of the stream or of a line, and an attach is
@@ -826,7 +920,11 @@ which `LocalZmxBackend` and `RemoteZmxBackend` both use.
   answer prompts and says to open a tab.
 - **Exit resolution** is the local rule: when a client goes away the
   backend asks `exists` (an `ls` over ssh). Only a host that answers
-  without the session ends it; an unreachable host means `.detached`.
+  without the session ends it; an unreachable host means `.detached`. An
+  ended session's record is then read with one more command over the
+  shared connection (`cd <dir>/run; for n in a-<id> …; do test -f "$n.exit"
+  && print it; done`, which also serves several sessions at once after a
+  host's first listing); a host that cannot be asked gives no status.
 - **Disconnected and reconnect.** A create or attach that cannot reach the
   host throws `BackendError.unreachable(message)`; the controller shows
   Disconnected with ssh's message and does not ask `exists` (it would
@@ -891,6 +989,37 @@ which `LocalZmxBackend` and `RemoteZmxBackend` both use.
   `openpty()` followed by `fcntl`. A `Process` launched concurrently
   elsewhere in the app therefore cannot inherit the master, and the app
   never acquires the terminal itself.
+- **Exit recorder** (`ctty-exec --exit-file <path>`, October 23, 2026;
+  section 4, Ended). Instead of `execv` it `posix_spawn`s the program with
+  the same path, argv (argv[0] included) and environment, with the
+  original signal mask (`SETSIGMASK`), and stays as its parent: it ignores
+  SIGINT, SIGQUIT, SIGTSTP, SIGTTIN and SIGTTOU (it never touches the
+  terminal), and the program gets back the default action of each of
+  those that was not already ignored when the recorder started
+  (`SETSIGDEF` for exactly those, read with `sigaction`), so dispositions
+  are what an exec would have passed on. It blocks SIGHUP, SIGTERM and
+  SIGCHLD and takes them with `sigwait` (no signal handlers run, no fork in
+  Swift), passes SIGHUP and SIGTERM on once (to the program's process
+  group when the program leads one of its own, else to the program),
+  reaps it, writes the record to `<path>` (temporary file, rename; `N` for
+  a normal exit, `signal N` for a death by signal N; a program that cannot
+  be started as 127), unless it has passed a signal on, and exits with the
+  status (128 + N after a signal).
+  Chosen over a `sh` wrapper locally because it keeps argv[0] exactly as
+  before without relying on `exec -a`, and starts no shell around a
+  program. Job control is unaffected, verified on real PTYs
+  (`ExitRecorderTests`, and through zmx in `LocalZmxBackendTests`): an
+  interactive zsh under it leads its own process group, which is the
+  terminal's foreground group; ^C interrupts `sleep 30` and the shell lives
+  on (`$?` 130); ^Z stops a job; a bare program in the recorder's group
+  dies of ^C and the recorder records 130; a resize reaches the program as
+  SIGWINCH; SIGHUP to the recorder (what `zmx kill` sends, measured with a
+  trapping script) reaches an interactive shell once and ends a bare
+  program, and nothing is recorded; `exit 3` (3), `exit 137` (137),
+  `kill -9 $$` (`signal 9`) and `exit` (0) are recorded; a signal ignored
+  before the recorder started stays ignored in the program. On macOS a terminal's hangup signals only the
+  session leader, now the recorder, which is why it passes SIGHUP on. Cost:
+  one more small process per local session.
 - `ctty-exec` is signed with no entitlements at all
   (`CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`, `ENTITLEMENTS_REQUIRED = NO`).
   Xcode would otherwise add `com.apple.application-identifier`, a restricted
@@ -2134,8 +2263,16 @@ The build order is complete.
   ordinary VT output. Anything odd shows up in step 3 and is the earliest
   signal that a different renderer is worth building. The first attach to a
   fresh session gets no replay, which is why creation attaches twice.
-- **Lost exit codes.** zmx discards the program's exit status, so the
-  *Session Ended* placeholder cannot show it in v1.
+- **Lost exit codes** (resolved October 23, 2026). zmx discards the
+  program's exit status; a recorder around the program now writes it next
+  to the session (section 4, Ended), a clean exit closes its pane, and the
+  placeholder shows the status otherwise. Still unknown: sessions created
+  before this version (no recorder), a session ended from outside (zmx
+  kill, the daemon killed, a hangup, a reboot, a SIGKILL of the recorder)
+  and the plain-ssh fallback when ssh itself fails; the placeholder then
+  says only that the session is no longer running. On hosts a normal exit
+  with status 128 or more cannot be told from a death by signal and is
+  read as one.
 - **Unbounded client buffering** in zmx 0.8.1 (see section 7, "zmx
   floods"): backpressure cannot reach a program inside a persistent
   session. When the session client's buffered backlog grows past ~16 MB,

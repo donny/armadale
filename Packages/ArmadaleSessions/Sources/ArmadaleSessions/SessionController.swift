@@ -237,11 +237,12 @@ public final class SessionController {
     }
 
     /// Shows a session that is known to be gone (at launch, a restored
-    /// session that is no longer live) as ended, without starting anything.
-    /// Does nothing unless detached.
-    public func markEnded() {
+    /// session that is no longer live) as ended, without starting anything,
+    /// with its program's recorded exit status if there is one. Does
+    /// nothing unless detached.
+    public func markEnded(exitCode: ProgramExit? = nil) {
         guard state == .detached, !isClosed else { return }
-        setState(.ended(exitCode: nil))
+        setState(.ended(exitCode: exitCode))
     }
 
     /// Shows a session whose runtime is not available in this run. It is
@@ -419,10 +420,17 @@ public final class SessionController {
         } catch {
             guard generation == self.generation, !isClosed else { return }
             switch error as? BackendError {
-            case .notPersistent(_)?, .noSuchSession?:
+            case .notPersistent(_)?:
                 // Simply gone; nothing went wrong.
                 failure = nil
                 setState(.ended(exitCode: nil))
+            case .noSuchSession?:
+                // Gone (a restored session whose program exited after the
+                // launch probe, say): with its status, if one was recorded.
+                let status = await backend.recordedExitStatuses(of: [target.id])[target.id]
+                guard generation == self.generation, !isClosed else { return }
+                failure = nil
+                setState(.ended(exitCode: status))
             case .unreachable(let reason)?:
                 // The host did not answer: nothing is known about the
                 // session, so it is not ended. A create that never got
@@ -576,8 +584,10 @@ public final class SessionController {
             guard let self, self.generation == generation, !self.isClosed else { return }
             if lasted { self.automaticReattaches = 0 }
             switch resolution {
-            case .ended:
-                self.end(exitCode: exitCode)
+            case .ended(let recorded):
+                // The backend's record (a zmx session's program), else the
+                // client's own status (a plain process is the session).
+                self.end(exitCode: recorded ?? exitCode.map(ProgramExit.exited))
             case .detached:
                 guard self.automaticReattaches < 1 else {
                     self.disconnect(reason: "The connection to the session was lost.")
@@ -611,7 +621,7 @@ public final class SessionController {
         surface.clearScrollback()
     }
 
-    private func end(exitCode: Int32?) {
+    private func end(exitCode: ProgramExit?) {
         binding?.cancelTasks()
         binding = nil
         finishFilter()
