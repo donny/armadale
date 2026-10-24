@@ -866,12 +866,24 @@ public final class AppModel {
         if clamped != from { didChange() }
     }
 
-    /// Why `favorite` cannot be started: "Host removed", "Profile removed",
-    /// or `nil` when it can (``requestProblem(_:)``). A broken favorite is
-    /// kept until the user edits or removes it.
+    /// Why `favorite` cannot be started: "Host removed", "Profile removed"
+    /// (``requestProblem(_:)``), "Host has no usable destination" (its host
+    /// has a blank or unusable destination, ``Host/destinationProblem(_:)``,
+    /// e.g. one just added with "+" in Settings › Hosts, which the New
+    /// Session dialog refuses too), or `nil` when it can. A broken favorite
+    /// is kept until the user edits or removes it (or fixes the host).
     public func favoriteProblem(_ favorite: Favorite) -> String? {
-        requestProblem(favorite.request)
+        if let problem = requestProblem(favorite.request) { return problem }
+        if case .remote(let id) = favorite.request.location, let host = host(id),
+           Host.destinationProblem(host.sshDestination) != nil {
+            return Self.unusableHostDestination
+        }
+        return nil
     }
+
+    /// ``favoriteProblem(_:)``'s reason for a host without a usable
+    /// destination.
+    public static let unusableHostDestination = "Host has no usable destination"
 
     private func cleanedFavoriteName(_ name: String, request: SessionRequest, excluding id: FavoriteID?) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

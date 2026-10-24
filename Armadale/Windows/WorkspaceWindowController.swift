@@ -40,8 +40,6 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     private let splitViewController = NSSplitViewController()
     private let sidebarItem: NSSplitViewItem
     private let content: ContentViewController
-    /// Step 10b interim: asks every empty pane for its session.
-    private let newSessions: NewSessionPresenter
     private var titleTask: Task<Void, Never>?
     /// Debounced report of geometry changes that end without a live resize
     /// (sidebar drags and collapses, zoom); see ``observeGeometry()``.
@@ -83,7 +81,6 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         sidebarItem.maximumThickness = 420
         sidebarItem.canCollapse = true
         content = ContentViewController(model: model, workspaceID: workspaceID, registry: registry, actions: actions)
-        newSessions = NewSessionPresenter(model: model, workspaceID: workspaceID, actions: actions)
         let contentItem = NSSplitViewItem(viewController: content)
         contentItem.minimumThickness = 320
         splitViewController.addSplitViewItem(sidebarItem)
@@ -105,15 +102,16 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
 
         actions.window = window
         // Where focus goes after a rename when what had it before is gone.
-        actions.rename.focusFallback = { [weak content = self.content] in content?.focusedPaneView?.focusTerminal() }
+        actions.rename.focusFallback = { [weak content = self.content] in content?.focusFocusedPane() }
         window.onFirstResponderChange = { [weak content] responder in
             content?.firstResponderDidChange(responder)
         }
         actions.focusPaneWhenShown = { [weak content] pane in content?.focusWhenShown(pane) }
-        actions.onNewSessionSheetEnded = { [weak newSessions] in newSessions?.check() }
-        content.onDisplayed = { [weak newSessions] in newSessions?.check() }
-        newSessions.isShowing = { [weak content] pane in content?.isShowing(pane) ?? false }
-        newSessions.canPresent = { [weak self] in self?.canPresentSheet ?? false }
+        actions.canPresentSheet = { [weak self] in
+            guard let self else { return false }
+            return Self.canPresentSheet(
+                isClosed: self.isClosed, isClosePending: self.isClosePending, fullScreenTarget: self.fullScreenTarget)
+        }
         let toolbar = NSToolbar(identifier: "WorkspaceToolbar")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
@@ -124,30 +122,14 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         restoreWindowState()
         observeTitles()
         observeGeometry()
-        newSessions.start()
     }
 
-    /// A quit is on its way (``AppDelegate/prepareForQuit()``): the New
-    /// Session sheet goes, its pane stays empty, and none comes up again
-    /// until ``resumeNewSessions()``.
-    func suspendNewSessionsForQuit() {
-        newSessions.isSuspended = true
-        actions.endNewSessionSheet()
-    }
-
-    /// The quit was cancelled: empty panes ask again.
-    func resumeNewSessions() {
-        guard newSessions.isSuspended else { return }
-        newSessions.isSuspended = false
-        newSessions.check()
-    }
-
-    /// Whether a sheet (the New Session dialog) may be put on the window
-    /// now: it is on screen, has no sheet, is not closing, and is not
-    /// entering or leaving full screen.
-    private var canPresentSheet: Bool {
-        guard let window, !isClosed, !isClosePending, fullScreenTarget == nil else { return false }
-        return window.isVisible && window.attachedSheet == nil && model.workspace(workspaceID) != nil
+    /// Whether a sheet (the New Session or Edit Favorite dialog) may be put
+    /// on the window: not while it is closing, nor while it is entering or
+    /// leaving full screen (`fullScreenTarget` set), where a sheet would
+    /// ride the transition.
+    nonisolated static func canPresentSheet(isClosed: Bool, isClosePending: Bool, fullScreenTarget: Bool?) -> Bool {
+        !isClosed && !isClosePending && fullScreenTarget == nil
     }
 
     @available(*, unavailable)
@@ -721,7 +703,6 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         finishFullScreenTransition()
         reportOpenState()
         fullScreenSteps?.transitionEnded(self)
-        newSessions.check()
     }
 
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
@@ -742,7 +723,6 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         finishFullScreenTransition()
         reportOpenState()
         fullScreenSteps?.transitionEnded(self)
-        newSessions.check()
     }
 
     func windowDidFailToExitFullScreen(_ window: NSWindow) {
@@ -772,23 +752,12 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         reportOpenState()
     }
 
-    /// Shown (again, after menu bar mode too) or brought forward: an empty
-    /// pane waiting for the New Session dialog gets it now.
-    func windowDidBecomeKey(_ notification: Notification) {
-        newSessions.check()
-    }
-
-    /// A sheet (a close question, or the New Session dialog) has gone: the
-    /// next empty pane may be asked about.
-    func windowDidEndSheet(_ notification: Notification) {
-        newSessions.check()
-    }
-
     func windowWillClose(_ notification: Notification) {
         // AppKit sends the full-screen exit callbacks (and a resize) after
         // this when a full-screen window closes; none may report it open.
         isClosed = true
-        newSessions.stop()
+        // A New Session or Edit Favorite sheet goes with its window.
+        actions.endNewSessionSheet()
         content.stop()
         titleTask?.cancel()
         titleTask = nil

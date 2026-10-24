@@ -48,8 +48,8 @@ final class WorkspaceActions {
     // MARK: Creating
 
     /// A new tab in `group`, or in this workspace's selected group. Its
-    /// pane starts empty and asks for its session (DESIGN §8, "New
-    /// sessions"; until step 10c through ``NewSessionPresenter``).
+    /// pane starts empty and shows the New Session chooser (DESIGN §8, "New
+    /// sessions").
     func newTab(in group: TabGroupID? = nil) {
         noteFocusedSession(beforeCreatingIn: group.flatMap { model.workspaceID(containing: $0) })
         if let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID {
@@ -98,76 +98,158 @@ final class WorkspaceActions {
     var showSettings: (SettingsWindowController.Tab) -> Void = { _ in }
     /// Gives keyboard focus to a pane's terminal once it is on screen.
     var focusPaneWhenShown: (PaneID) -> Void = { _ in }
-    /// Called when the New Session sheet has gone (started, cancelled or
-    /// dismissed), so the next empty pane can be asked about.
-    var onNewSessionSheetEnded: () -> Void = {}
+    /// Whether the window can take a sheet now, besides having none: the
+    /// window controller refuses while the window is closing or entering
+    /// or leaving full screen (``WorkspaceWindowController/canPresentSheet(isClosed:isClosePending:fullScreenTarget:)``).
+    /// The chooser's New Session… and Return then do nothing.
+    var canPresentSheet: () -> Bool = { true }
+
+    /// The sheet that is up (New Session, or Edit Favorite from the
+    /// chooser), with its form.
+    private var sheet: NSViewController?
+    /// The form of the sheet that is up, if one is.
+    private(set) var newSessionForm: NewSessionForm?
+    /// Ends the sheet when what it is about goes away.
+    private var sheetWatch: Task<Void, Never>?
 
     /// The pane whose New Session sheet is up, if one is.
-    private(set) var newSessionPane: PaneID?
-    private var newSessionSheet: NSViewController?
-    /// The form of the sheet that is up.
-    private(set) var newSessionForm: NewSessionForm?
+    var newSessionPane: PaneID? {
+        if case .newSession(let pane)? = newSessionForm?.mode { pane } else { nil }
+    }
 
     /// The New Session dialog for the empty pane `paneID`, as a sheet on
-    /// this window (DESIGN §8). Start starts the session there (saving a
-    /// favorite first when asked) and focuses the pane; Cancel closes the
-    /// pane like a clean exit (``cancelNewSession(in:)``). Does nothing
-    /// while a sheet is up, without a window, or for a pane that is gone
-    /// or has a session.
+    /// this window (DESIGN §8), opened by the pane's chooser (its New
+    /// Session… button, or Return with no favorite selected). Start starts
+    /// the session there (saving a favorite first when asked) and focuses
+    /// the pane; Cancel closes the sheet only, and the pane keeps its
+    /// chooser. Does nothing while a sheet is up, without a window, or for
+    /// a pane that is gone or has a session.
     func newSession(in paneID: PaneID) {
-        guard newSessionPane == nil, let window, window.attachedSheet == nil,
-              let presenter = window.contentViewController,
-              model.pane(paneID)?.isEmpty == true
-        else { return }
-        rename.commit()
+        guard model.pane(paneID)?.isEmpty == true else { return }
         let directorySession = model.focusedSessionID(in: workspaceID) ?? lastFocusedSessionID
         let form = NewSessionForm(model: model, mode: .newSession(paneID), directorySession: directorySession)
-        let sheet = NSHostingController(rootView: NewSessionSheet(
+        presentSheet(form: form) { [weak self] in self?.startNewSession(form) }
+    }
+
+    /// The favorite's Edit… in the chooser: the dialog in edit mode, as a
+    /// sheet on this window. Save updates the favorite; nothing is started.
+    func editFavorite(_ id: FavoriteID) {
+        guard model.favorite(id) != nil else { return }
+        let form = NewSessionForm(model: model, mode: .editFavorite(id))
+        presentSheet(form: form) { [weak self, weak form] in
+            guard let self, let form, self.newSessionForm === form else { return }
+            form.save()
+            self.endNewSessionSheet()
+        }
+    }
+
+    private func presentSheet(form: NewSessionForm, onConfirm: @escaping @MainActor () -> Void) {
+        guard newSessionForm == nil, canPresentSheet(), let window, window.attachedSheet == nil,
+              let presenter = window.contentViewController
+        else { return }
+        rename.commit()
+        let controller = NSHostingController(rootView: NewSessionSheet(
             form: form,
             showHosts: { [weak self] in self?.showSettings(.hosts) },
-            onCancel: { [weak self] in self?.cancelNewSession(in: paneID) },
-            onConfirm: { [weak self] in self?.startNewSession(form) }))
-        sheet.sizingOptions = [.preferredContentSize]
-        newSessionPane = paneID
-        newSessionSheet = sheet
+            onCancel: { [weak self] in self?.endNewSessionSheet() },
+            onConfirm: onConfirm))
+        controller.sizingOptions = [.preferredContentSize]
+        sheet = controller
         newSessionForm = form
-        presenter.presentAsSheet(sheet)
+        watchSheet(form)
+        presenter.presentAsSheet(controller)
+    }
+
+    /// Takes the sheet down once its pane is closed, given a session
+    /// elsewhere, or moved to another workspace (its tab dragged there from
+    /// another window's sidebar; that workspace's window shows its
+    /// chooser), or its favorite is removed (in Settings).
+    private func watchSheet(_ form: NewSessionForm) {
+        sheetWatch?.cancel()
+        let model = model
+        let mode = form.mode
+        let workspaceID = workspaceID
+        sheetWatch = Task { [weak self] in
+            let stillWanted = Observations { () -> Bool in
+                switch mode {
+                case .newSession(let pane): WorkspaceActions.sheetIsWanted(for: pane, in: model, workspace: workspaceID)
+                case .editFavorite(let id): model.favorite(id) != nil
+                case .newFavorite: true
+                }
+            }
+            for await wanted in stillWanted where !wanted {
+                guard let self, self.newSessionForm === form else { return }
+                self.endNewSessionSheet()
+                return
+            }
+        }
+    }
+
+    /// Whether a New Session sheet for `pane` on `workspace`'s window still
+    /// has a purpose: the pane is still an empty pane of that workspace.
+    static func sheetIsWanted(for pane: PaneID, in model: AppModel, workspace: WorkspaceID) -> Bool {
+        model.emptyPaneIDs(in: workspace).contains(pane)
     }
 
     /// Start: the session begins in the pane, the sheet goes, and the
     /// pane's terminal takes keyboard focus once it is shown.
     func startNewSession(_ form: NewSessionForm) {
         guard case .newSession(let paneID) = form.mode, form.isValid else { return }
-        // The model first, so the pane is no longer empty when the next
-        // one is looked for.
         let started = form.start() != nil
-        endNewSessionSheet()
+        if newSessionForm === form { endNewSessionSheet() }
         guard started else { return }
         model.focus(pane: paneID)
         focusPaneWhenShown(paneID)
     }
 
-    /// Cancel: the sheet goes and the empty pane closes through the normal
-    /// close path with no question (nothing runs there), cascading to its
-    /// tab, tab group and workspace as a clean exit does, so a new window
-    /// whose dialog is cancelled closes again.
-    func cancelNewSession(in paneID: PaneID) {
-        if model.pane(paneID)?.isEmpty == true { closePane(paneID, confirm: false) }
-        endNewSessionSheet()
+    /// A favorite clicked (or chosen with Return) in the chooser of the
+    /// empty pane `paneID`: starts a session from its request there, focuses
+    /// the pane and gives its terminal keyboard focus once shown. Refused
+    /// (returns `nil`, nothing changes) when the favorite is gone or broken
+    /// (``AppModel/favoriteProblem(_:)``), or the pane is gone or already
+    /// has a session.
+    @discardableResult
+    func startFavorite(_ id: FavoriteID, in paneID: PaneID) -> SessionID? {
+        guard let favorite = model.favorite(id), model.favoriteProblem(favorite) == nil,
+              model.pane(paneID)?.isEmpty == true
+        else { return nil }
+        rename.commit()
+        guard let session = model.startSession(in: paneID, request: favorite.request) else { return nil }
+        model.focus(pane: paneID)
+        focusPaneWhenShown(paneID)
+        return session
     }
 
-    /// Takes the New Session sheet down, if one is up, without starting or
-    /// closing anything (its pane was closed or started elsewhere).
+    /// The favorite's Remove in the chooser: no question (a favorite is
+    /// only a recipe; sessions started from it are unaffected).
+    func removeFavorite(_ id: FavoriteID) {
+        model.removeFavorite(id)
+    }
+
+    /// The chooser's Cancel (and Escape): the empty pane closes through the
+    /// normal close path with no question (nothing runs there), cascading
+    /// to its tab, tab group and workspace as a clean exit does, so a new
+    /// window whose chooser is cancelled closes again. A New Session sheet
+    /// up for it goes too.
+    func cancelNewSession(in paneID: PaneID) {
+        if newSessionPane == paneID { endNewSessionSheet() }
+        if model.pane(paneID)?.isEmpty == true { closePane(paneID, confirm: false) }
+    }
+
+    /// Takes the sheet (New Session or Edit Favorite) down, if one is up,
+    /// without starting, saving or closing anything: Cancel, a quit
+    /// (``AppDelegate/prepareForQuit()``), the window closing, or what it
+    /// was about having gone.
     func endNewSessionSheet() {
-        guard newSessionPane != nil else { return }
-        let sheet = newSessionSheet
-        newSessionPane = nil
-        newSessionSheet = nil
+        sheetWatch?.cancel()
+        sheetWatch = nil
+        guard newSessionForm != nil else { return }
+        let sheet = sheet
+        self.sheet = nil
         newSessionForm = nil
         if let sheet, sheet.presentingViewController != nil {
             sheet.presentingViewController?.dismiss(sheet)
         }
-        onNewSessionSheetEnded()
     }
 
     // MARK: Renaming

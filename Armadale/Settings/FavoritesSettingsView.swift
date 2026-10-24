@@ -15,7 +15,10 @@ struct FavoritesSettingsView: View {
     /// Add Host…: switches to Settings › Hosts.
     let showHosts: @MainActor () -> Void
     @State private var selection: FavoriteID?
-    @State private var newFavorite: NewSessionForm?
+    /// The "New Favorite" sheet, presented the way the workspace window's
+    /// New Session sheet is (an `NSHostingController` sized to its
+    /// content), so it grows and shrinks with its rows.
+    @State private var newFavorite = NewFavoriteSheet()
 
     init(model: AppModel, showHosts: @escaping @MainActor () -> Void) {
         self.model = model
@@ -38,7 +41,7 @@ struct FavoritesSettingsView: View {
                 .listStyle(.bordered)
                 HStack(spacing: 2) {
                     Button {
-                        newFavorite = NewSessionForm(model: model, mode: .newFavorite)
+                        presentNewFavorite()
                     } label: {
                         Image(systemName: "plus").frame(width: 22, height: 18)
                     }
@@ -67,21 +70,15 @@ struct FavoritesSettingsView: View {
             }
         }
         // A quit ends the sheet (AppDelegate.prepareForQuit).
-        .onReceive(NotificationCenter.default.publisher(for: .armadaleWillQuit)) { _ in newFavorite = nil }
-        .sheet(item: $newFavorite) { form in
-            NewSessionSheet(
-                form: form, showHosts: showHosts,
-                onCancel: { newFavorite = nil },
-                onConfirm: {
-                    // Once: Return and the button could both arrive.
-                    guard newFavorite === form else { return }
-                    if let id = form.save() { selection = id }
-                    newFavorite = nil
-                })
-            // Shrinks again when rows go (SSH → Local); the SwiftUI sheet
-            // otherwise keeps its largest height.
-            .presentationSizing(.fitted)
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .armadaleWillQuit)) { _ in newFavorite.dismiss() }
+        .onDisappear { newFavorite.dismiss() }
+    }
+
+    private func presentNewFavorite() {
+        let select = $selection
+        newFavorite.present(
+            form: NewSessionForm(model: model, mode: .newFavorite), showHosts: showHosts,
+            onSaved: { id in select.wrappedValue = id })
     }
 
     private var emptyState: some View {
@@ -96,7 +93,7 @@ struct FavoritesSettingsView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 380)
-                Button("New Favorite") { newFavorite = NewSessionForm(model: model, mode: .newFavorite) }
+                Button("New Favorite") { presentNewFavorite() }
                     .padding(.top, 4)
             }
         }
@@ -120,8 +117,49 @@ struct FavoritesSettingsView: View {
     }
 }
 
-extension NewSessionForm: Identifiable {
-    nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+/// Settings › Favorites' "New Favorite" sheet: the New Session form in
+/// `.newFavorite` mode, presented with `presentAsSheet` on the Settings
+/// window from an `NSHostingController` whose preferred content size
+/// follows the form, as ``WorkspaceActions/newSession(in:)`` does. (A
+/// SwiftUI `.sheet` kept its first height: SSH's Host row did not fit.)
+@MainActor
+final class NewFavoriteSheet {
+    private var controller: NSViewController?
+    private var form: NewSessionForm?
+
+    /// Presents the form on the key window (Settings, where "+" was
+    /// clicked), unless a sheet is up. Save stores the favorite and reports
+    /// its ID; Cancel and Escape close.
+    func present(
+        form: NewSessionForm, showHosts: @escaping @MainActor () -> Void,
+        onSaved: @escaping @MainActor (FavoriteID) -> Void
+    ) {
+        guard controller == nil, let window = NSApp.keyWindow, window.attachedSheet == nil,
+              let presenter = window.contentViewController
+        else { return }
+        let hosting = NSHostingController(rootView: NewSessionSheet(
+            form: form, showHosts: showHosts,
+            onCancel: { [weak self] in self?.dismiss() },
+            onConfirm: { [weak self, weak form] in
+                // Once: Return and the button could both arrive.
+                guard let self, let form, self.form === form else { return }
+                let id = form.save()
+                self.dismiss()
+                if let id { onSaved(id) }
+            }))
+        hosting.sizingOptions = [.preferredContentSize]
+        controller = hosting
+        self.form = form
+        presenter.presentAsSheet(hosting)
+    }
+
+    /// Takes the sheet down, if it is up, saving nothing.
+    func dismiss() {
+        guard let controller else { return }
+        self.controller = nil
+        form = nil
+        controller.presentingViewController?.dismiss(controller)
+    }
 }
 
 /// One favorite in the list: its profile's icon, its name, and where it

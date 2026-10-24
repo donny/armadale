@@ -353,6 +353,14 @@ final class NewSessionForm {
         }
     }
 
+    /// Whether the sheet's Start or Save can be pressed: Start needs a valid
+    /// form (``isValid``); Save the looser ``canSave``, so a broken
+    /// favorite can still be renamed or otherwise edited from the chooser's
+    /// Edit…, as in Settings › Favorites.
+    var canConfirm: Bool {
+        if case .newSession = mode { isValid } else { canSave }
+    }
+
     /// Save: adds the new favorite or updates the edited one; nothing is
     /// started. Returns its ID, or `nil` when nothing was saved.
     @discardableResult

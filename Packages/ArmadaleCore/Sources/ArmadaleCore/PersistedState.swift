@@ -81,8 +81,10 @@ extension PersistedState {
     /// - Workspace, tab group, tab, pane, session and favorite IDs are
     ///   unique; later duplicates are dropped.
     /// - A pane without a session (an empty pane, DESIGN §8 "New sessions")
-    ///   is kept as it is. Favorites naming a missing host or profile are
-    ///   kept too (they are shown as broken).
+    ///   is kept as it is. A pane whose `sessionID` names a session that is
+    ///   not in `sessions` becomes such an empty pane (it shows the New
+    ///   Session chooser). Favorites naming a missing host or profile are
+    ///   kept (they are shown as broken).
     /// - A tab's layout has no repeated leaves; every leaf has a pane
     ///   record and every pane record is a leaf (orphans are dropped). A tab
     ///   left with no panes is dropped.
@@ -140,7 +142,8 @@ extension PersistedState {
                         issues.append("Dropped duplicate tab \(tab.id)")
                         continue
                     }
-                    if let fixed = Self.repair(tab, seenPanes: &seenPanes, issues: &issues) {
+                    if let fixed = Self.repair(
+                        tab, knownSessions: seenSessions, seenPanes: &seenPanes, issues: &issues) {
                         tabs.append(fixed)
                     } else {
                         issues.append("Dropped tab \(tab.id) with no valid panes")
@@ -176,7 +179,9 @@ extension PersistedState {
         return (state, issues)
     }
 
-    private static func repair(_ tab: Tab, seenPanes: inout Set<PaneID>, issues: inout [String]) -> Tab? {
+    private static func repair(
+        _ tab: Tab, knownSessions: Set<SessionID>, seenPanes: inout Set<PaneID>, issues: inout [String]
+    ) -> Tab? {
         var tab = tab
         guard var layout = tab.layout.removingDuplicateLeaves() else { return nil }
         if layout != tab.layout { issues.append("Removed repeated panes from the layout of tab \(tab.id)") }
@@ -189,6 +194,9 @@ extension PersistedState {
                 issues.append("Dropped pane \(pane.id) that is not in the layout of tab \(tab.id)")
             } else if !seenPanes.insert(pane.id).inserted {
                 issues.append("Dropped duplicate pane \(pane.id)")
+            } else if let session = pane.sessionID, !knownSessions.contains(session) {
+                issues.append("Emptied pane \(pane.id) whose session \(session) is missing")
+                panes.append(Pane(id: pane.id))
             } else {
                 panes.append(pane)
             }

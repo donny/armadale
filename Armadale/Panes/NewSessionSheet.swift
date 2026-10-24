@@ -6,7 +6,8 @@ import SwiftUI
 /// workspace window (``WorkspaceActions/newSession(in:)``), and in its
 /// favorite modes ("New Favorite", "Edit Favorite") a sheet in Settings ›
 /// Favorites. The rules are ``NewSessionForm``'s; this is only the view.
-/// Return presses Start (or Save) while the form is valid; Escape cancels.
+/// Return presses Start while the form is valid (Save while it can be
+/// saved, ``NewSessionForm/canConfirm``); Escape cancels.
 struct NewSessionSheet: View {
     @Bindable var form: NewSessionForm
     /// Add Host…: opens Settings › Hosts; the sheet stays.
@@ -41,7 +42,7 @@ struct NewSessionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(form.primaryButtonTitle, action: confirm)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!form.isValid)
+                .disabled(!form.canConfirm)
             }
             .padding(20)
         }
@@ -50,7 +51,7 @@ struct NewSessionSheet: View {
     }
 
     private func confirm() {
-        guard form.isValid else { return }
+        guard form.canConfirm else { return }
         onConfirm()
     }
 }

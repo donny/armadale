@@ -7,7 +7,7 @@ instructions are in `README.md`.
 
 ## Status (October 24, 2026)
 
-Steps 1–9 of the build order (`docs/DESIGN.md` §12) are implemented,
+Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
 
 | Step | Commit | What it added |
@@ -21,6 +21,7 @@ reviewed and committed on `main`:
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
 | 8 Menu bar | bf40d94 | quit question, General preference, accessory mode with status item, End Sessions and Quit |
 | 9 Ship | cb63ef7 | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
+| 10 New Session | 507a52a, 9168f0b, 91f50fb | empty panes, the New Session dialog, favorites, the chooser in every new pane (October 24, 2026) |
 
 The app icon ("Panes": a graphite tile with three panes, the top-right
 one lit coral) was added after step 7: `scripts/render-app-icon.swift`
@@ -171,8 +172,8 @@ the bundled persistence helper stays universal for Intel Mac hosts.
 
 ## Next
 
-**Step 10, New Session (owner's request, October 24, 2026): 10a and 10b
-done, 10c to go.** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
+**Step 10, New Session (owner's request, October 24, 2026): done in
+three sub-steps (10a 507a52a, 10b 9168f0b, 10c 91f50fb).** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
 and favorites", §2 (`Pane.sessionID` optional, `SessionOptions`,
 `SessionRequest`, `Favorite`, the new intents), §3, §10 and
 §12 (step 10, three sub-steps) hold the agreed design. In short: a new
@@ -251,6 +252,36 @@ screen and menu bar mode with a sheet up, a host deleted while the sheet
 is open, broken favorites in Settings, the host-removal count sentence,
 Codex options, a real SSH start. Tests: 604 at 10b (155 app + 223 core
 + 206 sessions + 13 + 7).
+
+**10c (the chooser) is committed:** every empty pane shows the New
+Session chooser (`EmptyPaneView` hosting `NewSessionPaneView`, decisions
+in the view-free `NewSessionChooser`): favorites (icon, name, host badge,
+directory; a broken one dimmed with its reason, inert, still editable),
+a hint when there are none, Cancel and New Session…; ↑/↓ select (broken
+ones skipped, ↑ from the first returns to none), Return starts the
+selection or opens the dialog, Escape closes the pane and cascades, only
+in the focused pane; right-click Edit… / Remove. The 10b interim
+presenter is gone; the dialog's Cancel returns to the chooser; a
+cancelled quit brings no sheet back; no sheet opens during a full-screen
+transition or while the window closes; a sheet ends when its pane leaves
+the window's workspace. Repair turns a pane whose session is missing into
+an empty pane. `scripts/check-quit.sh` scenarios: chooser up, normal
+(attaches to a session the helper creates first), fallback alert. A tab
+of only empty panes shows no status glyph (`StatusGlyph` takes nil).
+Both cards (`PaneCard`) go compact below 340 pt. Repair and drop logs go
+through `os.Logger` (subsystem `com.tinylittleapps.armadale`, category
+`state`, public) because NSLog is `<private>` in `log show` on macOS 27.
+Reviewed with two live passes (all scripted checks passed: quit script,
+every chooser path, Return/Escape routing in splits, favorites
+edit/remove/broken, SIGTERM with the dialog and the Edit Favorite sheet
+up, a tab with the dialog up dragged to another window, full screen,
+⌘Q counting). Not checked live: menu bar mode with a chooser pane,
+keypad Enter, hover, a scrolling favorites list, dark mode, ⇧⌘N / tab bar
+"+" / sidebar New Tab in 10c (they share the path), Add Host… from the
+Edit Favorite sheet, zoom with a chooser, the compact Disconnected and
+Unavailable cards. Known: compact chooser rows show only icon and name,
+so a remote favorite in a narrow pane does not show its host. Tests: 621 at 10c (169 app +
+226 core + 206 sessions + 13 + 7).
 
 Other candidates, each needing an owner decision:
 the Ghostty second renderer (below), the open items below, a public home

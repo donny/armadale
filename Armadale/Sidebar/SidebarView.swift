@@ -261,7 +261,7 @@ private struct TabRow: View {
         let sessions = tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
         let status = registry.glyphStatus(of: sessions)
         HStack(spacing: 6) {
-            StatusGlyph(status: status)
+            StatusGlyph(status: sessions.isEmpty ? nil : status)
             Label {
                 if let edit {
                     InlineRenameField(

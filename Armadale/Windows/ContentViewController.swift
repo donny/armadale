@@ -23,6 +23,10 @@ final class ContentViewController: NSViewController {
     private var shown: Display?
     /// The pane views on screen, by pane.
     private var visiblePanes: [PaneID: PaneView] = [:]
+    /// The empty panes on screen, each showing the New Session chooser.
+    /// Made when an empty pane is first shown, dropped once it has a session
+    /// or is no longer shown.
+    private var emptyPanes: [PaneID: EmptyPaneView] = [:]
     private var displayTask: Task<Void, Never>?
     /// Divider drags not yet written to the model.
     private var pendingRatios: (tab: TabID, layout: PaneLayout)?
@@ -76,6 +80,7 @@ final class ContentViewController: NSViewController {
         displayTask = nil
         shown = nil
         visiblePanes = [:]
+        emptyPanes = [:]
         paneContainer.splitTree.update(layout: nil) { _ in NSView() }
     }
 
@@ -146,23 +151,29 @@ final class ContentViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        focusedPaneView?.focusTerminal()
+        focusFocusedPane()
     }
 
     /// The pane view of the focused pane, if it is on screen. `nil` for an
-    /// empty pane (no session yet), which shows a plain view and is never
-    /// given keyboard focus.
+    /// empty pane (no session yet), which shows the New Session chooser.
     var focusedPaneView: PaneView? {
         shown.flatMap { visiblePanes[$0.focusedPaneID] }
     }
 
-    /// Called after a new display has been laid out (the New Session
-    /// sheet waits for its pane to be on screen).
-    var onDisplayed: (() -> Void)?
+    /// The chooser view of the focused pane, if it is an empty pane on
+    /// screen.
+    var focusedEmptyPane: EmptyPaneView? {
+        shown.flatMap { emptyPanes[$0.focusedPaneID] }
+    }
 
-    /// Whether `pane` is on screen in a window, laid out.
-    func isShowing(_ pane: PaneID) -> Bool {
-        !isStopped && view.window != nil && shown?.layout.contains(pane) == true
+    /// Gives the focused pane keyboard focus: its terminal (or the pane,
+    /// while a placeholder is up), or an empty pane's chooser.
+    func focusFocusedPane() {
+        if let pane = focusedPaneView {
+            pane.focusTerminal()
+        } else {
+            focusedEmptyPane?.focusPane()
+        }
     }
 
     /// A pane whose terminal takes keyboard focus once it is shown (a
@@ -197,24 +208,39 @@ final class ContentViewController: NSViewController {
             paneContainer.splitTree.update(layout: nil) { _ in NSView() }
             paneContainer.showsEmptyState = model.workspace(workspaceID)?.selectedTabGroup != nil
             visiblePanes = [:]
+            emptyPanes = [:]
             return
         }
         paneContainer.showsEmptyState = false
 
         var panes: [PaneID: PaneView] = [:]
+        var empties: [PaneID: EmptyPaneView] = [:]
         paneContainer.splitTree.update(layout: display.layout) { paneID in
-            guard let sessionID = display.sessions[paneID], let pane = registry.paneView(for: sessionID) else {
+            guard let sessionID = display.sessions[paneID] else {
+                let empty = emptyPanes[paneID] ?? makeEmptyPane(paneID)
+                empties[paneID] = empty
+                return empty
+            }
+            guard let pane = registry.paneView(for: sessionID) else {
                 return paneContainer.blankView(for: paneID)
             }
             panes[paneID] = pane
             return pane
         }
         visiblePanes = panes
+        // Choosers of panes that now have a session, or are not shown, go.
+        emptyPanes = empties
 
-        let isSplit = panes.count > 1
+        let isSplit = display.layout.leaves().count > 1
+        func style(of paneID: PaneID) -> PaneView.FocusStyle {
+            !isSplit ? .alone : (paneID == display.focusedPaneID ? .focused : .unfocused)
+        }
         for (paneID, pane) in panes {
             pane.onClosePane = { [weak self] in self?.actions.closePane(paneID, confirm: false) }
-            pane.focusStyle = !isSplit ? .alone : (paneID == display.focusedPaneID ? .focused : .unfocused)
+            pane.focusStyle = style(of: paneID)
+        }
+        for (paneID, empty) in empties {
+            empty.focusStyle = style(of: paneID)
         }
 
         // Lay out first so new sessions start at their pane's real size.
@@ -229,13 +255,19 @@ final class ContentViewController: NSViewController {
         let focusChanged = previous?.tabID != display.tabID || previous?.focusedPaneID != display.focusedPaneID
         let responderLost = view.window.map { $0.firstResponder === $0 || $0.firstResponder == nil } ?? false
         if focusChanged || responderLost {
-            focusedPaneView?.focusTerminal()
+            focusFocusedPane()
         }
         if let pending = pendingFocus, let pane = panes[pending] {
             pendingFocus = nil
             pane.focusTerminal()
         }
-        onDisplayed?()
+    }
+
+    /// The chooser view of the empty pane `paneID`.
+    private func makeEmptyPane(_ paneID: PaneID) -> EmptyPaneView {
+        EmptyPaneView(
+            chooser: NewSessionChooser(model: model, paneID: paneID, actions: actions),
+            settings: registry.settings)
     }
 
     // MARK: From the view to the model
@@ -244,9 +276,9 @@ final class ContentViewController: NSViewController {
     /// put it in a pane of this tab, so focus that pane in the model.
     func firstResponderDidChange(_ responder: NSResponder?) {
         guard let shown, let view = responder as? NSView else { return }
-        guard let (paneID, _) = visiblePanes.first(where: { view.isDescendant(of: $0.value) }),
-              paneID != shown.focusedPaneID
-        else { return }
+        let paneID = visiblePanes.first(where: { view.isDescendant(of: $0.value) })?.key
+            ?? emptyPanes.first(where: { view.isDescendant(of: $0.value) })?.key
+        guard let paneID, paneID != shown.focusedPaneID else { return }
         model.focus(pane: paneID)
     }
 
@@ -311,11 +343,10 @@ final class PaneContainerView: NSView {
         }
     }
 
-    /// Stands in for a pane whose session is missing (never expected: the
-    /// saved state is repaired at launch), or an empty pane (no session
-    /// yet): a plain view that never takes keyboard focus. Until step 10c
-    /// the New Session dialog is shown over it as a sheet
-    /// (``NewSessionPresenter``); 10c shows the chooser here instead.
+    /// Stands in for a pane whose session has no pane view (never
+    /// expected: the repair at launch turns a pane whose session is missing
+    /// into an empty pane, which shows the New Session chooser): a plain
+    /// view that never takes keyboard focus.
     func blankView(for paneID: PaneID) -> NSView {
         if let view = blankViews[paneID] { return view }
         let view = NSView()

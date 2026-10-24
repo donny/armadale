@@ -2,7 +2,13 @@ import AppKit
 import ArmadaleCore
 import ArmadaleSessions
 import Observation
+import os
 import UserNotifications
+
+/// Launch repairs and housekeeping counts, readable in `log show` (NSLog's
+/// arguments are redacted as `<private>` there on macOS 27): subsystem
+/// `com.tinylittleapps.armadale`, category `state`.
+private let stateLog = Logger(subsystem: "com.tinylittleapps.armadale", category: "state")
 
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
@@ -100,11 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if droppedWorkspaces > 0 {
-            NSLog("Armadale: dropped %d closed workspace(s) with no tab groups from the saved layout", droppedWorkspaces)
+            stateLog.notice(
+                "Armadale: dropped \(droppedWorkspaces, privacy: .public) closed workspace(s) with no tab groups from the saved layout")
         }
         let (repaired, issues) = state.repaired()
         if !issues.isEmpty {
-            NSLog("Armadale: repaired saved layout: %@", issues.joined(separator: "; "))
+            stateLog.notice("Armadale: repaired saved layout: \(issues.joined(separator: "; "), privacy: .public)")
             state = repaired
         }
 
@@ -304,7 +311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         guard let runtime = zmxRuntime else { return }
         let closed = registry.closeLocalSessionsThatEndedCleanly(recordedIn: runtime)
         if !closed.isEmpty {
-            NSLog("Armadale: closed %d pane(s) whose sessions exited cleanly while Armadale was not running", closed.count)
+            stateLog.notice(
+                "Armadale: closed \(closed.count, privacy: .public) pane(s) whose sessions exited cleanly while Armadale was not running")
         }
     }
 
@@ -324,15 +332,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let killed = await OrphanReclaimer.reclaim(
                 live: live, referenced: referenced, stateLoadedCleanly: stateLoadedCleanly, backend: backend)
             if !killed.isEmpty {
-                NSLog("Armadale: ended %d session(s) that no pane refers to any more", killed.count)
+                stateLog.notice("Armadale: ended \(killed.count, privacy: .public) session(s) that no pane refers to any more")
             }
             let removed = runtime.collectGarbageLogs(live: live.subtracting(killed), referenced: referenced)
             if !removed.isEmpty {
-                NSLog("Armadale: removed %d log file(s) of ended sessions", removed.count)
+                stateLog.notice("Armadale: removed \(removed.count, privacy: .public) log file(s) of ended sessions")
             }
             let exitFiles = runtime.collectGarbageExitStatuses(live: live.subtracting(killed), referenced: referenced)
             if !exitFiles.isEmpty {
-                NSLog("Armadale: removed %d exit file(s) of ended sessions", exitFiles.count)
+                stateLog.notice("Armadale: removed \(exitFiles.count, privacy: .public) exit file(s) of ended sessions")
             }
         }
     }
@@ -391,31 +399,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     /// Before AppKit's `terminate(_:)` (``ArmadaleApplication``), which does
-    /// nothing while a sheet is attached: every window's New Session sheet
-    /// is taken down without closing its pane (saved empty, it asks again at
-    /// the next launch) and no new one comes up until the quit is cancelled;
-    /// a sheet in Settings (New Favorite, Configure…) is ended too.
+    /// nothing while a sheet is attached: every window's New Session or Edit
+    /// Favorite sheet is taken down without closing its pane (it keeps the
+    /// chooser, saved empty, and shows it again at the next launch); a sheet
+    /// in Settings (New Favorite, Configure…) is ended too. A cancelled quit
+    /// does not bring a sheet back: the pane's chooser is still there. The
+    /// chooser itself is a view in the pane, never a sheet, and holds
+    /// nothing up.
     func prepareForQuit() {
-        for controller in windowControllers.values { controller.suspendNewSessionsForQuit() }
-        if let window = settingsWindowController?.window, let sheet = window.attachedSheet {
+        Self.endSheetsForQuit(
+            workspaceWindows: Array(windowControllers.values), settingsWindow: settingsWindowController?.window)
+    }
+
+    /// ``prepareForQuit()``'s work, separate so it can be tested: ends the
+    /// New Session or Edit Favorite sheet of every workspace window, and
+    /// any sheet on the Settings window (posting ``Notification/Name/armadaleWillQuit``
+    /// first, so its SwiftUI state lets go of it).
+    static func endSheetsForQuit(workspaceWindows: [WorkspaceWindowController], settingsWindow: NSWindow?) {
+        for controller in workspaceWindows { controller.actions.endNewSessionSheet() }
+        if let window = settingsWindow, let sheet = window.attachedSheet {
             NotificationCenter.default.post(name: .armadaleWillQuit, object: nil)
             if window.attachedSheet === sheet { window.endSheet(sheet) }
         }
     }
 
-    /// The quit was cancelled (asked, kept in the menu bar, or ending
-    /// sessions first): empty panes may ask again.
-    private func resumeAfterCancelledQuit() {
-        for controller in windowControllers.values { controller.resumeNewSessions() }
-    }
-
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let reply = terminateReply()
-        if reply == .terminateCancel { resumeAfterCancelledQuit() }
-        return reply
-    }
-
-    private func terminateReply() -> NSApplication.TerminateReply {
         // A name typed into an inline rename field counts (on every quit,
         // SIGTERM's included: its handler calls `terminate`), before the
         // state is saved in `applicationWillTerminate`.
@@ -616,9 +624,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         // A new workspace's empty pane (⌘N, the fresh one at launch), a
         // reopened one's fresh group and an empty pane restored from the
-        // state file ask for their session once the window is on screen
-        // (NewSessionPresenter). The dialog's directory comes from the
-        // window this one was made from.
+        // state file show the New Session chooser. The dialog's directory
+        // comes from the window this one was made from.
         let near = windowControllers.first { $0.value.window === reference }?.value
         let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
         controller.actions.lastFocusedSessionID = near.flatMap {

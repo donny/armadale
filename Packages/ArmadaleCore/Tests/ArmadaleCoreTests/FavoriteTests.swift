@@ -128,4 +128,22 @@ struct FavoriteTests {
         #expect(model.startSession(in: pane, request: try #require(model.favorite(onHost)).request) == nil)
         #expect(model.startSession(in: pane, request: mended.request) != nil)
     }
+
+    /// A favorite on a host whose destination is blank or unusable (a host
+    /// just added with "+") cannot start either, until the host is fixed.
+    @Test func aFavoriteOnAHostWithoutADestinationIsBroken() throws {
+        let model = model()
+        let host = model.addHost(name: "New")
+        let id = model.addFavorite(Favorite(name: "Remote", request: SessionRequest(location: .remote(host: host))))
+        #expect(model.favoriteProblem(try #require(model.favorite(id))) == "Host has no usable destination")
+        var fixed = try #require(model.host(host))
+        fixed.sshDestination = "-oProxyCommand=x"
+        model.updateHost(fixed)
+        #expect(model.favoriteProblem(try #require(model.favorite(id))) == AppModel.unusableHostDestination)
+        fixed.sshDestination = "me@box"
+        model.updateHost(fixed)
+        #expect(model.favoriteProblem(try #require(model.favorite(id))) == nil)
+        model.removeHost(host)
+        #expect(model.favoriteProblem(try #require(model.favorite(id))) == "Host removed", "removal is named first")
+    }
 }

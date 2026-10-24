@@ -84,54 +84,72 @@ struct SessionPlaceholderView: View {
     }
 
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.black.opacity(0.18))
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture(perform: focusPane)
-            VStack(spacing: 10) {
+        GeometryReader { proxy in
+            let compact = PaneCard.isCompact(width: proxy.size.width)
+            ZStack {
+                Rectangle()
+                    .fill(.black.opacity(0.18))
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: focusPane)
+                card(compact: compact, tiny: PaneCard.isTiny(width: proxy.size.width))
+                    .modifier(PaneCard(compact: compact))
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+    }
+
+    /// In a narrow pane (``PaneCard/isCompact(width:)``) the card is
+    /// compact: no big icon, a smaller heading, and the buttons stacked
+    /// when they do not fit side by side.
+    private func card(compact: Bool, tiny: Bool) -> some View {
+        VStack(spacing: compact ? 6 : 10) {
+            if !compact {
                 Image(systemName: symbol)
                     .font(.system(size: 34, weight: .regular))
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 2)
-                Text(heading)
-                    .font(.title2.weight(.semibold))
-                Text(message)
+            }
+            Text(heading)
+                .font(compact ? .headline : .title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.6)
+            Text(message)
+                .font(compact ? .callout : .body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if kind == .reconnecting {
+                ProgressView().controlSize(.small)
+            }
+            if let failure, kind != .unavailable, kind != .hostRemoved {
+                Text(failure)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                if kind == .reconnecting {
-                    ProgressView().controlSize(.small)
-                }
-                if let failure, kind != .unavailable, kind != .hostRemoved {
-                    Text(failure)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .textSelection(.enabled)
-                }
-                HStack(spacing: 12) {
-                    // An unavailable session cannot be ended from here: its
-                    // runtime is unreachable, and closing would orphan it.
-                    // One whose host was removed can only be closed (the
-                    // close confirmation says it is left running).
-                    if kind != .unavailable {
-                        Button("Close Pane", action: closePane)
-                    }
-                    if kind != .hostRemoved {
-                        Button(primaryTitle, action: primary)
-                            .keyboardShortcut(isDefaultActionEnabled ? .defaultAction : nil)
-                    }
-                }
-                .controlSize(.large)
-                .padding(.top, 8)
+                    .textSelection(.enabled)
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 26)
-            .frame(maxWidth: 440)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 18, y: 6)
-            .padding(24)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { buttons }
+                VStack(spacing: 6) { buttons }
+            }
+            .controlSize(tiny ? .small : (compact ? .regular : .large))
+            .padding(.top, compact ? 4 : 8)
+        }
+    }
+
+    @ViewBuilder private var buttons: some View {
+        // An unavailable session cannot be ended from here: its runtime is
+        // unreachable, and closing would orphan it. One whose host was
+        // removed can only be closed (the close confirmation says it is
+        // left running).
+        if kind != .unavailable {
+            Button("Close Pane", action: closePane)
+                .fixedSize()
+        }
+        if kind != .hostRemoved {
+            Button(primaryTitle, action: primary)
+                .keyboardShortcut(isDefaultActionEnabled ? .defaultAction : nil)
+                .fixedSize()
         }
     }
 }

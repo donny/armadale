@@ -2,11 +2,16 @@
 # Checks that SIGTERM (`pkill -x Armadale`, as at logout) quits Armadale
 # within 2 s, in three situations:
 #
-#   1. sheet up: a fresh launch, whose new workspace shows the New Session
-#      sheet (DESIGN section 8). AppKit refuses to terminate while a sheet
-#      is attached, so the app must take it down first; the pane is saved
-#      empty (state.json written after the signal, with a pane that has no
-#      session).
+#   1. chooser up: a fresh launch, whose new workspace's empty pane shows
+#      the New Session chooser (DESIGN section 8) and no sheet (the dialog
+#      opens only on request). The chooser must not hold the quit up; the
+#      pane is saved empty (state.json written after the signal, with a
+#      pane that has no session). Quitting with the dialog's sheet up is
+#      not driven here: the app ends every New Session and Edit Favorite
+#      sheet before AppKit's terminate (which refuses while a sheet is
+#      attached); `AppDelegate.endSheetsForQuit`, what the quit runs, is
+#      unit-tested (NewSessionChooserTests), the hook from
+#      `ArmadaleApplication.terminate` to it is not.
 #   2. normal: the pane saved by 1 is given a persistent session created
 #      beforehand with the helper, and the app attaches to it. No session
 #      client may outlive the app, and the session daemon must keep running.
@@ -79,41 +84,45 @@ print(up ? \"yes\" : \"no\")" 2>/dev/null | tail -1
 
 status=0
 
-# Whether Armadale (pid $1) shows a sheet: a second normal-level window
-# besides the workspace window.
-sheet_up() {
+# How many normal-level windows Armadale (pid $1) shows on screen: the
+# workspace window, plus one for a sheet.
+normal_windows() {
     /usr/bin/swift -e "
 import CoreGraphics
 let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-let count = windows.filter { (\$0[kCGWindowOwnerPID as String] as? Int32) == $1
-    && (\$0[kCGWindowLayer as String] as? Int) == 0 }.count
-print(count >= 2 ? \"yes\" : \"no\")" 2>/dev/null | tail -1
+print(windows.filter { (\$0[kCGWindowOwnerPID as String] as? Int32) == $1
+    && (\$0[kCGWindowLayer as String] as? Int) == 0 }.count)" 2>/dev/null | tail -1
 }
 
-# --- 1. Quit with the New Session sheet up ----------------------------------
+# --- 1. Quit with the New Session chooser up --------------------------------
 mkdir -p /tmp/armadale-quitcheck
 open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck "$APP"
 pid=""
-sheet="no"
+windows=0
 for _ in $(seq 1 30); do
     pid="$(pgrep -x Armadale || true)"
     if [ -n "$pid" ]; then
-        sheet="$(sheet_up "$pid")"
-        [ "$sheet" = "yes" ] && break
+        windows="$(normal_windows "$pid")"
+        [ "${windows:-0}" -ge 1 ] && break
     fi
     sleep 0.5
 done
-if [ "$sheet" != "yes" ]; then
-    echo "check-quit [sheet]: FAIL: the New Session sheet did not appear" >&2
+if [ "${windows:-0}" -lt 1 ]; then
+    echo "check-quit [chooser]: FAIL: the workspace window did not appear" >&2
     exit 1
 fi
-echo "check-quit [sheet]: New Session sheet is up (pid $pid)"
-sleep 1  # let the sheet settle
+sleep 1  # let the window settle; a sheet would have come up by now
+windows="$(normal_windows "$pid")"
+if [ "$windows" != "1" ]; then
+    echo "check-quit [chooser]: FAIL: $windows windows on screen; expected the workspace window alone (no sheet)" >&2
+    exit 1
+fi
+echo "check-quit [chooser]: workspace window with the chooser is up, no sheet (pid $pid)"
 signalled=$(( $(now_ms) / 1000 ))
 elapsed=$(terminate_and_time)
-echo "check-quit [sheet]: Armadale exited ${elapsed} ms after SIGTERM with the sheet up"
+echo "check-quit [chooser]: Armadale exited ${elapsed} ms after SIGTERM with the chooser up"
 if [ "$elapsed" -gt 2000 ]; then
-    echo "check-quit [sheet]: FAIL: slower than 2 s" >&2
+    echo "check-quit [chooser]: FAIL: slower than 2 s" >&2
     status=1
 fi
 saved=$(stat -f %m /tmp/armadale-quitcheck/state.json 2>/dev/null || echo 0)
@@ -124,9 +133,9 @@ panes = [p for w in state["workspaces"] for g in w["tabGroups"] for t in g["tabs
 sys.exit(0 if len(panes) == 1 and not panes[0].get("sessionID") else 1)
 PY
 then
-    echo "check-quit [sheet]: state saved on the way out, with the pane still empty"
+    echo "check-quit [chooser]: state saved on the way out, with the pane still empty"
 else
-    echo "check-quit [sheet]: FAIL: state.json not written after SIGTERM, or the pane is not empty" >&2
+    echo "check-quit [chooser]: FAIL: state.json not written after SIGTERM, or the pane is not empty" >&2
     status=1
 fi
 

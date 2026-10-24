@@ -10,8 +10,15 @@ struct RepairTests {
         Tab(layout: layout, panes: panes.map { Pane(id: $0, sessionID: session) }, focusedPaneID: focus, zoomedPaneID: zoom)
     }
 
+    /// The session every pane of ``tab(layout:panes:focus:zoom:)`` shows.
+    private var sessionRecord: Session {
+        Session(id: session, profileID: Profile.shell.id, launch: LaunchSpec(), workingDirectory: "/")
+    }
+
     private func state(with tabs: [Tab]) -> PersistedState {
-        PersistedState(workspaces: [Workspace(name: "W", tabGroups: [TabGroup(name: "G", tabs: tabs)])])
+        PersistedState(
+            workspaces: [Workspace(name: "W", tabGroups: [TabGroup(name: "G", tabs: tabs)])],
+            sessions: [sessionRecord])
     }
 
     @Test func validStateIsUnchanged() {
@@ -75,7 +82,7 @@ struct RepairTests {
             name: "Closed", tabGroups: [TabGroup(name: "Empty too", tabs: [])], window: WindowState(isOpen: false))
         let open = Workspace(name: "Open", tabGroups: [TabGroup(name: "Empty three", tabs: [])],
                              window: WindowState(isOpen: true))
-        let (repaired, issues) = PersistedState(workspaces: [mixed, closed, open]).repaired()
+        let (repaired, issues) = PersistedState(workspaces: [mixed, closed, open], sessions: [sessionRecord]).repaired()
         #expect(repaired.workspaces.map(\.id) == [mixed.id, open.id])
         #expect(repaired.workspaces[0].tabGroups.map(\.id) == [kept.id])
         #expect(repaired.workspaces[0].selectedTabGroupID == kept.id)
@@ -92,7 +99,7 @@ struct RepairTests {
         let group = TabGroup(name: "G", tabs: [tab(layout: .pane(p), panes: [p], focus: p)])
         let first = Workspace(name: "First", tabGroups: [group])
         let copy = Workspace(name: "Copy", tabGroups: [group], window: WindowState(isOpen: false))
-        let (repaired, issues) = PersistedState(workspaces: [first, copy]).repaired()
+        let (repaired, issues) = PersistedState(workspaces: [first, copy], sessions: [sessionRecord]).repaired()
         #expect(repaired.workspaces.map(\.id) == [first.id])
         #expect(issues.contains("Dropped duplicate tab group \(group.id)"))
         #expect(issues.contains("Dropped closed workspace \(copy.id) with no tab groups"))
@@ -128,5 +135,35 @@ struct RepairTests {
         let (repaired, _) = state(with: [tab(layout: layout, panes: [p, q], focus: p)]).repaired()
         let fixed = try #require(repaired.workspaces.first?.tabGroups.first?.tabs.first)
         #expect(fixed.layout.leaves() == [p, q])
+    }
+
+    /// A pane whose session is not in the file becomes an empty pane (it
+    /// shows the New Session chooser), logged; its tab, layout and focus
+    /// stay as they were, and its neighbours keep their sessions.
+    @Test func aPaneWhoseSessionIsMissingBecomesEmpty() throws {
+        let (p, q) = (PaneID.generate(), PaneID.generate())
+        let missing = SessionID.generate()
+        let layout = PaneLayout.split(axis: .horizontal, ratio: 0.5, first: .pane(p), second: .pane(q))
+        let original = Tab(
+            layout: layout, panes: [Pane(id: p, sessionID: session), Pane(id: q, sessionID: missing)],
+            focusedPaneID: q)
+        let (repaired, issues) = state(with: [original]).repaired()
+        let fixed = try #require(repaired.workspaces.first?.tabGroups.first?.tabs.first)
+        #expect(fixed.layout == layout)
+        #expect(fixed.focusedPaneID == q)
+        #expect(fixed.pane(p)?.sessionID == session)
+        #expect(fixed.pane(q)?.isEmpty == true)
+        #expect(issues == ["Emptied pane \(q) whose session \(missing) is missing"])
+        // Repairing again finds nothing more.
+        #expect(repaired.repaired().issues.isEmpty)
+    }
+
+    /// An empty pane is kept as it is, with no issue.
+    @Test func anEmptyPaneIsKept() {
+        let p = PaneID.generate()
+        let original = state(with: [Tab(layout: .pane(p), panes: [Pane(id: p)], focusedPaneID: p)])
+        let (repaired, issues) = original.repaired()
+        #expect(issues.isEmpty)
+        #expect(repaired == original)
     }
 }

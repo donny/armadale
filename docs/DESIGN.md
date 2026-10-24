@@ -426,7 +426,10 @@ persistence.
   top-level array (absent decodes as empty), and a session may carry
   `options` (absent: none). Older files decode unchanged. A build from
   before this change cannot read a file holding an empty pane; the owner
-  decided not to care, as Armadale has not been released.
+  decided not to care, as Armadale has not been released. The repair
+  after every load (below) also turns a pane whose `sessionID` names a
+  session missing from the file into an empty pane, logged, so it shows
+  the chooser (step 10c; before, it was kept and showed a blank view).
 - A field added after a schema version shipped decodes with a default
   when absent (`decodeIfPresent`), without a version bump, when the
   default is right for every file written before it (`Profile.attentionIntegration`,
@@ -1309,7 +1312,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
                 │   ├── surface.view                   terminal
                 │   ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
                 │   └── focus overlay                  focus border, no hit testing
-                └── NewSessionPaneView per empty leaf  the New Session chooser
+                └── EmptyPaneView per empty leaf       first responder when focused
+                    ├── NSHostingView<NewSessionPaneView> the New Session chooser
+                    └── focus overlay                  focus border, no hit testing
 ```
 
 - Window uses `titlebarAppearsTransparent`, `toolbarStyle = .unified`, and
@@ -1616,13 +1621,18 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   the `SessionRegistry`, which only knows sessions) shows the heading
   "New Session", the list of favorites (profile icon and name, host badge
   for a remote one, directory in secondary text; a broken favorite is
-  dimmed with its reason and does nothing), and two buttons: **Cancel** and
+  dimmed with its reason and does nothing; broken means its host or
+  profile was removed, or its host has no usable destination, which
+  `AppModel.favoriteProblem` reports as "Host has no usable destination",
+  as the dialog refuses Start for it), and two buttons: **Cancel** and
   **New Session…**. A single click on a favorite starts it in this pane.
   Keyboard: the empty pane is first responder when focused (as a pane with
   a placeholder is); ↑/↓ move a selection through the favorites, Return
   starts the selected favorite or, with none selected, opens the dialog,
   and Escape cancels. A right-click on a favorite offers **Edit…** (the
-  dialog in edit mode) and **Remove**. Cancel closes the pane through the
+  dialog in edit mode) and **Remove** (no question). With no favorites the
+  card says "No favorites yet. New Session… starts one and can save it as
+  a favorite." Cancel closes the pane through the
   normal close path with no confirmation (nothing is running), so when it
   was the tab's only pane the tab, group and workspace cascade as a clean
   exit does (section 4): New Workspace then Cancel closes the new window
@@ -1670,7 +1680,9 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   - Buttons **Cancel** and **Start** (Return; disabled while the form is
     invalid: SSH with no host, a directory containing NUL). Escape cancels.
     Start calls `startSession(in:request:)`; the pane's view becomes the
-    session's `PaneView` and takes keyboard focus. In **edit mode** (from
+    session's `PaneView` and takes keyboard focus. The dialog's Cancel
+    closes the sheet only: the pane keeps its chooser (only the chooser's
+    own Cancel closes the pane). In **edit mode** (from
     a favorite's Edit… or Settings › Favorites) the title is "Edit
     Favorite", the name field is always shown, the buttons are Cancel and
     **Save**, and nothing is started.
@@ -1690,42 +1702,106 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   here has a key equivalent.
 - **Persistence**: an empty pane is saved as a pane without a session and
   comes back as an empty pane showing the chooser (section 3).
-  The repair step keeps it. A pane whose `sessionID` names a missing
-  session is kept as before (the repair never compares panes with
-  sessions) and shows nothing, the blank view, until 10c, when the repair
-  should turn it into an empty pane that shows the chooser.
+  The repair step keeps it, and turns a pane whose `sessionID` names a
+  session missing from the file into such an empty pane (logged like the
+  other repairs: "Emptied pane … whose session … is missing"), so it shows
+  the chooser instead of a blank view.
 
-*Step 10b interim (removed by 10c).* Until the chooser exists, an empty
-pane is asked about with the New Session dialog itself. 10a's interim
-(`withInterimShells`, a local shell in every new pane) is gone: every
-intent that makes panes just makes them empty, and each workspace window
-has a `NewSessionPresenter` (`Windows/NewSessionPresenter.swift`, marked
-`Step 10b interim`) that presents `WorkspaceActions.newSession(in:)` for
-its empty panes, one sheet at a time. That covers every path the 10a
-interim did (⌘T, ⇧⌘N, ⌘D / ⇧⌘D, the tab bar's "+", the sidebar's New Tab
-and New Tab Group, ⌘N, the fresh workspace at launch, a reopened
-workspace's fresh group) and an empty pane restored from the state file,
-without a hook per path. The pane asked about is the focused pane of the
-selected tab if it is empty, else an empty pane on screen, else the first
-empty pane of the workspace, which is revealed first (its tab selected,
-focused, its tab unzoomed). The sheet is presented only once the window
-is on screen with no sheet, not closing and not in a full-screen
-transition, and the content has laid the pane out; the presenter looks
-again when the workspace's empty panes change, the content shows a new
-layout, the window becomes key (after menu bar mode too), a sheet of the
-window ends, or a full-screen transition ends. A sheet whose pane was
-closed, given a session elsewhere, or moved to another workspace (its tab
-dragged there; that workspace's window asks instead) is taken down, and a
-closing window takes its sheet down. **Cancel** (and Escape) closes the empty pane
-through `WorkspaceActions.closePane` with no question, cascading tab,
-group, workspace and window like a clean exit: ⌘N then Cancel closes the
-new window, and cancelling the fresh workspace at launch leaves the app
-with no workspace (its Dock icon stays; ⌘N or a Dock click makes one).
-**Start** starts the session, focuses the pane in the model and gives its
-terminal keyboard focus once it is shown
-(`ContentViewController.focusWhenShown`). An empty pane shows a plain view
-that never takes keyboard focus (`focusedPaneView` is `nil` for it, so
-⌘K and the rename fallback do nothing there).
+*Implementation (step 10c).* What the code decides beyond the above:
+
+- **Views.** `NewSessionPaneView` (`Panes/NewSessionPaneView.swift`,
+  SwiftUI) is the card; `EmptyPaneView` (`Panes/EmptyPaneView.swift`, an
+  `NSView` hosting it) is what `ContentViewController` puts in the split
+  tree for a pane without a session, one per empty pane on screen, made
+  when the pane is first shown and dropped once it has a session or is no
+  longer shown (switching tabs makes a fresh one, so a selection does not
+  survive a tab switch). The decisions are `NewSessionChooser`
+  (`Panes/NewSessionChooser.swift`, `@Observable`, no view code;
+  `NewSessionChooserTests`). `PaneContainerView.blankView(for:)` is left
+  only for a pane whose session has no pane view, which the repair makes
+  impossible. The card is the placeholder's (material, 14 pt corners,
+  shadow, at most 440 pt wide) over the terminal theme's background,
+  without the placeholder's dimming; the focus border is the same as a
+  terminal pane's. A split counts all its leaves for the border, so a
+  terminal next to an empty pane shows focus as in any split. In a pane
+  narrower than 340 pt the card is compact (`PaneCard`, shared with the
+  *Session Ended* placeholder: 12/8 pt padding instead of 32/24, no big
+  icon, a one-line heading that scales down, rows of icon and one-line
+  truncated name and reason without the host or directory line, buttons
+  labelled "New…" or stacked when the full labels do not fit, and small
+  below 180 pt), checked live at about 90, 165 and 185 pt.
+- **Rows.** Profile icon (a warning triangle for a broken favorite), name,
+  and below it, for a remote favorite, the tab bar's `HostBadge` with the
+  host's name, then the directory (local ones `~`-abbreviated, remote ones
+  as typed, `~` when blank); a broken one shows its reason in orange at
+  55 % opacity and ignores clicks, but keeps its context menu so Edit…
+  can repair it. The rows are a plain stack when they fit the pane and a
+  scroll view (following the selection) when they do not (`ViewThatFits`).
+  The pointer highlights a startable row; the selection is an accent tint.
+- **Keys.** They reach the chooser only through `EmptyPaneView.keyDown`
+  while the pane is first responder; neither button has a SwiftUI
+  keyboard shortcut (a deviation from the placeholder, which keeps its
+  default-action shortcut for the look), so Return or Escape typed
+  anywhere else (the sidebar, another pane) can never press them. New
+  Session… is drawn prominent (`.borderedProminent`) while Return would
+  press it: the pane takes keys and no favorite is selected. ↑/↓ move
+  through the favorites that can start, skipping broken ones, and
+  **clamp**: ↓ from no selection picks the first, ↑ from the first goes
+  back to no selection (where Return opens the dialog), neither end wraps.
+  A selection whose favorite is removed or breaks counts as none. Return
+  and keypad Enter (not repeats) and Escape act only when the pane is not
+  an unfocused pane of a split (`isKeyTarget`, from the focus style, as
+  `isDefaultActionEnabled` for the placeholder); other keys are ignored.
+- **Focus.** Every path that focuses a pane focuses an empty one too:
+  the model's focus changing (a new tab, split or window focuses its
+  empty pane), the window appearing, the rename fallback
+  (`ContentViewController.focusFocusedPane()`), a click on the pane
+  around the card (the chooser's clear background has the tap gesture
+  that focuses the pane and so the model; the hosting view covers the
+  whole pane, so `EmptyPaneView` itself takes no mouse down, and a click
+  on the card's own padding does nothing, as on the placeholder), and the window's
+  first responder being lost when a view is replaced. When the pane gets
+  its session the chooser view leaves the window and the terminal takes
+  focus (`focusPaneWhenShown` as well). ⌘K and other terminal commands
+  stay disabled (`focusedPaneView` is `nil` there).
+- **Actions.** `WorkspaceActions.startFavorite(_:in:)` resolves the
+  favorite, refuses a missing or broken one (`favoriteProblem`) or a pane
+  that is gone or has a session, starts it with `startSession(in:request:)`,
+  focuses the pane and its terminal. `editFavorite(_:)` presents the form
+  in `.editFavorite` mode as a sheet on the window (Save saves and closes;
+  Cancel closes). `removeFavorite(_:)` removes without a question.
+  `newSession(in:)` and `editFavorite(_:)` share one sheet slot: one sheet
+  at a time per window, none while another sheet (a close question) is up,
+  and none while the window is closing or entering or leaving full screen
+  (`WorkspaceWindowController.canPresentSheet`, as 10b's presenter did):
+  New Session… and Return then do nothing, and work again once the
+  transition has ended. A sheet is taken down by itself when its pane is
+  closed, given a session elsewhere, or leaves the window's workspace (its
+  tab dragged into another workspace from another window's sidebar; that
+  window shows its chooser), or its favorite is removed (in Settings), and
+  when its window closes. The Edit Favorite sheet's Save follows the
+  looser rule of Settings › Favorites (`NewSessionForm.canConfirm`:
+  `canSave` in the favorite modes, `isValid` for Start), so a broken
+  favorite can be renamed from the chooser while it stays broken.
+- **Nothing opens a sheet by itself.** The 10b interim
+  (`NewSessionPresenter`, which put the dialog on every empty pane) is
+  gone; the dialog opens only from New Session… or Return. At launch,
+  restored empty panes and the fresh workspace show the chooser.
+- **Quit.** The chooser is a view, so it never holds up a quit, and an
+  empty pane has no session, so the quit question and menu bar mode count
+  nothing for it. `ArmadaleApplication` still ends a New Session or Edit
+  Favorite sheet before AppKit's `terminate(_:)` (which refuses while a
+  sheet is attached; `AppDelegate.endSheetsForQuit`, tested with a sheet
+  of each kind in two windows; the hook from `terminate` to it is not
+  unit-tested); a cancelled quit no longer brings the sheet back
+  (deviation from 10b: the pane's chooser is still there, so there is
+  nothing to resume). `scripts/check-quit.sh`'s first scenario is now
+  "chooser up" (a fresh launch shows the window alone, no sheet; SIGTERM
+  quits within 2 s and saves the pane empty).
+- **Tabs.** An empty pane's tab is titled "New Session" (`displayTitle`)
+  and its status glyph's place is left empty in the tab bar and the
+  sidebar (`StatusGlyph` takes `nil` for a tab with no session; until 10c
+  such a tab showed the hollow "ended" circle).
 
 *Implementation (step 10b).* What the code decides beyond the above:
 
@@ -1787,9 +1863,14 @@ that never takes keyboard focus (`focusedPaneView` is `nil` for it, so
   harmless (the pane already has its session; Settings' New Favorite
   sheet saves once).
 - **Layout.** The sheet is a `.columns` form (it sizes to its content);
-  Settings › Favorites uses `.grouped` like Profiles and Hosts, and its
-  New Favorite sheet uses `.presentationSizing(.fitted)` so it shrinks
-  again when rows go. Choose… opens its folder panel as a sheet on the
+  Settings › Favorites uses `.grouped` like Profiles and Hosts. Its New
+  Favorite sheet is presented like the workspace dialog
+  (`NewFavoriteSheet`: an `NSHostingController` with
+  `sizingOptions = [.preferredContentSize]` and `presentAsSheet` on the
+  Settings window), so it grows and shrinks with its rows (measured live:
+  540×241 Local, 540×273 SSH, 241 again; step 10c). The SwiftUI `.sheet`
+  with `.presentationSizing(.fitted)` used in 10b never grew: SSH's Host
+  row squeezed the title's top margin. Choose… opens its folder panel as a sheet on the
   window the form is in, so the panel cannot outlive the dialog.
 - **Respawn** keeps the session's options on the fresh session too
   (`SessionController.respawn`), so every respawn composes them, not only
@@ -1805,16 +1886,6 @@ that never takes keyboard focus (`focusedPaneView` is `nil` for it, so
   on the host) adds how many favorites will be broken
   (`HostsSettingsView.removalMessage(sessions:favorites:)`); a host with
   no sessions is still removed without a question.
-- **Hand-off to 10c.** The chooser replaces `NewSessionPresenter`: delete
-  it and its wiring in `WorkspaceWindowController` (`newSessions`,
-  `canPresentSheet`, the `check()` calls in `windowDidBecomeKey`,
-  `windowDidEndSheet`, the full-screen ends and `content.onDisplayed`),
-  and show the chooser where `PaneContainerView.blankView(for:)` puts the
-  plain view (`ContentViewController.show`). Its New Session… button calls
-  `WorkspaceActions.newSession(in:)`, its Cancel
-  `WorkspaceActions.cancelNewSession(in:)`, and a favorite's Edit… the
-  form in `.editFavorite` mode. `NewSessionForm.Mode` already has
-  everything the chooser needs.
 
 ### App lifecycle
 
@@ -1842,14 +1913,17 @@ that never takes keyboard focus (`focusedPaneView` is `nil` for it, so
   `terminate(_:)` does nothing at all, without asking the delegate, while
   any window has a sheet attached (measured on macOS 27), so the app's
   `NSApplication` subclass (`ArmadaleApplication`, the principal class)
-  lets the delegate end every window's New Session sheet first, and any
-  sheet in Settings; the panes stay empty, are saved so and ask again at
-  the next launch, and no sheet comes back unless the quit is cancelled.
-  Every quit path goes through it (⌘Q, the quit Apple Event, SIGTERM, the
-  status menu's Quit and End Sessions and Quit); `check-quit.sh` has a
-  third case, the fresh launch's sheet up (its "normal" case now attaches
-  to a session the helper creates beforehand, since a fresh launch starts
-  none). A close confirmation sheet still holds a quit up, as before. Closing a pane kills its session after a confirmation if it is
+  lets the delegate end every window's New Session (or Edit Favorite)
+  sheet first, and any sheet in Settings; the panes stay empty, are saved
+  so and show the chooser again at the next launch. No sheet comes back
+  when the quit is cancelled (since step 10c; the pane's chooser is still
+  there). Every quit path goes through it (⌘Q, the quit Apple Event,
+  SIGTERM, the status menu's Quit and End Sessions and Quit).
+  `check-quit.sh` has a third case, the fresh launch's chooser up (step
+  10c; in 10b it was the sheet the interim put on every new pane), whose
+  window must show no sheet; its "normal" case attaches to a session the
+  helper creates beforehand, since a fresh launch starts none. A close
+  confirmation sheet still holds a quit up, as before. Closing a pane kills its session after a confirmation if it is
   still running or disconnected (configurable), and also kills a session
   that was never shown (restored but not yet attached). Closing a window
   keeps the workspace.
@@ -2478,7 +2552,9 @@ armadale/
 │   │                                ContentViewController
 │   ├── Sidebar/                     SidebarView (SwiftUI)
 │   ├── Tabs/                        TabBarView, StatusGlyph, HostBadge (SwiftUI)
-│   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView
+│   ├── Panes/                       PaneContainerView, SplitTreeView, PaneView, SessionPlaceholderView,
+│   │                                EmptyPaneView + NewSessionPaneView + NewSessionChooser (the
+│   │                                chooser), NewSessionSheet + NewSessionForm (the dialog)
 │   ├── Sessions/                    SessionRegistry (controllers per session, a backend per host,
 │   │                                RemoteSessionSupport), SessionStatus / CloseRisk,
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
@@ -2707,7 +2783,8 @@ Each step was built by an implementer agent, reviewed by a separate
 reviewer agent (code reading plus live keystroke checks of the running
 app), fixed, verified with the full build and test command, and committed
 on `main`. Steps 1–7 are done: d0c4587, 93019d8, f6cedbb, 76a4e4e,
-4d3ab86, 7302a12, dac547f (October 16–18, 2026); steps 8 and 9 on October 19.
+4d3ab86, 7302a12, dac547f (October 16–18, 2026); steps 8 and 9 on October 19;
+step 10 (added later at the owner's request) on October 24.
 The build order is complete.
 
 1. **Skeleton** — XcodeGen project, packages, `ArmadaleCore` model,
@@ -2741,8 +2818,8 @@ The build order is complete.
     stays usable; **10b** the New Session dialog and Settings › Favorites; **10c** the chooser in every new pane,
     Cancel's cascade, restore of empty panes, and the README; the repair
     then also turns a pane whose `sessionID` names a missing session into an
-    empty pane showing the chooser (until then it is kept and shows the
-    blank view).
+    empty pane showing the chooser (until then it was kept and showed the
+    blank view). *Done* (October 24, 2026).
 
 ---
 
@@ -2753,7 +2830,9 @@ The build order is complete.
   flag names are version facts and will rot; the chooser adds one more
   "pane without a terminal" state whose focus
   and first-responder behaviour must match the placeholder's (the Return
-  bug fixed on October 23, 2026 came from exactly that gap).
+  bug fixed on October 23, 2026 came from exactly that gap). Step 10c
+  makes the empty pane first responder on every focusing path and tests
+  it (`NewSessionChooserTests`); the live check is the reviewer's.
 - **zmx maturity.** It is pre‑1.0 (0.8.x) and built with a pre‑release Zig.
   Pinning a release and running a private copy limits exposure. There is
   **no version handshake** between client and daemon: the wire format is

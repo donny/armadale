@@ -151,7 +151,7 @@ private struct TabItemView: View {
         let status = registry.glyphStatus(of: sessions)
         let needsAttention = sessions.contains { registry.attention?.needsAttention($0) ?? false }
         HStack(spacing: 6) {
-            StatusGlyph(status: status)
+            StatusGlyph(status: sessions.isEmpty ? nil : status)
             HostBadge(hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions))
             if let edit {
                 InlineRenameField(rename: actions.rename, edit: edit, font: Self.font)

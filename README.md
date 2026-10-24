@@ -48,18 +48,27 @@ What works today:
   over its last screen, with the status or signal when it is known, and
   Respawn / Close Pane. **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended
   pane of a workspace.
-- **New sessions are chosen per pane** (step 10, in progress): every new
-  tab, tab group, window and split asks with the **New Session** dialog:
+- **New sessions are chosen per pane.** A new tab, tab group, window or
+  split never starts a shell by itself: its pane shows the **New Session
+  chooser**, a card listing your **favorites** (profile icon, name, host
+  and directory) with **Cancel** and **New Session…**. A click on a
+  favorite starts it in that pane; ↑/↓ select one and Return starts it
+  (with none selected, Return opens the dialog); Escape or Cancel closes
+  the pane, cascading like a clean exit (so ⌘N then Cancel closes the new
+  window). A right-click on a favorite offers Edit… and Remove; a favorite
+  whose host or profile was removed is dimmed with the reason until it is
+  edited or removed. **New Session…** opens the **New Session** dialog:
   Local or SSH (a saved host, with Add Host… opening Settings › Hosts), a
   directory (prefilled from the window's focused session), a profile, the
   agent options for Claude Code (skip permission checks, continue, model)
   and Codex (skip approvals and sandbox, sandbox mode, model), additional
-  arguments, and Add to Favorites. Start starts it; Cancel closes the new
-  pane (so ⌘N then Cancel closes the new window). **Settings › Favorites**
-  lists, edits, reorders and removes favorites. The chooser that lists
-  favorites in a new pane arrives in step 10c. File › New Tab with
-  Profile, File › New Tab on Host, the "+" button's menu and General's
-  default profile and directory are gone.
+  arguments, and Add to Favorites. Start starts it; its Cancel returns to
+  the chooser. **Settings › Favorites** lists, edits, reorders (the
+  chooser's order) and removes favorites. A pane still choosing is saved
+  as such and shows the chooser again after a relaunch; it needs no
+  attention and never holds up a quit. File › New Tab with Profile, File ›
+  New Tab on Host, the "+" button's menu and General's default profile and
+  directory are gone.
 - **Settings** (⌘,): General (close confirmation, quitting with running
   sessions, notifications), Appearance (font, size, light and dark themes,
   Ghostty theme import, cursor, renderer), Profiles, Hosts, Favorites,
@@ -169,9 +178,9 @@ ZMX_DIR=~/Library/Application\ Support/Armadale/run \
 
 `scripts/check-quit.sh /path/to/Armadale.app` checks quitting as logout
 does it, in three cases: it sends SIGTERM (`pkill -x Armadale`) and checks
-that the app is gone within 2 s. With the New Session sheet up (a fresh
-launch), the quit must not be held up by the sheet, and the state must be
-saved with the pane still empty. Normally (that pane given a session the
+that the app is gone within 2 s. With the New Session chooser up (a fresh
+launch, whose pane shows the chooser and no sheet), the quit must not be
+held up, and the state must be saved with the pane still empty. Normally (that pane given a session the
 helper creates beforehand, which the app attaches to), no session client
 may be left and the session daemon must still be alive. With the fallback
 alert up (it makes `<state dir>/bin` a regular file so the session runtime

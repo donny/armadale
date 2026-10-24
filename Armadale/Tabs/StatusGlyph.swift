@@ -1,20 +1,28 @@
 import SwiftUI
 
 /// The status glyph of a tab (tab bar and sidebar): running, pending,
-/// ended, disconnected, unavailable, or ◐ attention.
+/// ended, disconnected, unavailable, or ◐ attention. A tab with no session
+/// (only empty panes, showing the New Session chooser) has none: `nil`
+/// keeps the glyph's place empty.
 struct StatusGlyph: View {
-    let status: SessionStatus
+    let status: SessionStatus?
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: 12)
-            .help(help)
-            .accessibilityLabel(help)
+        if let status {
+            Image(systemName: Self.symbol(status))
+                .font(.system(size: Self.size(status), weight: .semibold))
+                .foregroundStyle(Self.color(status))
+                .frame(width: 12)
+                .help(Self.help(status))
+                .accessibilityLabel(Self.help(status))
+        } else {
+            Color.clear
+                .frame(width: 12, height: 1)
+                .accessibilityHidden(true)
+        }
     }
 
-    private var symbol: String {
+    private static func symbol(_ status: SessionStatus) -> String {
         switch status {
         case .running: "circle.fill"
         case .pending: "circle.dotted"
@@ -25,7 +33,7 @@ struct StatusGlyph: View {
         }
     }
 
-    private var size: CGFloat {
+    private static func size(_ status: SessionStatus) -> CGFloat {
         switch status {
         case .running, .pending, .ended: 7
         case .attention: 8
@@ -33,7 +41,7 @@ struct StatusGlyph: View {
         }
     }
 
-    private var color: Color {
+    private static func color(_ status: SessionStatus) -> Color {
         switch status {
         case .running: .green
         case .pending, .ended: .secondary
@@ -43,7 +51,7 @@ struct StatusGlyph: View {
         }
     }
 
-    private var help: String {
+    private static func help(_ status: SessionStatus) -> String {
         switch status {
         case .running: "Running"
         case .pending: "Starting"
