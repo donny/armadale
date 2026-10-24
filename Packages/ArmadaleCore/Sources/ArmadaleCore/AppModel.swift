@@ -31,14 +31,15 @@ public final class AppModel {
     public private(set) var sessions: [Session]
     public private(set) var hosts: [Host]
     public private(set) var profiles: [Profile]
+    /// Saved session recipes, in the user's order (Settings › Favorites).
+    public private(set) var favorites: [Favorite]
 
     /// Incremented by every intent that changes persisted state.
     public private(set) var changeCount = 0
 
-    /// Working directory for sessions created without an explicit one.
+    /// The home directory: what a blank (or `~`) local working directory
+    /// in a ``SessionRequest`` means. Injectable for tests.
     @ObservationIgnored public var defaultWorkingDirectory: String
-    /// Profile used when an intent does not name one.
-    @ObservationIgnored public var defaultProfileID: ProfileID = Profile.shell.id
     /// Called synchronously, inside the intent, with the sessions that just
     /// left the model (closed, or retired by a respawn), so state kept per
     /// session elsewhere (attention, the Dock badge) never outlives them.
@@ -60,12 +61,14 @@ public final class AppModel {
             profiles.append(builtIn)
         }
         self.profiles = profiles
+        self.favorites = state.favorites
         self.defaultWorkingDirectory = defaultWorkingDirectory
     }
 
     /// A snapshot suitable for ``StateStore``.
     public var persistedState: PersistedState {
-        PersistedState(workspaces: workspaces, sessions: sessions, hosts: hosts, profiles: profiles)
+        PersistedState(
+            workspaces: workspaces, sessions: sessions, hosts: hosts, profiles: profiles, favorites: favorites)
     }
 
     // MARK: Lookup
@@ -90,6 +93,11 @@ public final class AppModel {
             }
         }
         return nil
+    }
+
+    /// The pane record for `id`, in any tab.
+    public func pane(_ id: PaneID) -> Pane? {
+        tab(containing: id)?.pane(id)
     }
 
     /// The tab containing `pane`.
@@ -124,6 +132,15 @@ public final class AppModel {
     public func tab(_ id: TabID) -> Tab? {
         guard let path = path(ofTab: id) else { return nil }
         return workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
+    }
+
+    /// The panes of `workspace` without a session yet, in tab order and
+    /// each tab's layout order.
+    public func emptyPaneIDs(in workspace: WorkspaceID) -> [PaneID] {
+        guard let workspace = self.workspace(workspace) else { return [] }
+        return workspace.tabGroups.flatMap(\.tabs).flatMap { tab in
+            tab.layout.leaves().filter { tab.pane($0)?.isEmpty == true }
+        }
     }
 
     /// The sessions of every pane of `tab`, in layout order.
@@ -199,22 +216,24 @@ public final class AppModel {
     }
 
     /// The title shown for `tab`: its custom title, else the focused
-    /// session's title, else the focused session's profile name.
+    /// session's title, else the focused session's profile name. A focused
+    /// empty pane gives "New Session".
     public func displayTitle(for tab: Tab) -> String {
         if let custom = tab.customTitle, !custom.isEmpty { return custom }
-        guard let pane = tab.pane(tab.focusedPaneID), let session = session(pane.sessionID) else {
-            return "Tab"
-        }
+        guard let pane = tab.pane(tab.focusedPaneID) else { return "Tab" }
+        guard let sessionID = pane.sessionID else { return "New Session" }
+        guard let session = session(sessionID) else { return "Tab" }
         if !session.title.isEmpty { return session.title }
         return profile(session.profileID)?.name ?? "Shell"
     }
 
     // MARK: Workspaces
 
-    /// Creates a workspace with one tab group holding one tab, open in a window.
+    /// Creates a workspace with one tab group holding one tab with one
+    /// empty pane, open in a window. No session is created.
     @discardableResult
-    public func newWorkspace(name: String? = nil, profile: ProfileID? = nil) -> WorkspaceID {
-        let tab = makeTab(profile: profile ?? defaultProfileID, location: .local, workingDirectory: nil)
+    public func newWorkspace(name: String? = nil) -> WorkspaceID {
+        let tab = makeTab()
         let group = TabGroup(name: "Main", tabs: [tab])
         let workspace = Workspace(
             name: name ?? nextWorkspaceName(),
@@ -233,7 +252,7 @@ public final class AppModel {
     /// Deletes a workspace and all its sessions.
     public func deleteWorkspace(_ id: WorkspaceID) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
-        let sessionIDs = workspaces[index].tabGroups.flatMap(\.tabs).flatMap(\.panes).map(\.sessionID)
+        let sessionIDs = workspaces[index].tabGroups.flatMap(\.tabs).flatMap(\.panes).compactMap(\.sessionID)
         workspaces.remove(at: index)
         removeSessions(Set(sessionIDs))
         didChange()
@@ -255,14 +274,14 @@ public final class AppModel {
     }
 
     /// Marks a workspace's window open. A workspace with no tab groups gets
-    /// a fresh "Main" group with one tab of the default profile. (Closing
+    /// a fresh "Main" group with one tab of one empty pane. (Closing
     /// the last group deletes a workspace, and loading drops closed empty
     /// ones, so only a hand-edited file still holds one: open, or with no
     /// window state yet.)
     public func reopenWorkspace(_ id: WorkspaceID) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
         if workspaces[index].tabGroups.isEmpty {
-            let tab = makeTab(profile: defaultProfileID, location: .local, workingDirectory: nil)
+            let tab = makeTab()
             let group = TabGroup(name: "Main", tabs: [tab])
             workspaces[index].tabGroups = [group]
             workspaces[index].selectedTabGroupID = group.id
@@ -275,11 +294,12 @@ public final class AppModel {
 
     // MARK: Tab groups
 
-    /// Adds a tab group with one tab to a workspace and selects it.
+    /// Adds a tab group with one tab of one empty pane to a workspace and
+    /// selects it. No session is created.
     @discardableResult
     public func newTabGroup(in workspaceID: WorkspaceID, name: String? = nil) -> TabGroupID? {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return nil }
-        let tab = makeTab(profile: defaultProfileID, location: .local, workingDirectory: nil)
+        let tab = makeTab()
         let group = TabGroup(name: name ?? "Group \(workspaces[index].tabGroups.count + 1)", tabs: [tab])
         workspaces[index].tabGroups.append(group)
         workspaces[index].selectedTabGroupID = group.id
@@ -327,7 +347,7 @@ public final class AppModel {
         guard let path = path(ofTabGroup: id) else { return .notFound }
         let workspaceID = workspaces[path.workspace].id
         let group = workspaces[path.workspace].tabGroups.remove(at: path.tabGroup)
-        removeSessions(Set(group.tabs.flatMap(\.panes).map(\.sessionID)))
+        removeSessions(Set(group.tabs.flatMap(\.panes).compactMap(\.sessionID)))
         defer { didChange() }
         return groupRemoved(id, at: path)
             ?? .closedTabGroup(id, in: workspaceID)
@@ -335,17 +355,12 @@ public final class AppModel {
 
     // MARK: Tabs
 
-    /// Adds a tab to a tab group and selects it. `profile` defaults to
-    /// ``defaultProfileID``; `workingDirectory` to ``defaultWorkingDirectory``.
+    /// Adds a tab of one empty pane to a tab group and selects it. No
+    /// session is created.
     @discardableResult
-    public func newTab(
-        in tabGroupID: TabGroupID,
-        profile: ProfileID? = nil,
-        location: Location = .local,
-        workingDirectory: String? = nil
-    ) -> TabID? {
+    public func newTab(in tabGroupID: TabGroupID) -> TabID? {
         guard path(ofTabGroup: tabGroupID) != nil else { return nil }
-        let tab = makeTab(profile: profile ?? defaultProfileID, location: location, workingDirectory: workingDirectory)
+        let tab = makeTab()
         mutateTabGroup(tabGroupID) { group in
             group.tabs.append(tab)
             group.selectedTabID = tab.id
@@ -367,7 +382,7 @@ public final class AppModel {
         let workspaceID = workspaces[path.workspace].id
         let groupID = workspaces[path.workspace].tabGroups[path.tabGroup].id
         let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs.remove(at: path.tab)
-        removeSessions(Set(tab.panes.map(\.sessionID)))
+        removeSessions(Set(tab.panes.compactMap(\.sessionID)))
         defer { didChange() }
 
         guard workspaces[path.workspace].tabGroups[path.tabGroup].tabs.isEmpty else {
@@ -388,7 +403,7 @@ public final class AppModel {
         let group = workspaces[path.workspace].tabGroups[path.tabGroup]
         let others = group.tabs.filter { $0.id != id }
         guard !others.isEmpty else { return [] }
-        removeSessions(Set(others.flatMap(\.panes).map(\.sessionID)))
+        removeSessions(Set(others.flatMap(\.panes).compactMap(\.sessionID)))
         workspaces[path.workspace].tabGroups[path.tabGroup].tabs.removeAll { $0.id != id }
         workspaces[path.workspace].tabGroups[path.tabGroup].selectedTabID = id
         didChange()
@@ -472,19 +487,17 @@ public final class AppModel {
 
     // MARK: Panes
 
-    /// Splits `pane`, creating a new pane and session that inherit the
-    /// original session's profile, location and working directory. The new
-    /// pane is placed after the original and focused. Returns its ID.
+    /// Splits `pane`, creating a new empty pane (no session; it asks like
+    /// any new pane, DESIGN §8 "New sessions"). The new pane is placed after
+    /// the original and focused. Returns its ID. An empty pane can be split
+    /// too.
     @discardableResult
     public func splitPane(_ paneID: PaneID, axis: Axis) -> PaneID? {
         guard let path = path(ofPane: paneID) else { return nil }
         let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
-        guard let original = tab.pane(paneID), let session = session(original.sessionID) else { return nil }
+        guard tab.pane(paneID) != nil else { return nil }
 
-        let newSession = makeSession(
-            profile: session.profileID, location: session.location, workingDirectory: session.workingDirectory)
-        let newPane = Pane(sessionID: newSession.id)
-        sessions.append(newSession)
+        let newPane = Pane()
         mutateTab(tab.id) { tab in
             tab.layout = tab.layout.split(paneID, axis: axis, newPane: newPane.id)
             tab.panes.append(newPane)
@@ -494,7 +507,8 @@ public final class AppModel {
         return newPane.id
     }
 
-    /// Closes a pane and removes its session. Closing the last pane closes
+    /// Closes a pane and removes its session, if it has one (an empty pane
+    /// has nothing to end). Closing the last pane closes
     /// the tab, which may cascade further; see ``CloseResult``. If the pane
     /// was focused, focus moves to the nearest pane of its sibling branch.
     @discardableResult
@@ -624,7 +638,7 @@ public final class AppModel {
     /// Every session shown in `workspace`'s panes, in tab order.
     public func sessionIDs(in workspace: WorkspaceID) -> [SessionID] {
         guard let workspace = self.workspace(workspace) else { return [] }
-        return workspace.tabGroups.flatMap { $0.tabs.flatMap { $0.panes.map(\.sessionID) } }
+        return workspace.tabGroups.flatMap { $0.tabs.flatMap { $0.panes.compactMap(\.sessionID) } }
     }
 
     /// Replaces session `old` with `new` (a respawn): every pane bound to
@@ -712,22 +726,173 @@ public final class AppModel {
 
     /// Deletes a profile. Built-in profiles cannot be deleted (returns
     /// false). Sessions created from it keep running and keep their launch;
-    /// a respawn then reuses that launch. If it was ``defaultProfileID``,
-    /// the default goes back to the shell.
+    /// a respawn then reuses that launch. Favorites that use it are kept,
+    /// broken (``favoriteProblem(_:)``).
     @discardableResult
     public func deleteProfile(_ id: ProfileID) -> Bool {
         guard let index = profiles.firstIndex(where: { $0.id == id }), !profiles[index].isBuiltIn else { return false }
         profiles.remove(at: index)
-        if defaultProfileID == id { defaultProfileID = Profile.shell.id }
         didChange()
         return true
     }
 
-    /// The launch a respawn of `session` uses: its profile as it is now,
-    /// or, if the profile was deleted, the launch the session was created
-    /// with.
+    /// The launch a respawn of `session` uses: its profile as it is now
+    /// with the session's own ``Session/options``
+    /// (``Profile/launchSpec(options:)``), or, if the profile was deleted,
+    /// the launch the session was created with.
     public func launchForRespawn(of session: Session) -> LaunchSpec {
-        profile(session.profileID)?.launchSpec ?? session.launch
+        profile(session.profileID)?.launchSpec(options: session.options) ?? session.launch
+    }
+
+    // MARK: Starting sessions
+
+    /// Creates a session from `request` in the empty pane `paneID` and binds
+    /// the pane to it. Its launch is the profile's (``Profile/launchSpec(options:)``)
+    /// with the request's options, which are recorded on the session for
+    /// respawns. A blank or `~` directory is the home directory: locally
+    /// ``defaultWorkingDirectory`` (a leading `~/` is expanded against it
+    /// too), on a host `~`; any other directory is passed through as typed,
+    /// with surrounding whitespace trimmed (a remote one is the host's). Returns `nil`, changing nothing, when the pane is gone or
+    /// already has a session, or the request names a missing profile or host.
+    @discardableResult
+    public func startSession(in paneID: PaneID, request: SessionRequest) -> SessionID? {
+        guard let path = path(ofPane: paneID),
+              let pane = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].pane(paneID),
+              pane.isEmpty,
+              requestProblem(request) == nil,
+              let profile = profile(request.profileID)
+        else { return nil }
+        let session = Session(
+            location: request.location,
+            profileID: profile.id,
+            launch: profile.launchSpec(options: request.options),
+            workingDirectory: resolvedWorkingDirectory(request.workingDirectory, location: request.location),
+            options: request.options)
+        sessions.append(session)
+        let tab = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab]
+        if let index = tab.panes.firstIndex(where: { $0.id == paneID }) {
+            workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].panes[index].sessionID = session.id
+        }
+        didChange()
+        return session.id
+    }
+
+    /// Why `request` cannot start a session, or `nil` if it can: "Host
+    /// removed" when it names a host that is gone, "Profile removed" when
+    /// its profile is gone (the host is checked first).
+    public func requestProblem(_ request: SessionRequest) -> String? {
+        if case .remote(let hostID) = request.location, host(hostID) == nil { return "Host removed" }
+        if profile(request.profileID) == nil { return "Profile removed" }
+        return nil
+    }
+
+    private func resolvedWorkingDirectory(_ directory: String, location: Location) -> String {
+        let trimmed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch location {
+        case .local:
+            if trimmed.isEmpty || trimmed == "~" { return defaultWorkingDirectory }
+            if trimmed.hasPrefix("~/") {
+                let home = defaultWorkingDirectory.hasSuffix("/")
+                    ? String(defaultWorkingDirectory.dropLast()) : defaultWorkingDirectory
+                return home + trimmed.dropFirst()
+            }
+            return trimmed
+        case .remote:
+            return trimmed.isEmpty ? "~" : trimmed
+        }
+    }
+
+    // MARK: Favorites
+
+    public func favorite(_ id: FavoriteID) -> Favorite? {
+        favorites.first { $0.id == id }
+    }
+
+    /// The name the New Session dialog proposes for a favorite of
+    /// `request`: "<Profile> in <dir>" locally, "<Profile> on <host> in
+    /// <dir>" on a host, with the home directory shown as `~`.
+    public func proposedFavoriteName(for request: SessionRequest) -> String {
+        let profileName = profile(request.profileID)?.name ?? "Session"
+        let directory = abbreviatedDirectory(request.workingDirectory, location: request.location)
+        switch request.location {
+        case .local:
+            return "\(profileName) in \(directory)"
+        case .remote(let hostID):
+            let hostName = host(hostID)?.displayName ?? "Host"
+            return "\(profileName) on \(hostName) in \(directory)"
+        }
+    }
+
+    /// Adds `favorite` at the end of the list and returns its ID (a new one
+    /// if its own is taken). The name is trimmed; a blank one becomes
+    /// ``proposedFavoriteName(for:)``, made unique.
+    @discardableResult
+    public func addFavorite(_ favorite: Favorite) -> FavoriteID {
+        var favorite = favorite
+        if favorites.contains(where: { $0.id == favorite.id }) {
+            favorite = Favorite(name: favorite.name, request: favorite.request)
+        }
+        favorite.name = cleanedFavoriteName(favorite.name, request: favorite.request, excluding: nil)
+        favorites.append(favorite)
+        didChange()
+        return favorite.id
+    }
+
+    /// Replaces the stored favorite with the same ID by `favorite`, its
+    /// name cleaned up as ``addFavorite(_:)`` does. Unknown IDs are ignored.
+    public func updateFavorite(_ favorite: Favorite) {
+        guard let index = favorites.firstIndex(where: { $0.id == favorite.id }) else { return }
+        var updated = favorite
+        updated.name = cleanedFavoriteName(favorite.name, request: favorite.request, excluding: favorite.id)
+        guard updated != favorites[index] else { return }
+        favorites[index] = updated
+        didChange()
+    }
+
+    /// Removes a favorite. Sessions started from it are unaffected.
+    public func removeFavorite(_ id: FavoriteID) {
+        guard let index = favorites.firstIndex(where: { $0.id == id }) else { return }
+        favorites.remove(at: index)
+        didChange()
+    }
+
+    /// Moves a favorite to position `index`, counted *after* it has been
+    /// removed, and clamped.
+    public func moveFavorite(_ id: FavoriteID, to index: Int) {
+        guard let from = favorites.firstIndex(where: { $0.id == id }) else { return }
+        let favorite = favorites.remove(at: from)
+        let clamped = min(max(index, 0), favorites.count)
+        favorites.insert(favorite, at: clamped)
+        if clamped != from { didChange() }
+    }
+
+    /// Why `favorite` cannot be started: "Host removed", "Profile removed",
+    /// or `nil` when it can (``requestProblem(_:)``). A broken favorite is
+    /// kept until the user edits or removes it.
+    public func favoriteProblem(_ favorite: Favorite) -> String? {
+        requestProblem(favorite.request)
+    }
+
+    private func cleanedFavoriteName(_ name: String, request: SessionRequest, excluding id: FavoriteID?) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty else { return trimmed }
+        let base = proposedFavoriteName(for: request)
+        let names = Set(favorites.filter { $0.id != id }.map(\.name))
+        guard names.contains(base) else { return base }
+        var n = 2
+        while names.contains("\(base) \(n)") { n += 1 }
+        return "\(base) \(n)"
+    }
+
+    private func abbreviatedDirectory(_ directory: String, location: Location) -> String {
+        let trimmed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "~" }
+        guard case .local = location else { return trimmed }
+        let home = defaultWorkingDirectory.hasSuffix("/") && defaultWorkingDirectory.count > 1
+            ? String(defaultWorkingDirectory.dropLast()) : defaultWorkingDirectory
+        if trimmed == home { return "~" }
+        if home != "/", trimmed.hasPrefix(home + "/") { return "~" + trimmed.dropFirst(home.count) }
+        return trimmed
     }
 
     // MARK: Hosts
@@ -774,7 +939,8 @@ public final class AppModel {
 
     /// Removes a host. Sessions on it stay in their panes and are left
     /// running there: they become unreachable (the app shows them as
-    /// unavailable), never killed. Returns those sessions.
+    /// unavailable), never killed. Returns those sessions. Favorites on it
+    /// are kept, broken (``favoriteProblem(_:)``).
     @discardableResult
     public func removeHost(_ id: HostID) -> [SessionID] {
         guard let index = hosts.firstIndex(where: { $0.id == id }) else { return [] }
@@ -787,15 +953,6 @@ public final class AppModel {
     /// Sessions whose location is `host`, whether the host still exists or not.
     public func sessionIDs(onHost host: HostID) -> [SessionID] {
         sessions.filter { $0.location == .remote(host: host) }.map(\.id)
-    }
-
-    /// File › New Tab on Host: a tab in `tabGroupID` whose session runs on
-    /// `host`, in the home directory there, with `profile` (else the
-    /// default profile). `nil` if the group or host is unknown.
-    @discardableResult
-    public func newTab(in tabGroupID: TabGroupID, onHost host: HostID, profile: ProfileID? = nil) -> TabID? {
-        guard self.host(host) != nil else { return nil }
-        return newTab(in: tabGroupID, profile: profile, location: .remote(host: host), workingDirectory: "~")
     }
 
     private static func cleaned(_ host: Host) -> Host {
@@ -923,20 +1080,9 @@ public final class AppModel {
         if !ids.isEmpty { onSessionsRemoved?(ids) }
     }
 
-    private func makeSession(profile profileID: ProfileID, location: Location, workingDirectory: String?) -> Session {
-        let resolved = self.profile(profileID) ?? Profile.shell
-        return Session(
-            location: location,
-            profileID: resolved.id,
-            launch: resolved.launchSpec,
-            workingDirectory: workingDirectory ?? defaultWorkingDirectory)
-    }
-
-    /// Creates a one-pane tab and registers its session.
-    private func makeTab(profile: ProfileID, location: Location, workingDirectory: String?) -> Tab {
-        let session = makeSession(profile: profile, location: location, workingDirectory: workingDirectory)
-        sessions.append(session)
-        return Tab(pane: Pane(sessionID: session.id))
+    /// A tab of one empty pane.
+    private func makeTab() -> Tab {
+        Tab(pane: Pane())
     }
 
     private func nextWorkspaceName() -> String {

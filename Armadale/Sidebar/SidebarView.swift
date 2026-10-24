@@ -284,8 +284,8 @@ private struct TabRow: View {
     }
 
     private var icon: String {
-        guard let pane = tab.pane(tab.focusedPaneID),
-              let session = model.session(pane.sessionID),
+        guard let sessionID = tab.pane(tab.focusedPaneID)?.sessionID,
+              let session = model.session(sessionID),
               let profile = model.profile(session.profileID)
         else { return "terminal" }
         return profile.icon

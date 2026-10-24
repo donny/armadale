@@ -62,7 +62,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
         tabs.canPropagateSelectedChildViewControllerTitle = false
         for tab in Tab.allCases {
             let root: AnyView = switch tab {
-            case .general: AnyView(GeneralSettingsView(model: model, preferences: settings.preferences))
+            case .general: AnyView(GeneralSettingsView(preferences: settings.preferences))
             case .appearance: AnyView(AppearanceSettingsView(settings: settings))
             case .profiles: AnyView(ProfilesSettingsView(model: model))
             case .hosts: AnyView(HostsSettingsView(model: model, tools: hostTools))

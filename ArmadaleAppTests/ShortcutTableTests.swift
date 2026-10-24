@@ -53,7 +53,7 @@ struct ShortcutTableTests {
         #expect(!table.contains { $0.command.hasPrefix("Show Tab 3") })
         #expect(table.allSatisfy { !$0.menu.isEmpty && !$0.shortcut.isEmpty })
         #expect(table.first { $0.command == "New Tab" }?.menu == "File")
-        #expect(!table.contains { $0.command.contains("New Tab with Profile") }, "no key equivalent, not listed")
+        #expect(!table.contains { $0.command.contains("New Tab with Profile") }, "removed in step 10")
     }
 
     /// AppKit fills the Services menu and adds window-tiling commands to the

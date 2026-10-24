@@ -215,8 +215,10 @@ struct RegistryQuitTests {
     @Test func countsRestoredSessionsAndEndsThemAll() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let restored = Set(model.sessionIDs(in: workspace))
         #expect(restored.count == 2)
         let settings = AppSettings.forTesting()
@@ -234,6 +236,7 @@ struct RegistryQuitTests {
 
         // A tab created in this run and never shown has no process.
         _ = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         #expect(registry.runningSessionCount() == 2)
 
         let ended = await registry.endAllSessions()
@@ -249,8 +252,10 @@ struct RegistryQuitTests {
     @Test func aSecondPassCoversSessionsTheFirstDidNot() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         _ = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let restored = Set(model.sessionIDs(in: workspace))
         let first = try #require(restored.first)
         let settings = AppSettings.forTesting()
@@ -275,6 +280,7 @@ struct RegistryQuitTests {
     @Test func nothingRunningInAFreshModel() {
         let model = AppModel(defaultWorkingDirectory: "/")
         _ = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(

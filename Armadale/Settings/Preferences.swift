@@ -14,9 +14,10 @@ import TerminalSurface
 @Observable
 final class Preferences {
     /// UserDefaults keys. `confirmClosingRunningSession` predates this type.
+    /// (`defaultProfileID` and `defaultWorkingDirectory`, General's default
+    /// profile and directory until step 10, are left in the domain unread:
+    /// every new pane asks instead, DESIGN §8 "New sessions".)
     enum Key {
-        static let defaultProfileID = "defaultProfileID"
-        static let defaultWorkingDirectory = "defaultWorkingDirectory"
         static let confirmClosingRunningSession = "confirmClosingRunningSession"
         static let fontName = "fontName"
         static let fontSize = "fontSize"
@@ -64,8 +65,6 @@ final class Preferences {
     /// The suite `defaults` is, if it is not the standard domain.
     @ObservationIgnored let suiteName: String?
 
-    private var storedDefaultProfileID: String
-    private var storedDefaultWorkingDirectory: String
     private var storedConfirmClosing: Bool
     private var storedFontName: String
     private var storedFontSize: Double
@@ -84,8 +83,6 @@ final class Preferences {
     init(defaults: UserDefaults, suiteName: String? = nil) {
         self.defaults = defaults
         self.suiteName = suiteName
-        storedDefaultProfileID = defaults.string(forKey: Key.defaultProfileID) ?? Profile.shell.id.raw
-        storedDefaultWorkingDirectory = defaults.string(forKey: Key.defaultWorkingDirectory) ?? ""
         storedConfirmClosing = defaults.object(forKey: Key.confirmClosingRunningSession) as? Bool ?? true
         storedFontName = defaults.string(forKey: Key.fontName).flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultFontName
         storedFontSize = Self.clampFontSize(defaults.object(forKey: Key.fontSize) as? Double ?? Self.defaultFontSize)
@@ -104,37 +101,6 @@ final class Preferences {
     }
 
     // MARK: General
-
-    /// Profile of new tabs, tab groups and workspaces (⌘T, ⇧⌘N, ⌘N).
-    var defaultProfileID: ProfileID {
-        get { ProfileID(raw: storedDefaultProfileID) }
-        set { storedDefaultProfileID = newValue.raw; defaults.set(newValue.raw, forKey: Key.defaultProfileID) }
-    }
-
-    /// Resets ``defaultProfileID`` to the shell if it names none of
-    /// `profiles` (the profile was deleted). Returns whether it changed.
-    @discardableResult
-    func reconcileDefaultProfile(with profiles: [ProfileID]) -> Bool {
-        guard !profiles.contains(defaultProfileID) else { return false }
-        defaultProfileID = Profile.shell.id
-        return true
-    }
-
-    /// Where new sessions start, as typed; empty means the home folder.
-    var defaultWorkingDirectory: String {
-        get { storedDefaultWorkingDirectory }
-        set { storedDefaultWorkingDirectory = newValue; defaults.set(newValue, forKey: Key.defaultWorkingDirectory) }
-    }
-
-    /// ``defaultWorkingDirectory`` as an absolute path: `~` expanded, empty
-    /// meaning `home`.
-    func resolvedWorkingDirectory(home: String = NSHomeDirectory()) -> String {
-        let trimmed = defaultWorkingDirectory.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return home }
-        if trimmed == "~" { return home }
-        if trimmed.hasPrefix("~/") { return (home as NSString).appendingPathComponent(String(trimmed.dropFirst(2))) }
-        return trimmed
-    }
 
     /// Ask before closing a pane, tab or tab group whose process runs.
     var confirmClosingRunningSession: Bool {

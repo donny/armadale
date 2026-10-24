@@ -401,27 +401,14 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         actions.newTab()
     }
 
-    /// File › New Tab with Profile: the item's represented object is the
-    /// profile's ID.
-    @objc func newTabWithProfile(_ sender: Any?) {
-        guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
-        actions.newTab(profile: ProfileID(raw: raw))
-    }
-
-    /// File › New Tab on Host: the item's represented object is the host's ID.
-    @objc func newTabOnHost(_ sender: Any?) {
-        guard let raw = (sender as? NSMenuItem)?.representedObject as? String else { return }
-        actions.newTab(onHost: HostID(raw: raw))
-    }
-
-    /// ⌘D: a new shell right of the focused pane, in its directory.
+    /// ⌘D: a new pane right of the focused pane.
     @objc func splitRight(_ sender: Any?) {
-        model.splitFocusedPane(axis: .horizontal, in: workspaceID)
+        actions.splitFocusedPane(axis: .horizontal)
     }
 
-    /// ⇧⌘D: a new shell below the focused pane, in its directory.
+    /// ⇧⌘D: a new pane below the focused pane.
     @objc func splitDown(_ sender: Any?) {
-        model.splitFocusedPane(axis: .vertical, in: workspaceID)
+        actions.splitFocusedPane(axis: .vertical)
     }
 
     /// ⌘W: the last pane closes the tab, the last tab the group, the last
@@ -515,7 +502,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         let group = workspace?.selectedTabGroup
         let tab = group?.selectedTab
         switch menuItem.action {
-        case #selector(newTab(_:)), #selector(newTabWithProfile(_:)), #selector(newTabOnHost(_:)), #selector(newTabGroup(_:)),
+        case #selector(newTab(_:)), #selector(newTabGroup(_:)),
              #selector(deleteWorkspace(_:)):
             return workspace != nil
         case #selector(closePane(_:)):

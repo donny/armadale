@@ -18,8 +18,6 @@ struct PreferencesTests {
     @Test func defaultsWhenNothingIsStored() {
         withSuite { defaults, _ in
             let preferences = Preferences(defaults: defaults)
-            #expect(preferences.defaultProfileID == Profile.shell.id)
-            #expect(preferences.defaultWorkingDirectory.isEmpty)
             #expect(preferences.confirmClosingRunningSession)
             #expect(preferences.fontName == Preferences.defaultFontName)
             #expect(preferences.fontSize == Preferences.defaultFontSize)
@@ -37,8 +35,6 @@ struct PreferencesTests {
     @Test func everySettingPersistsAcrossInstances() {
         withSuite { defaults, _ in
             let preferences = Preferences(defaults: defaults)
-            preferences.defaultProfileID = Profile.codex.id
-            preferences.defaultWorkingDirectory = "~/src"
             preferences.confirmClosingRunningSession = false
             preferences.fontName = "Menlo-Regular"
             preferences.fontSize = 15
@@ -52,8 +48,6 @@ struct PreferencesTests {
             preferences.quitWithRunningSessions = .keepInMenuBar
 
             let reloaded = Preferences(defaults: defaults)
-            #expect(reloaded.defaultProfileID == Profile.codex.id)
-            #expect(reloaded.defaultWorkingDirectory == "~/src")
             #expect(!reloaded.confirmClosingRunningSession)
             #expect(reloaded.fontName == "Menlo-Regular")
             #expect(reloaded.fontSize == 15)
@@ -109,32 +103,21 @@ struct PreferencesTests {
         }
     }
 
-    @Test func aDeletedDefaultProfileResetsThePreference() {
+    /// General's default profile and directory are gone (step 10: every
+    /// new pane asks); values an older build stored are left unread and
+    /// untouched.
+    @Test func theOldDefaultProfileAndDirectoryKeysAreLeftUnread() {
         withSuite { defaults, _ in
+            defaults.set("builtin.codex", forKey: "defaultProfileID")
+            defaults.set("~/src", forKey: "defaultWorkingDirectory")
             let preferences = Preferences(defaults: defaults)
-            let model = AppModel(defaultWorkingDirectory: "/")
-            let id = model.newProfile()
-            preferences.defaultProfileID = id
-            #expect(!preferences.reconcileDefaultProfile(with: model.profiles.map(\.id)))
-            #expect(preferences.defaultProfileID == id)
-            model.deleteProfile(id)
-            #expect(preferences.reconcileDefaultProfile(with: model.profiles.map(\.id)))
-            #expect(preferences.defaultProfileID == Profile.shell.id)
-            #expect(Preferences(defaults: defaults).defaultProfileID == Profile.shell.id, "stored")
+            preferences.fontSize = 14
+            #expect(defaults.string(forKey: "defaultProfileID") == "builtin.codex")
+            #expect(defaults.string(forKey: "defaultWorkingDirectory") == "~/src")
         }
     }
 
-    @Test func workingDirectoryResolution() {
-        withSuite { defaults, _ in
-            let preferences = Preferences(defaults: defaults)
-            #expect(preferences.resolvedWorkingDirectory(home: "/Users/me") == "/Users/me")
-            preferences.defaultWorkingDirectory = "~"
-            #expect(preferences.resolvedWorkingDirectory(home: "/Users/me") == "/Users/me")
-            preferences.defaultWorkingDirectory = "~/src/armadale"
-            #expect(preferences.resolvedWorkingDirectory(home: "/Users/me") == "/Users/me/src/armadale")
-            preferences.defaultWorkingDirectory = "/tmp "
-            #expect(preferences.resolvedWorkingDirectory(home: "/Users/me") == "/tmp")
-        }
+    @Test func homeAbbreviation() {
         #expect(ProfileIcon.abbreviatingHome("/Users/me/x", home: "/Users/me") == "~/x")
         #expect(ProfileIcon.abbreviatingHome("/Users/meme", home: "/Users/me") == "/Users/meme")
     }

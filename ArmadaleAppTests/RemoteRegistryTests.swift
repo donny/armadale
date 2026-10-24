@@ -81,10 +81,11 @@ struct RemoteRegistryTests {
         _ = NSApplication.shared // panes make surfaces with NSApp's appearance
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let host = model.addHost(name: "VM", sshDestination: "vm")
         let group = model.workspace(workspace)?.selectedTabGroupID ?? TabGroupID(raw: "missing")
         let local = model.tabGroup(group)?.tabs.first?.id
-        let tab = model.newTab(in: group, onHost: host) ?? TabID(raw: "missing")
+        let tab = model.newTab(in: group, starting: Profile.shell.id, at: .remote(host: host), workingDirectory: "~") ?? TabID(raw: "missing")
         // Only the remote tab is left.
         if let local { model.closeTab(local) }
         let remote = model.sessionIDs(ofTab: tab).first ?? SessionID(raw: "missing")
@@ -225,21 +226,14 @@ struct RemoteRegistryTests {
         #expect((controller.activeBackend as? RemoteZmxBackend) === f.registry.remoteBackend(for: f.host))
     }
 
-    @Test func theHostMenuListsHostsAndNeverNamesTheRuntime() throws {
-        let menu = NSMenu()
-        MainMenu.fillHostMenu(menu, hosts: [
-            ArmadaleCore.Host(name: "Lima", sshDestination: "lima-default"),
-            ArmadaleCore.Host(name: "", sshDestination: "me@box"),
-        ])
-        #expect(menu.items.map(\.title) == ["Lima", "me@box", "", "Add Host…"])
-        #expect(menu.items[0].action == #selector(WorkspaceWindowController.newTabOnHost(_:)))
-        let empty = NSMenu()
-        MainMenu.fillHostMenu(empty, hosts: [])
-        #expect(empty.items.first?.title == "No Hosts")
-        #expect(empty.items.first?.isEnabled == false)
-
+    /// File › New Tab on Host and New Tab with Profile are gone (step 10:
+    /// every new pane asks, and the New Session dialog picks the host).
+    @Test func theFileMenuHasNoHostOrProfileSubmenus() throws {
         let main = MainMenu.make(installsSpecialMenus: false)
         let file = try #require(main.items.first { $0.title == "File" }?.submenu)
-        #expect(file.items.contains { $0.title == "New Tab on Host" && $0.submenu != nil })
+        #expect(!file.items.contains { $0.title == "New Tab on Host" })
+        #expect(!file.items.contains { $0.title == "New Tab with Profile" })
+        #expect(!file.items.contains { $0.submenu != nil }, "no submenus left in File")
+        #expect(file.items.prefix(3).map(\.title) == ["New Workspace", "New Tab Group", "New Tab"])
     }
 }

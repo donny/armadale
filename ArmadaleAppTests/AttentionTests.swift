@@ -92,10 +92,11 @@ struct AttentionCenterTests {
     private func makeFixture() throws -> Fixture {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "Work")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         model.renameTabGroup(group, to: "Agents")
         let shell = try #require(model.sessionIDs(in: workspace).first)
-        let tab = try #require(model.newTab(in: group, profile: Profile.claudeCode.id))
+        let tab = try #require(model.newTab(in: group, starting: Profile.claudeCode.id))
         let agent = try #require(model.sessionIDs(ofTab: tab).first)
         model.select(tab: tab)
         let settings = AppSettings.forTesting()
@@ -206,6 +207,7 @@ struct AttentionCenterTests {
         let f = try makeFixture()
         defer { f.settings.removeTestDefaults() }
         let other = f.model.newWorkspace(name: "Other")
+        f.model.fillEmptyPanes()
         let remote = try #require(f.model.sessionIDs(in: other).first)
         var shown: [WorkspaceID] = []
         f.center.showWorkspace = { id in
@@ -297,10 +299,12 @@ struct AttentionFromSurfaceTests {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let first = try #require(model.sessionIDs(in: workspace).first)
         let firstTab = try #require(model.place(of: first)).tab
         let secondTab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let second = try #require(model.sessionIDs(ofTab: secondTab).first)
         model.select(tab: secondTab)
 
@@ -343,6 +347,7 @@ struct AttentionFromSurfaceTests {
 
         // Switching to another tab keeps it; focusing its pane clears it.
         let thirdTab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         model.select(tab: thirdTab)
         try await Task.sleep(for: .milliseconds(50))
         #expect(center.needsAttention(first))

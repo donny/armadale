@@ -145,15 +145,22 @@ public struct Tab: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
-/// A rectangle in a tab's split tree. A pane always has exactly one session.
+/// A rectangle in a tab's split tree. A pane has exactly one session, or
+/// none yet: a new pane starts **empty** (`sessionID == nil`) until a
+/// session is started in it (``AppModel/startSession(in:request:)``;
+/// DESIGN §1, §8 "New sessions"). Saved without the key when empty, and a
+/// file without it decodes as empty.
 public struct Pane: Identifiable, Codable, Sendable, Hashable {
     public let id: PaneID
-    public var sessionID: SessionID
+    public var sessionID: SessionID?
 
-    public init(id: PaneID = .generate(), sessionID: SessionID) {
+    public init(id: PaneID = .generate(), sessionID: SessionID? = nil) {
         self.id = id
         self.sessionID = sessionID
     }
+
+    /// Whether no session has been started in this pane yet.
+    public var isEmpty: Bool { sessionID == nil }
 }
 
 /// Where a session runs.
@@ -196,6 +203,11 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
     /// sessions and for sessions not yet started. Optional, so state files
     /// written before it existed decode unchanged.
     public var runtimeVersion: String?
+    /// The per-session choices the session was started with
+    /// (``SessionOptions``), so a respawn keeps them
+    /// (``AppModel/launchForRespawn(of:)``). `nil` for sessions saved
+    /// before October 24, 2026, which respawn from their profile alone.
+    public var options: SessionOptions?
 
     public init(
         id: SessionID = .generate(),
@@ -205,7 +217,8 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
         workingDirectory: String,
         title: String = "",
         createdAt: Date = Date(),
-        runtimeVersion: String? = nil
+        runtimeVersion: String? = nil,
+        options: SessionOptions? = nil
     ) {
         self.id = id
         self.location = location
@@ -215,6 +228,102 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
         self.title = title
         self.createdAt = createdAt
         self.runtimeVersion = runtimeVersion
+        self.options = options
+    }
+}
+
+/// What the New Session dialog adds to a profile for one session (DESIGN
+/// §2, §8 "New sessions"). The flags each option becomes depend on the
+/// profile's agent (``AgentIntegration/arguments(for:)``); a profile
+/// without a program (the login shell) ignores all of it.
+public struct SessionOptions: Codable, Sendable, Hashable {
+    /// Claude Code: `--dangerously-skip-permissions`; Codex:
+    /// `--dangerously-bypass-approvals-and-sandbox`.
+    public var skipPermissions: Bool
+    /// Claude Code: `--continue`. Codex has no flag for it; ignored.
+    public var continueConversation: Bool
+    /// `--model <model>` for either agent; `nil` (or blank) is the agent's default.
+    public var model: String?
+    /// Codex: `--sandbox <mode>`; `nil` (or blank) is Codex's default.
+    public var sandbox: String?
+    /// Appended last, for any profile with a program.
+    public var additionalArguments: [String]
+
+    public init(
+        skipPermissions: Bool = false,
+        continueConversation: Bool = false,
+        model: String? = nil,
+        sandbox: String? = nil,
+        additionalArguments: [String] = []
+    ) {
+        self.skipPermissions = skipPermissions
+        self.continueConversation = continueConversation
+        self.model = model
+        self.sandbox = sandbox
+        self.additionalArguments = additionalArguments
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case skipPermissions, continueConversation, model, sandbox, additionalArguments
+    }
+
+    /// Every key may be absent (its default), so an option added later
+    /// decodes from older files.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        skipPermissions = try container.decodeIfPresent(Bool.self, forKey: .skipPermissions) ?? false
+        continueConversation = try container.decodeIfPresent(Bool.self, forKey: .continueConversation) ?? false
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        sandbox = try container.decodeIfPresent(String.self, forKey: .sandbox)
+        additionalArguments = try container.decodeIfPresent([String].self, forKey: .additionalArguments) ?? []
+    }
+}
+
+/// What starting a session needs: the New Session dialog's result, and a
+/// ``Favorite`` minus its name.
+public struct SessionRequest: Codable, Sendable, Hashable {
+    public var location: Location
+    public var profileID: ProfileID
+    /// `""` or `"~"` means the home directory (on a host, the host's);
+    /// remote paths are the host's and are passed through untouched.
+    public var workingDirectory: String
+    public var options: SessionOptions
+
+    public init(
+        location: Location = .local,
+        profileID: ProfileID = Profile.shell.id,
+        workingDirectory: String = "",
+        options: SessionOptions = SessionOptions()
+    ) {
+        self.location = location
+        self.profileID = profileID
+        self.workingDirectory = workingDirectory
+        self.options = options
+    }
+
+    private enum CodingKeys: String, CodingKey { case location, profileID, workingDirectory, options }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        location = try container.decode(Location.self, forKey: .location)
+        profileID = try container.decode(ProfileID.self, forKey: .profileID)
+        workingDirectory = try container.decodeIfPresent(String.self, forKey: .workingDirectory) ?? ""
+        options = try container.decodeIfPresent(SessionOptions.self, forKey: .options) ?? SessionOptions()
+    }
+}
+
+/// A saved recipe for a session: starting it creates a fresh session
+/// every time. Kept, and shown as broken, when its host or profile is gone
+/// (``AppModel/favoriteProblem(_:)``).
+public struct Favorite: Identifiable, Codable, Sendable, Hashable {
+    public let id: FavoriteID
+    public var name: String
+    public var request: SessionRequest
+
+    public init(id: FavoriteID = .generate(), name: String, request: SessionRequest) {
+        self.id = id
+        self.name = name
+        self.request = request
     }
 }
 

@@ -281,6 +281,48 @@ layout, in the order the user keeps them in Settings › Favorites; a
 favorite whose host or profile is gone is kept and shown as broken
 (`AppModel.favoriteProblem(_:)` says why) until edited or removed.
 
+*Implementation (step 10a).* What the code names and decides beyond the
+above:
+
+- `Pane.sessionID` is optional (`Pane.isEmpty`); `Pane()` is an empty
+  pane. `SessionOptions`, `SessionRequest`, `Favorite` and `FavoriteID` are
+  as listed; every `SessionOptions` key and a request's `workingDirectory`
+  and `options` may be absent when decoding. A blank `model` or `sandbox`
+  adds no flag.
+- The flag table is `OptionFlags` (`.claudeCode`, `.codex`, with Codex's
+  `sandboxModes` for the dialog's picker) on `AgentIntegration.optionFlags`;
+  `AgentIntegration.arguments(for:)` emits skip permissions, continue,
+  sandbox, model, in that order, and nothing for an option the agent has no
+  flag for. It was built in 10a with the model rather than in 10b.
+  `Profile.launchSpec(options:)` composes `launchArguments` + those flags +
+  `additionalArguments`; **a profile without a program (the login shell)
+  ignores every option, the additional arguments included** (a login shell
+  is started with no arguments), and `nil` options give `launchSpec`.
+- `startSession(in:request:)` resolves the directory: blank or `~` is
+  `defaultWorkingDirectory` locally and `~` on a host; locally a leading
+  `~/` is expanded against `defaultWorkingDirectory`; anything else is kept
+  as typed, with surrounding whitespace trimmed (locally and on a host). `requestProblem(_:)` is the check behind both `startSession`'s
+  refusal and `favoriteProblem(_:)` (host first, then profile).
+- Favorites: `addFavorite(_ favorite: Favorite) -> FavoriteID` (a taken ID
+  gets a new one; the name is trimmed; a blank one becomes
+  `proposedFavoriteName(for:)`, made unique with " 2", " 3"… among the
+  others, while a name the user typed is kept even if another favorite has
+  it); `updateFavorite` cleans the name the same way; `moveFavorite(_:to:)`
+  counts the index after removal, like `moveTabGroup`. `proposedFavoriteName`
+  shows the local home as `~` (`~/work`), never abbreviates a remote path,
+  and says "Session" / "Host" for a missing profile or host.
+- Lookups added: `pane(_:)`, `emptyPaneIDs(in:)` (a workspace's empty panes
+  in tab and layout order). An empty focused pane titles its tab "New
+  Session" (`displayTitle(for:)`). The repair also drops duplicate favorite
+  IDs and keeps broken favorites.
+- `ShellWords.split` splits like a shell, simplified: no variable
+  expansion, globbing or command substitution, and inside double quotes
+  only `\"` and `\\` are escapes (`"\$HOME"` stays `\$HOME`; a
+  backslash-newline is not joined). It closes an unterminated quote at the end of the text
+  (what was typed is kept rather than the line refused, since the field has
+  no error state), keeps a trailing lone backslash, makes `''` an empty
+  word, and expands nothing.
+
 *Step 5:* a session still records the `LaunchSpec` it was created with, so
 a running session is unaffected by later profile edits, but **Respawn uses
 the profile as it is at respawn time** (`AppModel.launchForRespawn(of:)`,
@@ -375,17 +417,16 @@ persistence.
 - Written atomically (temp file + rename), debounced 500 ms after any model
   change, and synchronously on quit.
 - Stores workspaces, selections, window frames, sessions, hosts, profiles
-  and (schema 2) favorites.
+  and (October 24, 2026) favorites.
   A window's frame is always its normal (windowed) frame; `isFullScreen`
   says whether it was in full screen (section 8, "App lifecycle").
-- **Schema 2** (October 24, 2026): a pane may have no `sessionID` (an empty
-  pane showing the New Session chooser; it is restored as one, and nothing
-  is started for it), `favorites` is a top-level array, and a session may
-  carry `options`. Every schema 1 file is a valid schema 2 document, so the
-  1 → 2 migration step only bumps the version. The bump exists for the
-  other direction: a build from before this change would fail to decode a
-  pane without a session and fall back to the backup, so it refuses the file
-  as "written by a newer Armadale" instead (`MigrationError.newerVersion`).
+- October 24, 2026, additive and still schema 1: a pane may have no
+  `sessionID` (an empty pane showing the New Session chooser; it is
+  restored as one, and nothing is started for it), `favorites` is a
+  top-level array (absent decodes as empty), and a session may carry
+  `options` (absent: none). Older files decode unchanged. A build from
+  before this change cannot read a file holding an empty pane; the owner
+  decided not to care, as Armadale has not been released.
 - A field added after a schema version shipped decodes with a default
   when absent (`decodeIfPresent`), without a version bump, when the
   default is right for every file written before it (`Profile.attentionIntegration`,
@@ -1648,9 +1689,30 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   `newTab(in:onHost:profile:)`. The Shortcuts table is unchanged: nothing
   here has a key equivalent.
 - **Persistence**: an empty pane is saved as a pane without a session and
-  comes back as an empty pane showing the chooser (section 3, schema 2).
-  The repair step keeps it; only a pane whose `sessionID` names a missing
-  session is still repaired as before.
+  comes back as an empty pane showing the chooser (section 3).
+  The repair step keeps it. A pane whose `sessionID` names a missing
+  session is kept as before (the repair never compares panes with
+  sessions) and shows nothing, the blank view, until 10c, when the repair
+  should turn it into an empty pane that shows the chooser.
+
+*Step 10a interim (removed by 10c).* Until the chooser exists the app
+never shows an empty pane: `WorkspaceActions.withInterimShells(model:near:_:)`
+wraps every intent that makes panes (`WorkspaceActions.newTab`,
+`newTabGroup`, the new `splitFocusedPane(axis:)` behind ⌘D / ⇧⌘D, and
+`AppDelegate.openWindow`, through which ⌘N, the fresh workspace at
+launch and a reopened workspace's fresh group pass) and then starts the
+shell profile, locally, in **every** empty pane of the model, a restored
+one included. The directory is that of the focused pane of the acting
+window's workspace as it was before the intent (its session's
+`workingDirectory`, which OSC 7 keeps current), or home when that pane has
+no session, runs on a host (its directory is the host's) or there is no
+such window. So a split of a remote pane is a local shell at home until
+10b, and no session can be started on a host or with another profile
+(Respawn is unchanged). File › New Tab on Host's Add Host… action
+(`AppDelegate.showHostsSettings`) went with the menu; 10b's dialog needs
+its own way to open Settings › Hosts. `WorkspaceActions.closePane` closes
+an empty pane at once, with no question and nothing to end, which 10c's
+Cancel relies on.
 
 ### App lifecycle
 
@@ -2559,22 +2621,24 @@ The build order is complete.
 10. **New Session** (owner's request, October 24, 2026; section 8, "New
     sessions"), in three sub-steps, each through the loop: **10a** the
     model (empty panes, `SessionOptions`, `Favorite`, `startSession`, the
-    favorite intents, `ShellWords`, schema 2) and the removals (the two
+    favorite intents, `ShellWords`, and, moved forward from 10b, the option
+    flag table) and the removals (the two
     File items, the "+" context menu, General's defaults), with the app
     still starting a shell in every new pane through `startSession` so it
-    stays usable; **10b** the New Session dialog, the option flag table,
-    and Settings › Favorites; **10c** the chooser in every new pane,
-    Cancel's cascade, restore of empty panes, and the README.
+    stays usable; **10b** the New Session dialog and Settings › Favorites; **10c** the chooser in every new pane,
+    Cancel's cascade, restore of empty panes, and the README; the repair
+    then also turns a pane whose `sessionID` names a missing session into an
+    empty pane showing the chooser (until then it is kept and shows the
+    blank view).
 
 ---
 
 ## 13. Risks and open points
 
-- **New Session (step 10).** A schema 2 file is refused by builds before
-  it (by design; the installed app must be updated before the test build
-  writes the owner's real state, which the isolated state directory already
-  guarantees). The Codex and Claude flag names are version facts and will
-  rot; the chooser adds one more "pane without a terminal" state whose focus
+- **New Session (step 10).** A state file holding an empty pane is not
+  readable by builds before it (accepted: unreleased). The Codex and Claude
+  flag names are version facts and will rot; the chooser adds one more
+  "pane without a terminal" state whose focus
   and first-responder behaviour must match the placeholder's (the Return
   bug fixed on October 23, 2026 came from exactly that gap).
 - **zmx maturity.** It is pre‑1.0 (0.8.x) and built with a pre‑release Zig.

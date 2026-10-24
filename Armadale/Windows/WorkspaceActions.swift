@@ -46,30 +46,67 @@ final class WorkspaceActions {
 
     // MARK: Creating
 
-    /// A new tab in `group`, or in this workspace's selected group, with
-    /// `profile` (else the default profile).
-    func newTab(in group: TabGroupID? = nil, profile: ProfileID? = nil) {
-        if let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID {
-            model.newTab(in: group, profile: profile)
-            showIfElsewhere(model.workspaceID(containing: group))
-        } else {
-            model.newTabGroup(in: workspaceID)
+    /// A new tab in `group`, or in this workspace's selected group. Its
+    /// pane starts empty; until step 10c it is given a shell at once
+    /// (``withInterimShells(model:near:_:)``).
+    func newTab(in group: TabGroupID? = nil) {
+        Self.withInterimShells(model: model, near: workspaceID) {
+            if let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID {
+                model.newTab(in: group)
+            } else {
+                model.newTabGroup(in: workspaceID)
+            }
         }
-    }
-
-    /// File › New Tab on Host: a tab on `host` (in its home directory, with
-    /// the default profile) in `group`, or this workspace's selected group.
-    func newTab(onHost host: HostID, in group: TabGroupID? = nil) {
-        guard let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID ?? model.newTabGroup(in: workspaceID)
-        else { return }
-        model.newTab(in: group, onHost: host)
-        showIfElsewhere(model.workspaceID(containing: group))
+        if let group { showIfElsewhere(model.workspaceID(containing: group)) }
     }
 
     func newTabGroup(in workspace: WorkspaceID? = nil) {
         let target = workspace ?? workspaceID
-        model.newTabGroup(in: target)
+        Self.withInterimShells(model: model, near: workspaceID) {
+            _ = model.newTabGroup(in: target)
+        }
         showIfElsewhere(target)
+    }
+
+    /// ⌘D / ⇧⌘D: splits the focused pane. The new pane starts empty (a
+    /// split no longer copies the pane's profile and directory); until step
+    /// 10c it is given a shell in the focused pane's directory.
+    func splitFocusedPane(axis: Axis) {
+        Self.withInterimShells(model: model, near: workspaceID) {
+            _ = model.splitFocusedPane(axis: axis, in: workspaceID)
+        }
+    }
+
+    // MARK: Step 10a interim
+
+    // Step 10a interim: replaced by the New Session chooser in 10c.
+    /// Runs `create`, an intent that may add empty panes (new workspace,
+    /// tab group, tab, split, a reopened workspace's fresh group), and then
+    /// starts a session in every empty pane of the model, as Armadale did
+    /// before step 10: the shell profile, on this Mac, in the directory of
+    /// the focused pane of `workspace` as it was *before* `create` (its
+    /// session's last known directory, which OSC 7 keeps current), or the
+    /// home directory when that pane has no session, is remote (its
+    /// directory is the host's) or there is no such workspace. Every path
+    /// that makes panes goes through here (``WorkspaceActions`` and
+    /// `AppDelegate.openWindow`), so the user never sees an empty pane
+    /// before the chooser exists. Returns what `create` returned.
+    @discardableResult
+    static func withInterimShells<Result>(
+        model: AppModel, near workspace: WorkspaceID?, _ create: () -> Result
+    ) -> Result {
+        let directory = workspace
+            .flatMap { model.focusedSessionID(in: $0) }
+            .flatMap { model.session($0) }
+            .flatMap { $0.location == .local ? $0.workingDirectory : nil } ?? ""
+        let result = create()
+        let request = SessionRequest(location: .local, profileID: Profile.shell.id, workingDirectory: directory)
+        for id in model.workspaces.map(\.id) {
+            for pane in model.emptyPaneIDs(in: id) {
+                model.startSession(in: pane, request: request)
+            }
+        }
+        return result
     }
 
     // MARK: Renaming
@@ -102,18 +139,20 @@ final class WorkspaceActions {
     // MARK: Closing
 
     /// Closes a pane (⌘W), killing its session; asks first if it may be
-    /// running (and confirmation is on) or cannot be reached.
+    /// running (and confirmation is on) or cannot be reached. An empty pane
+    /// (no session yet) has nothing to end and closes without asking.
     func closePane(_ paneID: PaneID, confirm: Bool) {
         rename.commit() // a name being typed counts, in the question too
-        guard let tab = model.tab(containing: paneID), let sessionID = tab.pane(paneID)?.sessionID else { return }
+        guard let pane = model.tab(containing: paneID)?.pane(paneID) else { return }
+        let sessionID = pane.sessionID
         let perform: @MainActor () -> Void = { [model, registry] in
             let result = model.closePane(paneID)
-            registry.close(sessionID)
+            if let sessionID { registry.close(sessionID) }
             if case .notFound = result {
                 NSLog("Armadale: pane %@ was already gone", paneID.raw)
             }
         }
-        guard confirm else { return perform() }
+        guard confirm, let sessionID else { return perform() }
         confirmClose(
             sessions: [sessionID], subject: .pane, removing: model.workspaceRemoved(byClosingPane: paneID),
             perform: perform)

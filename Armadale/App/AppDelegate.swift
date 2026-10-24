@@ -7,13 +7,11 @@ import UserNotifications
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let model: AppModel
     /// Preferences, themes and renderers.
     let settings: AppSettings
     private var settingsWindowController: SettingsWindowController?
-    private var preferencesTask: Task<Void, Never>?
-    private var profilesTask: Task<Void, Never>?
     /// Session controllers for every pane shown so far.
     private let registry: SessionRegistry
     /// Which sessions need attention; the Dock badge and notifications.
@@ -118,8 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         self.canSave = result.allowsSaving
         self.loadReport = report
         self.settings = AppSettings.shared
-        self.model = AppModel(state: state, defaultWorkingDirectory: settings.preferences.resolvedWorkingDirectory())
-        model.defaultProfileID = settings.preferences.defaultProfileID
+        self.model = AppModel(state: state, defaultWorkingDirectory: NSHomeDirectory())
         let sessions = Self.makeSessionBackend(for: state.sessions)
         self.zmxRuntime = sessions.runtime
         self.sessionSetupFailure = sessions.failure
@@ -137,26 +134,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         super.init()
         wireRegistry()
         wireAttention()
-        followGeneralPreferences()
-    }
-
-    /// The default profile and directory live in preferences; the model
-    /// uses them for every new tab, tab group and workspace. A deleted
-    /// default profile resets the preference to the shell.
-    private func followGeneralPreferences() {
-        let preferences = settings.preferences
-        let model = model
-        profilesTask = Task {
-            for await ids in Observations({ model.profiles.map(\.id) }) {
-                preferences.reconcileDefaultProfile(with: ids)
-            }
-        }
-        preferencesTask = Task {
-            for await (profile, _) in Observations({ (preferences.defaultProfileID, preferences.defaultWorkingDirectory) }) {
-                model.defaultProfileID = profile
-                model.defaultWorkingDirectory = preferences.resolvedWorkingDirectory()
-            }
-        }
     }
 
     private func wireRegistry() {
@@ -370,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.mainMenu = MainMenu.make(profileMenuDelegate: self)
+        NSApp.mainMenu = MainMenu.make()
         handleTerminationSignal()
         observeFocus()
 
@@ -511,11 +488,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         showSettings(tab: nil)
     }
 
-    /// File › New Tab on Host › Add Host…: Settings › Hosts.
-    @objc func showHostsSettings(_ sender: Any?) {
-        showSettings(tab: .hosts)
-    }
-
     private func showSettings(tab: SettingsWindowController.Tab?) {
         if settingsWindowController == nil {
             let registry = registry
@@ -588,19 +560,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// File › New Tab with Profile and New Tab on Host are filled in each
-    /// time they open.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        switch menu.identifier {
-        case MainMenu.newTabWithProfileIdentifier:
-            MainMenu.fillProfileMenu(menu, profiles: model.profiles, defaultProfile: model.defaultProfileID)
-        case MainMenu.newTabOnHostIdentifier:
-            MainMenu.fillHostMenu(menu, hosts: model.hosts)
-        default:
-            break
-        }
-    }
-
     // MARK: Windows
 
     /// Brings a workspace's window to front, opening it if it is closed
@@ -625,8 +584,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             existing.showWindow(nil)
             return
         }
-        if let workspace = model.workspace(id), workspace.window?.isOpen != true || workspace.tabGroups.isEmpty {
-            model.reopenWorkspace(id)
+        // Step 10a interim: replaced by the New Session chooser in 10c. A
+        // new workspace (⌘N, or the fresh one at launch), a reopened one's
+        // fresh group and any empty pane restored from the state file get
+        // a shell before the window shows them.
+        let near = windowControllers.first { $0.value.window === reference }?.key
+        WorkspaceActions.withInterimShells(model: model, near: near) {
+            if let workspace = model.workspace(id), workspace.window?.isOpen != true || workspace.tabGroups.isEmpty {
+                model.reopenWorkspace(id)
+            }
         }
         let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
         controller.actions.showWorkspace = { [weak self] id in self?.showWorkspace(id) }

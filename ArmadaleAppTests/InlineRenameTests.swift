@@ -20,6 +20,7 @@ struct InlineRenameTests {
     private func makeFixture() throws -> Fixture {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "Work")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab = try #require(model.tabGroup(group)?.tabs.first?.id)
         return Fixture(model: model, rename: InlineRename(model: model), workspace: workspace, group: group, tab: tab)
@@ -303,6 +304,7 @@ struct InlineRenameTests {
         _ = NSApplication.shared
         let f = try makeFixture()
         let other = f.model.newWorkspace(name: "Other")
+        f.model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(

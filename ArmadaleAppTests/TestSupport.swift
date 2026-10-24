@@ -126,3 +126,28 @@ struct TestDefaults {
         try? FileManager.default.removeItem(at: folder)
     }
 }
+
+extension AppModel {
+    /// What the app's step 10a interim does with new panes
+    /// (`WorkspaceActions.withInterimShells`): starts a session, by default
+    /// the shell on this Mac in the home directory, in every empty pane of
+    /// every workspace. Returns the sessions started.
+    @discardableResult
+    func fillEmptyPanes(
+        profile: ProfileID = Profile.shell.id, location: Location = .local, workingDirectory: String = ""
+    ) -> [SessionID] {
+        let request = SessionRequest(location: location, profileID: profile, workingDirectory: workingDirectory)
+        return workspaces.flatMap { emptyPaneIDs(in: $0.id) }.compactMap { startSession(in: $0, request: request) }
+    }
+
+    /// A new tab in `group` whose pane runs `profile` at `location` (what
+    /// File › New Tab with Profile and New Tab on Host made before step 10).
+    func newTab(
+        in group: TabGroupID, starting profile: ProfileID, at location: Location = .local,
+        workingDirectory: String = ""
+    ) -> TabID? {
+        guard let tab = newTab(in: group), let pane = self.tab(tab)?.focusedPaneID else { return nil }
+        let request = SessionRequest(location: location, profileID: profile, workingDirectory: workingDirectory)
+        return startSession(in: pane, request: request) == nil ? nil : tab
+    }
+}

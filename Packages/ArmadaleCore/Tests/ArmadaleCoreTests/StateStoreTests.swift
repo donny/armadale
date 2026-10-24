@@ -19,10 +19,15 @@ private func sampleState() -> PersistedState {
     let model = AppModel(defaultWorkingDirectory: "/tmp")
     let workspace = model.newWorkspace(name: "Agents")
     let group = model.workspace(workspace)?.tabGroups.first?.id
-    if let group { model.newTab(in: group, profile: Profile.claudeCode.id) }
-    if let pane = model.workspace(workspace)?.tabGroups.first?.tabs.first?.focusedPaneID {
-        model.splitPane(pane, axis: .horizontal)
+    if let group, let tab = model.newTab(in: group), let pane = model.tab(tab)?.focusedPaneID {
+        let options = SessionOptions(skipPermissions: true, model: "opus", additionalArguments: ["--verbose"])
+        model.startSession(in: pane, request: SessionRequest(profileID: Profile.claudeCode.id, options: options))
     }
+    model.fillEmptyPanes()
+    if let pane = model.workspace(workspace)?.tabGroups.first?.tabs.first?.focusedPaneID {
+        model.splitPane(pane, axis: .horizontal) // left empty: an empty pane round-trips
+    }
+    model.addFavorite(Favorite(name: "Agent", request: SessionRequest(profileID: Profile.codex.id, workingDirectory: "~/src")))
     var state = model.persistedState
     state.hosts = [Host(name: "box", sshDestination: "me@box", port: 2222)]
     return state

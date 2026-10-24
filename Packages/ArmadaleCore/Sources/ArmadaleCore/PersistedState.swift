@@ -9,19 +9,38 @@ public struct PersistedState: Codable, Sendable, Hashable {
     public var sessions: [Session]
     public var hosts: [Host]
     public var profiles: [Profile]
+    /// Saved session recipes, in the order the user keeps them. Added on
+    /// October 24, 2026 without a schema bump: absent decodes as none.
+    public var favorites: [Favorite]
 
     public init(
         schemaVersion: Int = PersistedState.currentSchemaVersion,
         workspaces: [Workspace] = [],
         sessions: [Session] = [],
         hosts: [Host] = [],
-        profiles: [Profile] = Profile.builtIns
+        profiles: [Profile] = Profile.builtIns,
+        favorites: [Favorite] = []
     ) {
         self.schemaVersion = schemaVersion
         self.workspaces = workspaces
         self.sessions = sessions
         self.hosts = hosts
         self.profiles = profiles
+        self.favorites = favorites
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, workspaces, sessions, hosts, profiles, favorites
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        workspaces = try container.decode([Workspace].self, forKey: .workspaces)
+        sessions = try container.decode([Session].self, forKey: .sessions)
+        hosts = try container.decode([Host].self, forKey: .hosts)
+        profiles = try container.decode([Profile].self, forKey: .profiles)
+        favorites = try container.decodeIfPresent([Favorite].self, forKey: .favorites) ?? []
     }
 
     /// A first-launch state: no workspaces, the built-in profiles.
@@ -59,8 +78,11 @@ extension PersistedState {
     /// after loading, so a hand-edited or partially written file cannot
     /// leave the UI with dangling references.
     ///
-    /// - Workspace, tab group, tab, pane and session IDs are unique; later
-    ///   duplicates are dropped.
+    /// - Workspace, tab group, tab, pane, session and favorite IDs are
+    ///   unique; later duplicates are dropped.
+    /// - A pane without a session (an empty pane, DESIGN §8 "New sessions")
+    ///   is kept as it is. Favorites naming a missing host or profile are
+    ///   kept too (they are shown as broken).
     /// - A tab's layout has no repeated leaves; every leaf has a pane
     ///   record and every pane record is a leaf (orphans are dropped). A tab
     ///   left with no panes is dropped.
@@ -81,6 +103,15 @@ extension PersistedState {
         state.sessions = sessions.filter { session in
             guard seenSessions.insert(session.id).inserted else {
                 issues.append("Dropped duplicate session \(session.id)")
+                return false
+            }
+            return true
+        }
+
+        var seenFavorites = Set<FavoriteID>()
+        state.favorites = favorites.filter { favorite in
+            guard seenFavorites.insert(favorite.id).inserted else {
+                issues.append("Dropped duplicate favorite \(favorite.id)")
                 return false
             }
             return true
@@ -162,7 +193,8 @@ extension PersistedState {
                 panes.append(pane)
             }
         }
-        // Leaves without a record have no session; remove them.
+        // Leaves without a record are removed. (A record without a session
+        // is an empty pane, and is kept.)
         let recorded = Set(panes.map(\.id))
         for leaf in layout.leaves() where !recorded.contains(leaf) {
             issues.append("Removed pane \(leaf) without a record from tab \(tab.id)")

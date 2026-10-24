@@ -11,18 +11,12 @@ import ArmadaleCore
 /// the menu this builds (``ShortcutTable``), so the two cannot disagree.
 @MainActor
 enum MainMenu {
-    /// Identifier of File › New Tab with Profile, whose items are filled in
-    /// by `profileMenuDelegate` each time it opens.
-    static let newTabWithProfileIdentifier = NSUserInterfaceItemIdentifier("newTabWithProfile")
-    /// Identifier of File › New Tab on Host, filled in the same way.
-    static let newTabOnHostIdentifier = NSUserInterfaceItemIdentifier("newTabOnHost")
-
     /// Prefix of the identifier given to every item this builds. AppKit adds
     /// items of its own later (the Services menu's contents, the Window
     /// menu's tiling commands); the shortcut table lists only ours.
     static let ownItemPrefix = "armadale.menu."
 
-    /// Whether `item` was created by ``make(profileMenuDelegate:installsSpecialMenus:)``.
+    /// Whether `item` was created by ``make(installsSpecialMenus:)``.
     static func isOwnItem(_ item: NSMenuItem) -> Bool {
         item.identifier?.rawValue.hasPrefix(ownItemPrefix) ?? false
     }
@@ -30,7 +24,7 @@ enum MainMenu {
     /// The main menu. With `installsSpecialMenus`, the Services, Window
     /// and Help menus are registered with `NSApp` (pass `false` to only
     /// read the menu, e.g. in tests).
-    static func make(profileMenuDelegate: (any NSMenuDelegate)? = nil, installsSpecialMenus: Bool = true) -> NSMenu {
+    static func make(installsSpecialMenus: Bool = true) -> NSMenu {
         let appName = ProcessInfo.processInfo.processName
         let main = NSMenu()
 
@@ -59,14 +53,6 @@ enum MainMenu {
         file.addItem(withTitle: "New Tab Group", action: #selector(WorkspaceWindowController.newTabGroup(_:)),
                      keyEquivalent: "n").keyEquivalentModifierMask = [.command, .shift]
         file.addItem(withTitle: "New Tab", action: #selector(WorkspaceWindowController.newTab(_:)), keyEquivalent: "t")
-        let profiles = NSMenu(title: "New Tab with Profile")
-        profiles.identifier = newTabWithProfileIdentifier
-        profiles.delegate = profileMenuDelegate
-        file.addItem(withTitle: "New Tab with Profile", action: nil, keyEquivalent: "").submenu = profiles
-        let hosts = NSMenu(title: "New Tab on Host")
-        hosts.identifier = newTabOnHostIdentifier
-        hosts.delegate = profileMenuDelegate
-        file.addItem(withTitle: "New Tab on Host", action: nil, keyEquivalent: "").submenu = hosts
         file.addItem(.separator())
         file.addItem(withTitle: "Close Pane", action: #selector(WorkspaceWindowController.closePane(_:)),
                      keyEquivalent: "w")
@@ -222,38 +208,6 @@ enum MainMenu {
             item.identifier = NSUserInterfaceItemIdentifier(ownItemPrefix + itemPath)
             if let submenu = item.submenu { markOwnItems(in: submenu, path: itemPath) }
         }
-    }
-
-    /// Fills File › New Tab with Profile with one item per profile.
-    static func fillProfileMenu(_ menu: NSMenu, profiles: [Profile], defaultProfile: ProfileID) {
-        menu.removeAllItems()
-        for profile in profiles {
-            let item = menu.addItem(
-                withTitle: profile.name, action: #selector(WorkspaceWindowController.newTabWithProfile(_:)),
-                keyEquivalent: "")
-            item.representedObject = profile.id.raw
-            item.image = NSImage(systemSymbolName: profile.icon, accessibilityDescription: nil)
-            item.state = profile.id == defaultProfile ? .on : .off
-        }
-    }
-
-    /// Fills File › New Tab on Host: one item per host (a tab there, in
-    /// the home directory, with the default profile), then Add Host….
-    static func fillHostMenu(_ menu: NSMenu, hosts: [ArmadaleCore.Host]) {
-        menu.removeAllItems()
-        if hosts.isEmpty {
-            menu.addItem(withTitle: "No Hosts", action: nil, keyEquivalent: "").isEnabled = false
-        }
-        for host in hosts {
-            let item = menu.addItem(
-                withTitle: host.displayName, action: #selector(WorkspaceWindowController.newTabOnHost(_:)),
-                keyEquivalent: "")
-            item.representedObject = host.id.raw
-            item.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
-            if host.displayName != host.sshDestination { item.toolTip = host.sshDestination }
-        }
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Add Host…", action: #selector(AppDelegate.showHostsSettings(_:)), keyEquivalent: "")
     }
 
     // MARK: Directions

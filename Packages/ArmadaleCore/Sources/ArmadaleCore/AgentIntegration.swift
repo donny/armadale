@@ -38,6 +38,8 @@ public struct AgentIntegration: Sendable, Hashable {
     public var hookFile: String
     /// What the optional settings add.
     public var hookSummary: String
+    /// The flags the New Session dialog's options become for this agent.
+    public var optionFlags: OptionFlags
 
     /// Name of the helper script in the app bundle's `Contents/Resources`.
     public static let notifyHelperName = "armadale-notify"
@@ -53,7 +55,8 @@ public struct AgentIntegration: Sendable, Hashable {
             + "settings files are not changed. Turn it off to keep your own channel.",
         hookFile: "~/.claude/settings.json",
         hookSummary: "To get attention the moment Claude stops, add a Stop hook that runs Armadale’s "
-            + "notify helper. The helper does nothing outside Armadale.")
+            + "notify helper. The helper does nothing outside Armadale.",
+        optionFlags: .claudeCode)
 
     public static let codex = AgentIntegration(
         flavor: .codex,
@@ -66,7 +69,8 @@ public struct AgentIntegration: Sendable, Hashable {
         hookSummary: "Optional: notification_method = \"osc9\" makes Codex send its message text instead of "
             + "a plain bell (add it to your [tui] table, or create one). Codex’s notify command can also run "
             + "Armadale’s notify helper after every turn; notify must be at the top of the file, before any "
-            + "[table], and it replaces any notify you already have.")
+            + "[table], and it replaces any notify you already have.",
+        optionFlags: .codex)
 
     /// The integration for `flavor`, if Armadale knows one.
     public static func `for`(_ flavor: AgentFlavor) -> AgentIntegration? {
@@ -101,6 +105,29 @@ public struct AgentIntegration: Sendable, Hashable {
         }
     }
 
+    /// The flags `options` add for this agent, in a fixed order: skip
+    /// permissions, continue, sandbox, model. Options the agent has no flag
+    /// for, and a blank model or sandbox, add nothing.
+    /// ``SessionOptions/additionalArguments`` are not included
+    /// (``Profile/launchSpec(options:)`` appends them for any profile).
+    public func arguments(for options: SessionOptions) -> [String] {
+        var arguments: [String] = []
+        if options.skipPermissions, let flag = optionFlags.skipPermissions { arguments.append(flag) }
+        if options.continueConversation, let flag = optionFlags.continueConversation { arguments.append(flag) }
+        if let sandbox = Self.nonBlank(options.sandbox), let flag = optionFlags.sandbox {
+            arguments += [flag, sandbox]
+        }
+        if let model = Self.nonBlank(options.model), let flag = optionFlags.model { arguments += [flag, model] }
+        return arguments
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
     /// `'…'` for a POSIX shell.
     static func posixQuoted(_ word: String) -> String {
         "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
@@ -127,6 +154,70 @@ public struct AgentIntegration: Sendable, Hashable {
 
     static func tomlQuoted(_ text: String) -> String {
         jsonQuoted(text) // TOML basic strings use the same escapes
+    }
+}
+
+/// How the New Session dialog's ``SessionOptions`` become command-line
+/// flags for one agent (DESIGN §8 "New sessions", §10). A version fact,
+/// read from the agents' own `--help` on October 24, 2026 (re-run on this
+/// Mac for step 10a): **`claude 2.1.304`** (`-c, --continue`,
+/// `--dangerously-skip-permissions`, `--model <model>`; it has no sandbox
+/// flag) and **`codex-cli 0.163.0`** (`--dangerously-bypass-approvals-and-sandbox`,
+/// `-s, --sandbox <SANDBOX_MODE>` with the possible values read-only,
+/// workspace-write and danger-full-access, `-m, --model <MODEL>`; it has no
+/// `--full-auto` any more and no flag to continue, `resume` being a
+/// subcommand). Re-check with the rest of DESIGN §10 when either agent is
+/// upgraded. `nil`: the agent has no flag for that option, which is then
+/// ignored.
+public struct OptionFlags: Sendable, Hashable {
+    public var skipPermissions: String?
+    public var continueConversation: String?
+    public var model: String?
+    public var sandbox: String?
+    /// The values `sandbox` accepts, for the dialog's picker.
+    public var sandboxModes: [String]
+
+    public init(
+        skipPermissions: String? = nil, continueConversation: String? = nil, model: String? = nil,
+        sandbox: String? = nil, sandboxModes: [String] = []
+    ) {
+        self.skipPermissions = skipPermissions
+        self.continueConversation = continueConversation
+        self.model = model
+        self.sandbox = sandbox
+        self.sandboxModes = sandboxModes
+    }
+
+    /// Claude Code 2.1.304.
+    public static let claudeCode = OptionFlags(
+        skipPermissions: "--dangerously-skip-permissions",
+        continueConversation: "--continue",
+        model: "--model")
+
+    /// Codex 0.163.0.
+    public static let codex = OptionFlags(
+        skipPermissions: "--dangerously-bypass-approvals-and-sandbox",
+        model: "--model",
+        sandbox: "--sandbox",
+        sandboxModes: ["read-only", "workspace-write", "danger-full-access"])
+}
+
+extension Profile {
+    /// The launch spec of a session started from this profile with
+    /// `options`: ``launchArguments`` (the profile's own, behind the
+    /// attention integration's), then the agent's flags for the options
+    /// (``AgentIntegration/arguments(for:)``; none for a profile whose
+    /// agent Armadale does not know, or that is not an agent), then
+    /// ``SessionOptions/additionalArguments``. A profile without a program
+    /// (the user's login shell) ignores every option, the additional
+    /// arguments included: a login shell is started with no arguments.
+    /// `nil` options give ``launchSpec``.
+    public func launchSpec(options: SessionOptions?) -> LaunchSpec {
+        guard program != nil, let options else { return launchSpec }
+        let flags = agentIntegration?.arguments(for: options) ?? []
+        return LaunchSpec(
+            program: program, arguments: launchArguments + flags + options.additionalArguments,
+            environment: environment)
     }
 }
 

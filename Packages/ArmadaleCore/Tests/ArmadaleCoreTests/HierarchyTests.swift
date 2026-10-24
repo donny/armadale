@@ -10,6 +10,7 @@ struct HierarchyTests {
     private func makeModel() -> (AppModel, WorkspaceID, TabGroupID) {
         let model = AppModel(defaultWorkingDirectory: "/work")
         let ws = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = model.workspace(ws)?.tabGroups.first?.id ?? TabGroupID(raw: "none")
         return (model, ws, group)
     }
@@ -41,6 +42,7 @@ struct HierarchyTests {
         let (model, ws, g1) = makeModel()
         let g2 = try #require(model.newTabGroup(in: ws, name: "B"))
         _ = try #require(model.newTab(in: g2))
+        model.fillEmptyPanes()
         #expect(model.sessions.count == 3)
         #expect(model.closeTabGroup(g2) == .closedTabGroup(g2, in: ws))
         #expect(model.workspace(ws)?.tabGroups.map(\.id) == [g1])
@@ -54,6 +56,7 @@ struct HierarchyTests {
     @Test func closingLastTabGroupDeletesTheWorkspace() throws {
         let (model, ws, g1) = makeModel()
         let other = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let otherBefore = try #require(model.workspace(other))
         let sessionsBefore = model.sessions.count
         let changes = model.changeCount
@@ -127,6 +130,7 @@ struct HierarchyTests {
         let (model, ws, g1) = makeModel()
         let t2 = try #require(model.newTab(in: g1))
         let g2 = try #require(model.newTabGroup(in: ws, name: "B"))
+        model.fillEmptyPanes()
         model.select(tabGroup: g1)
         let sessions = model.sessionIDs(ofTab: t2)
         let existing = tabs(model, g2)[0]
@@ -144,6 +148,7 @@ struct HierarchyTests {
         let (model, _, g1) = makeModel()
         let t2 = try #require(model.newTab(in: g1))
         let other = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let otherGroup = try #require(model.workspace(other)?.tabGroups[0].id)
         model.moveTab(t2, to: otherGroup, index: 5)
         #expect(model.location(of: t2)?.workspace == other)
@@ -169,6 +174,7 @@ struct HierarchyTests {
         let t0 = tabs(model, group)[0]
         let t1 = try #require(model.newTab(in: group))
         let t2 = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let kept = model.sessionIDs(ofTab: t1)
         #expect(Set(model.closeOtherTabs(than: t1)) == [t0, t2])
         #expect(tabs(model, group) == [t1])
@@ -237,15 +243,18 @@ struct HierarchyTests {
         return (model, ws, p1, p2, p3)
     }
 
-    @Test func splitFocusedPaneInheritsDirectory() throws {
+    /// A split no longer copies the pane's profile and directory: the new
+    /// pane is empty and asks (DESIGN §8 "New sessions").
+    @Test func splitFocusedPaneMakesAnEmptyPane() throws {
         let (model, ws, _) = makeModel()
         let first = try #require(model.selectedTab(in: ws)?.panes.first?.sessionID)
         model.setWorkingDirectory("/repo", for: first)
         let new = try #require(model.splitFocusedPane(axis: .horizontal, in: ws))
         let tab = try #require(model.selectedTab(in: ws))
         #expect(tab.focusedPaneID == new)
-        let session = try #require(tab.pane(new).flatMap { model.session($0.sessionID) })
-        #expect(session.workingDirectory == "/repo")
+        #expect(tab.pane(new)?.isEmpty == true)
+        #expect(model.sessions.map(\.id) == [first])
+        #expect(model.focusedSessionID(in: ws) == nil)
     }
 
     @Test func moveFocusByDirection() throws {

@@ -40,6 +40,7 @@ struct WindowLifetimeTests {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
@@ -69,6 +70,7 @@ struct WindowLifetimeTests {
         // not be picked up by the closed window's controller.
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let newSession = try #require(model.sessionIDs(ofTab: tab).first)
         try await Task.sleep(for: .milliseconds(200))
         #expect(registry.controller(for: newSession) == nil, "nothing showed the new tab")
@@ -92,7 +94,9 @@ struct WindowLifetimeTests {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let other = otherWorkspace ? model.newWorkspace(name: "Other") : nil
+        model.fillEmptyPanes()
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
@@ -173,7 +177,9 @@ struct CloseLastTabGroupTests {
     @Test func closeTabGroupThroughTheActionsDeletesTheWorkspace() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let other = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
@@ -196,7 +202,9 @@ struct CloseLastTabGroupTests {
     @Test func closingCommitsTheRenameUnderWayFirst() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "Workspace 2")
+        model.fillEmptyPanes()
         let second = try #require(model.newTabGroup(in: workspace, name: "Second"))
+        model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(
@@ -232,6 +240,7 @@ struct RegistryCloseRiskTests {
     @Test func restoredSessionAsksUntilTheProbeSaysItIsGone() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let restored = Set(model.sessionIDs(in: workspace))
         let session = try #require(restored.first)
         // The inert backend's probe answers "nothing is alive", but only
@@ -257,6 +266,7 @@ struct RegistryCloseRiskTests {
     @Test func newSessionNeverShownDoesNotAsk() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let session = try #require(model.sessionIDs(in: workspace).first)
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }

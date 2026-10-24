@@ -48,16 +48,24 @@ What works today:
   over its last screen, with the status or signal when it is known, and
   Respawn / Close Pane. **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended
   pane of a workspace.
-- **Settings** (⌘,): General (default profile and directory, close
-  confirmation, quitting with running sessions, notifications), Appearance
-  (font, size, light and dark themes, Ghostty theme import, cursor,
-  renderer), Profiles, Hosts, and a read-only Shortcuts table generated
-  from the menus. **File › New Tab with Profile** opens a tab with any
-  profile.
+- **New sessions are chosen per pane** (step 10, in progress): the profile,
+  the location (this Mac or a saved host), the directory and per-agent
+  options are picked for each new pane, and recipes can be saved as
+  favorites. The New Session dialog and the chooser arrive in steps 10b and
+  10c; until then every new tab, tab group, window and split starts the
+  shell on this Mac, in the directory of the window's focused pane (else
+  the home folder), and no other profile or host can be picked. File › New Tab with Profile, File › New Tab on Host,
+  the "+" button's menu and General's default profile and directory are
+  gone.
+- **Settings** (⌘,): General (close confirmation, quitting with running
+  sessions, notifications), Appearance (font, size, light and dark themes,
+  Ghostty theme import, cursor, renderer), Profiles, Hosts, and a
+  read-only Shortcuts table generated from the menus.
 - **Remote hosts.** **Settings › Hosts** adds SSH hosts (destination, port,
   identity file, SSH config file, remote folder) with Test Connection and
-  Deploy Now. **File › New Tab on Host** opens a session that keeps running
-  on the host: Armadale installs its private persistence helper under
+  Deploy Now. (Until the New Session dialog in step 10b there is no way
+  to start a new session on a host; existing ones keep working.) A session
+  on a host keeps running there: Armadale installs its private persistence helper under
   `~/.armadale` there on first use, quitting leaves the session running, a
   relaunch reattaches it, and a lost connection shows *Reconnecting…* and
   retries by itself for up to five minutes. See docs/DESIGN.md section 6.
@@ -358,14 +366,16 @@ sessions".
 
 Settings live in the app's user defaults (`com.tinylittleapps.armadale`,
 i.e. `~/Library/Preferences/com.tinylittleapps.armadale.plist`), through the
-typed `Preferences` store: default profile and directory, the three
+typed `Preferences` store: the three
 notification settings (`notifyOnAttention`, `notifyOnlyForAgents`,
 `notificationPlaysSound`), `confirmClosingRunningSession` (default `true`: closing a pane, tab or tab
 group with a running process asks first), `quitWithRunningSessions` (`ask`, `keepInMenuBar` or
 `endSessions`; default `ask`), font name and size (⌘= / ⌘- / ⌘0
 change the stored size), theme choice, cursor, renderer, and the Settings
-window's position and tab. Profiles are not preferences: they are saved
-with the layout in `state.json`.
+window's position and tab. (The `defaultProfileID` and
+`defaultWorkingDirectory` keys of older builds are left unread.) Profiles
+are not preferences: they are saved with the layout in `state.json`, as
+are favorites.
 
 Imported themes are JSON files in `<state dir>/themes/<name>.json`
 (`~/Library/Application Support/Armadale/themes/` by default). Import reads

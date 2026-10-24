@@ -171,10 +171,10 @@ the bundled persistence helper stays universal for Intel Mac hosts.
 
 ## Next
 
-**Step 10, New Session (owner's request, October 24, 2026), specified,
-not started.** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
+**Step 10, New Session (owner's request, October 24, 2026): 10a done,
+10b and 10c to go.** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
 and favorites", §2 (`Pane.sessionID` optional, `SessionOptions`,
-`SessionRequest`, `Favorite`, the new intents), §3 (schema 2), §10 and
+`SessionRequest`, `Favorite`, the new intents), §3, §10 and
 §12 (step 10, three sub-steps) hold the agreed design. In short: a new
 pane never starts a shell by itself; it shows a chooser with the saved
 favorites, Cancel and New Session…; the New Session dialog (a sheet)
@@ -192,9 +192,34 @@ they are; the word for the thing is "session"; the button is Start; a
 favorite whose host or profile is gone is shown broken until edited or
 removed. The flag names were read from `claude 2.1.304 --help` and
 `codex-cli 0.163.0 --help` on October 24, 2026 (Codex has no
-`--full-auto` any more). Order: 10a model and removals, 10b dialog and
+`--full-auto` any more). The owner said not to care about files written
+by older builds (unreleased), so the state file stays schema 1 with
+additive decoding. Order: 10a model and removals, 10b dialog and
 Settings › Favorites, 10c the chooser; each through the implementer →
-reviewer loop with the owner's go-ahead first.
+reviewer loop. The owner gave the go-ahead for all of step 10 on October
+24, 2026 and asked only to be told when the Mac is needed for live UI
+work (10c; 10a and 10b were done code-only, no app launch).
+
+**10a (model and removals) is committed:** empty panes, `SessionOptions`,
+`SessionRequest`, `Favorite`, `startSession(in:request:)`, the favorite
+intents, the agent flag table (pulled forward from 10b) in
+`AgentIntegration`, `ShellWords.split`, respawn with the session's
+options; the two File items, the "+" context menu and General's defaults
+removed; an **interim** (`WorkspaceActions.withInterimShells`, marked
+`Step 10a interim`) gives every new pane a local shell in the focused
+pane's directory until 10c, so between 10a and 10b there is no way to
+start a remote or non-shell session except Respawn. Reviewer findings,
+all low, were fixed (directory trimming, repair wording, `ShellWords`
+wording) except two notes for later: a pane whose `sessionID` names a
+missing session is kept and shows blank (as at HEAD before 10a); 10c's
+repair should turn it into an empty pane that shows the chooser. **10b
+live check to do:** nobody has run a real Codex session with `--model`,
+`--sandbox` or `--dangerously-bypass-approvals-and-sandbox` to see
+whether they, like the `-c` overrides §10 records, make Codex run
+"without the shared background server"; they parse together fine
+(`codex … completion zsh` exits 0). "Add Host…" needs its own way to open
+Settings › Hosts in 10b, since `showHostsSettings` went with the menu.
+Tests: 578 at 10a (129 app + 223 core + 206 sessions + 13 + 7).
 
 Other candidates, each needing an owner decision:
 the Ghostty second renderer (below), the open items below, a public home

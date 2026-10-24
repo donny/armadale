@@ -43,6 +43,7 @@ struct SettingsApplyTests {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let registry = SessionRegistry(
             model: model,
             runtime: SessionRuntimeSetup(
@@ -78,6 +79,7 @@ struct SettingsApplyTests {
         // A pane created afterwards starts with the current settings.
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let newSession = try #require(model.sessionIDs(ofTab: tab).first)
         let newSurface = try #require(registry.paneView(for: newSession)?.controller.surface as? SwiftTermSurface)
         #expect(newSurface.appearance.fontSize == 21)
@@ -133,6 +135,7 @@ struct SettingsApplyTests {
         // New panes use the new renderer straight away.
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let newSession = try #require(model.sessionIDs(ofTab: tab).first)
         let newPane = try #require(registry.paneView(for: newSession))
         #expect(newPane.controller.surface is StubRendererSurface)
@@ -159,6 +162,7 @@ struct SettingsApplyTests {
         // An unknown renderer (removed in a later version) means the default.
         settings.preferences.rendererID = "gone"
         let third = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let thirdSession = try #require(model.sessionIDs(ofTab: third).first)
         #expect(registry.paneView(for: thirdSession)?.controller.surface is SwiftTermSurface)
     }
@@ -173,7 +177,7 @@ struct SettingsApplyTests {
         profile.kind = .command
         profile.program = "top"
         model.updateProfile(profile)
-        let tab = try #require(model.newTab(in: group, profile: profileID))
+        let tab = try #require(model.newTab(in: group, starting: profileID))
         let sessionID = try #require(model.sessionIDs(ofTab: tab).first)
         let controller = try #require(registry.paneView(for: sessionID)?.controller)
 

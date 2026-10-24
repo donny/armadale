@@ -60,17 +60,23 @@ struct HostIntentTests {
         let workspace = model.newWorkspace()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let host = model.addHost(name: "VM", sshDestination: "vm")
-        let tab = try #require(model.newTab(in: group, onHost: host))
-        let remote = try #require(model.sessionIDs(ofTab: tab).first)
+        let tab = try #require(model.newTab(in: group))
+        let pane = try #require(model.tab(tab)?.focusedPaneID)
+        let request = SessionRequest(location: .remote(host: host))
+        let remote = try #require(model.startSession(in: pane, request: request))
+        #expect(model.sessionIDs(ofTab: tab) == [remote])
         #expect(model.session(remote)?.location == .remote(host: host))
         #expect(model.session(remote)?.workingDirectory == "~", "the home directory on the host")
         #expect(model.sessionIDs(onHost: host) == [remote])
 
-        // A split inherits the location.
-        let pane = try #require(model.tab(tab)?.focusedPaneID)
+        // A split asks again; started with the same request, it runs there too.
         let split = try #require(model.splitPane(pane, axis: .horizontal))
-        let splitSession = try #require(model.tab(tab)?.pane(split)?.sessionID)
+        #expect(model.tab(tab)?.pane(split)?.isEmpty == true)
+        var directoryRequest = request
+        directoryRequest.workingDirectory = "~/src"
+        let splitSession = try #require(model.startSession(in: split, request: directoryRequest))
         #expect(model.session(splitSession)?.location == .remote(host: host))
+        #expect(model.session(splitSession)?.workingDirectory == "~/src", "remote directories pass through")
 
         let left = model.removeHost(host)
         #expect(Set(left) == [remote, splitSession])
@@ -88,12 +94,16 @@ struct HostIntentTests {
         }
     }
 
-    @Test func newTabOnAnUnknownHostDoesNothing() throws {
+    @Test func aSessionOnAnUnknownHostIsRefused() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace()
-        let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
-        #expect(model.newTab(in: group, onHost: HostID(raw: "missing")) == nil)
-        #expect(model.tabGroup(group)?.tabs.count == 1)
+        let pane = try #require(model.emptyPaneIDs(in: workspace).first)
+        let before = model.changeCount
+        let request = SessionRequest(location: .remote(host: HostID(raw: "missing")))
+        #expect(model.startSession(in: pane, request: request) == nil)
+        #expect(model.sessions.isEmpty)
+        #expect(model.pane(pane)?.isEmpty == true)
+        #expect(model.changeCount == before)
     }
 
     @Test func validation() {

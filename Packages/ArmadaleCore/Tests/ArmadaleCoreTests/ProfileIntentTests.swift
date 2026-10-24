@@ -94,11 +94,9 @@ struct ProfileIntentTests {
             #expect(model.profile(builtIn.id) != nil)
         }
         let id = model.newProfile()
-        model.defaultProfileID = id
         let before = model.changeCount
         #expect(model.deleteProfile(id))
         #expect(model.profile(id) == nil)
-        #expect(model.defaultProfileID == Profile.shell.id, "the default falls back to the shell")
         #expect(model.changeCount == before + 1)
         #expect(!model.deleteProfile(id))
     }
@@ -112,8 +110,9 @@ struct ProfileIntentTests {
         profile.kind = .command
         profile.program = "htop"
         model.updateProfile(profile)
-        let tab = try #require(model.newTab(in: group, profile: id))
-        let sessionID = try #require(model.sessionIDs(ofTab: tab).first)
+        let tab = try #require(model.newTab(in: group))
+        let pane = try #require(model.tab(tab)?.focusedPaneID)
+        let sessionID = try #require(model.startSession(in: pane, request: SessionRequest(profileID: id)))
         #expect(model.session(sessionID)?.launch == LaunchSpec(program: "htop"))
         #expect(model.session(sessionID)?.profileID == id)
 

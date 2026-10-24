@@ -133,7 +133,9 @@ final class ContentViewController: NSViewController {
                     tabID: tab.id,
                     layout: layout,
                     focusedPaneID: tab.focusedPaneID,
-                    sessions: Dictionary(tab.panes.map { ($0.id, $0.sessionID) }, uniquingKeysWith: { first, _ in first }))
+                    sessions: Dictionary(
+                        tab.panes.compactMap { pane in pane.sessionID.map { (pane.id, $0) } },
+                        uniquingKeysWith: { first, _ in first }))
             }
             for await display in displays {
                 guard let self else { return }
@@ -279,7 +281,9 @@ final class PaneContainerView: NSView {
     }
 
     /// Stands in for a pane whose session is missing (never expected: the
-    /// saved state is repaired at launch).
+    /// saved state is repaired at launch), or an empty pane (no session
+    /// yet; until step 10c every one is given a shell as it is made, and
+    /// 10c shows the New Session chooser here instead).
     func blankView(for paneID: PaneID) -> NSView {
         if let view = blankViews[paneID] { return view }
         let view = NSView()

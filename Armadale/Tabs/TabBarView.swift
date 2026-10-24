@@ -100,28 +100,8 @@ struct TabBarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .help("New Tab (right-click to choose a profile or a host)")
+                .help("New Tab")
                 .accessibilityLabel("New Tab")
-                .contextMenu {
-                    ForEach(model.profiles) { profile in
-                        Button {
-                            actions.newTab(in: group?.id, profile: profile.id)
-                        } label: {
-                            Label(profile.name, systemImage: profile.icon)
-                        }
-                    }
-                    if !model.hosts.isEmpty {
-                        Section("On Host") {
-                            ForEach(model.hosts) { host in
-                                Button {
-                                    actions.newTab(onHost: host.id, in: group?.id)
-                                } label: {
-                                    Label(host.displayName, systemImage: "network")
-                                }
-                            }
-                        }
-                    }
-                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 6)

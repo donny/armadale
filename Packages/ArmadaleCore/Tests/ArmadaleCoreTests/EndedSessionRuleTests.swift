@@ -48,8 +48,17 @@ struct EndedSessionRuleTests {
     private func makeModel() throws -> (AppModel, WorkspaceID, TabGroupID, Tab) {
         let model = AppModel(defaultWorkingDirectory: "/work")
         let ws = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(ws)?.tabGroups.first)
         return (model, ws, group.id, try #require(group.tabs.first))
+    }
+
+    /// A new tab in `group` running Claude Code.
+    private func agentTab(in group: TabGroupID, of model: AppModel) throws -> TabID {
+        let tab = try #require(model.newTab(in: group))
+        let pane = try #require(model.tab(tab)?.focusedPaneID)
+        try #require(model.startSession(in: pane, request: SessionRequest(profileID: Profile.claudeCode.id)) != nil)
+        return tab
     }
 
     private func session(of pane: PaneID, in model: AppModel) throws -> SessionID {
@@ -75,8 +84,9 @@ struct EndedSessionRuleTests {
     @Test func aProgramsFailureInTheOnlyPaneKeepsIt() throws {
         let model = AppModel(defaultWorkingDirectory: "/work")
         let ws = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(ws)?.selectedTabGroupID)
-        let agentTab = try #require(model.newTab(in: group, profile: Profile.claudeCode.id))
+        let agentTab = try agentTab(in: group, of: model)
         let shellTab = try #require(model.workspace(ws)?.tabGroups.first?.tabs.first?.id)
         model.closeTab(shellTab)
         let agent = try session(of: try #require(model.tab(agentTab)?.focusedPaneID), in: model)
@@ -92,6 +102,7 @@ struct EndedSessionRuleTests {
         let (model, _, _, tab) = try makeModel()
         let first = tab.focusedPaneID
         let second = try #require(model.splitPane(first, axis: .vertical))
+        model.fillEmptyPanes()
         let ended = try session(of: second, in: model)
         #expect(model.closePaneIfSessionEndedCleanly(ended, exit: .signaled(15)) == nil, "a signal keeps its pane")
         #expect(model.closePaneIfSessionEndedCleanly(ended, exit: nil) == nil, "so does an unknown status")
@@ -104,7 +115,7 @@ struct EndedSessionRuleTests {
     /// A failing program keeps its pane; the shell's failing exit does not.
     @Test func aShellsNonZeroExitClosesAProgramsDoesNot() throws {
         let (model, ws, group, tab) = try makeModel()
-        let agentTab = try #require(model.newTab(in: group, profile: Profile.claudeCode.id))
+        let agentTab = try agentTab(in: group, of: model)
         let agent = try session(of: try #require(model.tab(agentTab)?.focusedPaneID), in: model)
         #expect(model.closePaneIfSessionEndedCleanly(agent, exit: 1) == nil)
         #expect(model.closePaneIfSessionEndedCleanly(agent, exit: .signaled(15)) == nil)
@@ -120,11 +131,13 @@ struct EndedSessionRuleTests {
     @Test func aCleanExitClosesTheTabAndTheGroupWhenOthersRemain() throws {
         let (model, ws, group, tab) = try makeModel()
         let secondTab = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         #expect(model.closePaneIfSessionEndedCleanly(try session(of: tab.focusedPaneID, in: model), exit: 0) != nil)
         #expect(model.tab(tab.id) == nil)
         #expect(model.tabGroup(group)?.tabs.map(\.id) == [secondTab])
 
         let otherGroup = try #require(model.newTabGroup(in: ws))
+        model.fillEmptyPanes()
         let pane = try #require(model.tab(secondTab)?.focusedPaneID)
         #expect(model.closePaneIfSessionEndedCleanly(try session(of: pane, in: model), exit: 0) == pane)
         #expect(model.tabGroup(group) == nil, "the emptied group is removed")
@@ -139,6 +152,7 @@ struct EndedSessionRuleTests {
         let (model, ws, group, tab) = try makeModel()
         let other = model.newWorkspace(name: "Other")
         let second = try #require(model.newTabGroup(in: ws, name: "Second"))
+        model.fillEmptyPanes()
         let pane = tab.focusedPaneID
         #expect(model.closePaneIfSessionEndedCleanly(try session(of: pane, in: model), exit: 0) == pane)
         #expect(model.tabGroup(group) == nil)

@@ -30,6 +30,7 @@ struct PlaceholderKeyboardTests {
         _ = NSApplication.shared
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let registry = SessionRegistry(

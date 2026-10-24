@@ -8,33 +8,41 @@ struct AppModelTests {
     private func makeModel() -> (AppModel, WorkspaceID, TabGroupID) {
         let model = AppModel(defaultWorkingDirectory: "/work")
         let ws = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = model.workspace(ws)?.tabGroups.first?.id ?? TabGroupID(raw: "none")
         return (model, ws, group)
     }
 
-    @Test func newWorkspaceHasOneGroupOneTabOneSession() throws {
-        let (model, ws, _) = makeModel()
+    /// A new workspace holds one group, one tab, one empty pane, and no
+    /// session (DESIGN §8 "New sessions").
+    @Test func newWorkspaceHasOneEmptyPaneAndNoSession() throws {
+        let model = AppModel(defaultWorkingDirectory: "/work")
+        let ws = model.newWorkspace(name: "W")
         let workspace = try #require(model.workspace(ws))
         #expect(workspace.tabGroups.count == 1)
         #expect(workspace.tabGroups[0].tabs.count == 1)
+        #expect(workspace.tabGroups[0].tabs[0].panes.count == 1)
+        #expect(workspace.tabGroups[0].tabs[0].panes[0].isEmpty)
         #expect(workspace.selectedTabGroupID == workspace.tabGroups[0].id)
         #expect(workspace.window?.isOpen == true)
-        #expect(model.sessions.count == 1)
-        #expect(model.sessions[0].workingDirectory == "/work")
-        #expect(model.sessions[0].profileID == Profile.shell.id)
+        #expect(model.sessions.isEmpty)
+        #expect(model.sessionIDs(in: ws).isEmpty)
+        #expect(model.emptyPaneIDs(in: ws) == [workspace.tabGroups[0].tabs[0].focusedPaneID])
+        #expect(model.displayTitle(for: workspace.tabGroups[0].tabs[0]) == "New Session")
         #expect(model.changeCount == 1)
     }
 
-    @Test func newTabResolvesLaunchFromProfile() throws {
-        let (model, _, group) = makeModel()
-        let tabID = try #require(model.newTab(in: group, profile: Profile.codex.id, workingDirectory: "/repo"))
-        let tab = try #require(model.location(of: tabID))
-        #expect(tab.tabGroup == group)
-        let session = try #require(model.sessions.last)
-        #expect(session.launch == LaunchSpec(program: "codex"))
-        #expect(session.workingDirectory == "/repo")
-        #expect(model.displayTitle(for: try #require(model.tab(containing: model.workspaces[0].tabGroups[0].tabs[1].focusedPaneID))) == "Codex")
-        #expect(model.workspaces[0].tabGroups[0].selectedTabID == tabID)
+    /// New Tab and New Tab Group make empty panes too.
+    @Test func newTabsAndGroupsAreEmpty() throws {
+        let (model, ws, group) = makeModel()
+        let tab = try #require(model.newTab(in: group))
+        let newGroup = try #require(model.newTabGroup(in: ws))
+        #expect(model.sessions.count == 1)
+        #expect(model.sessionIDs(ofTab: tab).isEmpty)
+        #expect(model.sessionIDs(ofTabGroup: newGroup).isEmpty)
+        #expect(model.emptyPaneIDs(in: ws).count == 2)
+        #expect(model.workspaces[0].tabGroups[0].selectedTabID == tab)
+        #expect(model.focusedSessionID(in: ws) == nil, "the new group's empty pane is focused")
     }
 
     @Test func splitAndClosePane() throws {
@@ -44,13 +52,25 @@ struct AppModelTests {
         var tab = model.workspaces[0].tabGroups[0].tabs[0]
         #expect(tab.layout.leaves() == [original, new])
         #expect(tab.focusedPaneID == new)
-        #expect(model.sessions.count == 2)
+        #expect(tab.pane(new)?.isEmpty == true, "a split asks like any new pane")
+        #expect(model.sessions.count == 1)
 
+        var removed: Set<SessionID> = []
+        model.onSessionsRemoved = { removed.formUnion($0) }
         model.closePane(new)
+        #expect(removed.isEmpty, "an empty pane has nothing to end")
         tab = model.workspaces[0].tabGroups[0].tabs[0]
         #expect(tab.layout == .pane(original))
         #expect(tab.focusedPaneID == original)
         #expect(tab.panes.map(\.id) == [original])
+        #expect(model.sessions.count == 1)
+
+        // An empty pane can be split, and closed back.
+        let empty = try #require(model.splitPane(original, axis: .vertical))
+        let second = try #require(model.splitPane(empty, axis: .horizontal))
+        #expect(model.closePane(empty) == .closedPane(empty, in: tab.id))
+        #expect(model.closePane(second) == .closedPane(second, in: tab.id))
+        #expect(model.workspaces[0].tabGroups[0].tabs[0].layout == .pane(original))
         #expect(model.sessions.count == 1)
     }
 
@@ -118,6 +138,7 @@ struct AppModelTests {
     @Test func moveTheLastTabToAnotherWorkspaceRemovesTheWorkspace() throws {
         let (model, ws, _) = makeModel()
         let other = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let target = try #require(model.workspace(other)?.tabGroups.first?.id)
         let tab = model.workspaces[0].tabGroups[0].tabs[0].id
         var removed: Set<SessionID> = []
@@ -184,6 +205,7 @@ struct AppModelTests {
     @Test func deleteWorkspaceRemovesSessions() {
         let (model, ws, _) = makeModel()
         let other = model.newWorkspace()
+        model.fillEmptyPanes()
         #expect(model.sessions.count == 2)
         model.deleteWorkspace(ws)
         #expect(model.workspaces.map(\.id) == [other])
@@ -211,6 +233,13 @@ struct AppModelTests {
         model.reopenWorkspace(ws); #expect(bumped())
         let session = model.sessions[0].id
         model.setTitle("title", for: session); #expect(bumped())
+        let empty = try #require(model.newTab(in: group).flatMap { model.tab($0)?.focusedPaneID }); #expect(bumped())
+        _ = try #require(model.startSession(in: empty, request: SessionRequest())); #expect(bumped())
+        let favorite = model.addFavorite(Favorite(name: "", request: SessionRequest())); #expect(bumped())
+        model.updateFavorite(Favorite(id: favorite, name: "F", request: SessionRequest())); #expect(bumped())
+        _ = model.addFavorite(Favorite(name: "G", request: SessionRequest())); #expect(bumped())
+        model.moveFavorite(favorite, to: 1); #expect(bumped())
+        model.removeFavorite(favorite); #expect(bumped())
         model.deleteWorkspace(ws); #expect(bumped())
 
         // No-ops do not signal.
@@ -219,6 +248,9 @@ struct AppModelTests {
         model.closeTab(TabID.generate()); #expect(!bumped())
         model.focus(pane: PaneID.generate()); #expect(!bumped())
         model.deleteWorkspace(WorkspaceID.generate()); #expect(!bumped())
+        #expect(model.startSession(in: PaneID.generate(), request: SessionRequest()) == nil); #expect(!bumped())
+        model.removeFavorite(FavoriteID.generate()); #expect(!bumped())
+        model.moveFavorite(FavoriteID.generate(), to: 0); #expect(!bumped())
     }
 
     @Test func closePaneFocusesNearestPaneOfSiblingBranch() throws {
@@ -279,7 +311,8 @@ struct AppModelTests {
         #expect(model.workspaces.map(\.id) == opened)
         #expect(model.workspaces[0].name == "Workspace")
         #expect(model.workspaces[0].tabGroups.map(\.name) == ["Main"])
-        #expect(model.sessions.count == 1)
+        #expect(model.sessions.isEmpty, "the fresh workspace's pane is empty")
+        #expect(model.emptyPaneIDs(in: opened[0]).count == 1)
 
         let closedA = Workspace(name: "A", window: WindowState(isOpen: false))
         let closedB = Workspace(name: "B", window: WindowState(isOpen: false))
@@ -311,7 +344,8 @@ struct AppModelTests {
         #expect(reopened.tabGroups.map(\.name) == ["Main"])
         #expect(reopened.tabGroups[0].tabs.count == 1)
         #expect(reopened.selectedTabGroupID == reopened.tabGroups[0].id)
-        #expect(model.sessions.map(\.profileID) == [Profile.shell.id])
+        #expect(reopened.tabGroups[0].tabs[0].panes.map(\.isEmpty) == [true])
+        #expect(model.sessions.isEmpty)
     }
 
     @Test func reopenWorkspaceKeepsExistingGroups() throws {
@@ -349,7 +383,7 @@ struct AppModelTests {
     @Test func replaceSessionRebindsPaneAndRetiresOld() throws {
         let (model, _, _) = makeModel()
         let tab = model.workspaces[0].tabGroups[0].tabs[0]
-        let old = try #require(model.session(tab.panes[0].sessionID))
+        let old = try #require(tab.panes[0].sessionID.flatMap { model.session($0) })
         model.setTitle("vim", for: old.id)
         let fresh = Session(
             location: old.location, profileID: old.profileID, launch: old.launch, workingDirectory: old.workingDirectory)
@@ -391,10 +425,12 @@ struct AppModelTests {
 
     @Test func sessionIDsInAWorkspace() throws {
         let (model, ws, group) = makeModel()
-        let tab = try #require(model.newTab(in: group, profile: nil, workingDirectory: nil))
+        let tab = try #require(model.newTab(in: group))
         let pane = try #require(model.workspace(ws)?.tabGroups[0].tabs.first { $0.id == tab }?.focusedPaneID)
         _ = model.splitPane(pane, axis: .horizontal)
         let other = model.newWorkspace(name: "Other")
+        #expect(model.sessionIDs(in: ws).count == 1, "empty panes have no session")
+        model.fillEmptyPanes()
         #expect(model.sessionIDs(in: ws).count == 3)
         #expect(Set(model.sessionIDs(in: ws)).isDisjoint(with: model.sessionIDs(in: other)))
         #expect(model.sessionIDs(in: other).count == 1)

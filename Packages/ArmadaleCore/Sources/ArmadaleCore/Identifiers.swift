@@ -145,6 +145,12 @@ public struct HostID: ShortIdentifier {
     public init(raw: String) { self.raw = raw }
 }
 
+/// Identifies a ``Favorite``.
+public struct FavoriteID: ShortIdentifier {
+    public let raw: String
+    public init(raw: String) { self.raw = raw }
+}
+
 /// Identifies a ``Profile``. Unlike the other identifiers it accepts any
 /// non-empty string, so the built-in profiles can use readable reserved IDs
 /// (`builtin.*`) that can never collide with generated ones.

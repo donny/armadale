@@ -33,11 +33,14 @@ struct CleanExitTests {
     @Test func aCleanExitClosesItsPaneAndOthersKeepThePlaceholder() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let first = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
         let second = try #require(model.splitPane(first, axis: .vertical))
+        model.fillEmptyPanes()
         let third = try #require(model.splitPane(second, axis: .horizontal))
-        let agentTab = try #require(model.newTab(in: group, profile: Profile.claudeCode.id))
+        model.fillEmptyPanes()
+        let agentTab = try #require(model.newTab(in: group, starting: Profile.claudeCode.id))
         let agentPane = try #require(model.tab(agentTab)?.focusedPaneID)
         let (registry, settings) = makeRegistry(model)
         defer { settings.removeTestDefaults() }
@@ -64,6 +67,7 @@ struct CleanExitTests {
     @Test func theOnlyPaneOfTheOnlyWorkspaceClosesOnACleanExit() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let shell = try #require(model.sessionIDs(in: workspace).first)
         let (registry, settings) = makeRegistry(model)
         defer { settings.removeTestDefaults() }
@@ -86,7 +90,8 @@ struct CleanExitTests {
         [ProgramExit.exited(3), .signaled(15), nil, .signaled(15), nil] as [ProgramExit?]))
     func theOnlyPaneKeepsThePlaceholderWhenTheEndIsNotClean(profile: ProfileID?, exit: ProgramExit?) throws {
         let model = AppModel(defaultWorkingDirectory: "/")
-        let workspace = model.newWorkspace(name: "W", profile: profile)
+        let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes(profile: profile ?? Profile.shell.id)
         let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
         let (registry, settings) = makeRegistry(model)
         defer { settings.removeTestDefaults() }
@@ -104,14 +109,18 @@ struct CleanExitTests {
     @Test func restoredSessionsThatExitedCleanlyAreClosedAtLaunch() throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab1 = try #require(model.selectedTab(in: workspace))
         let tab2 = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let tab3 = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
         let s1 = try session(of: tab1.focusedPaneID, in: model)
         let s2 = try session(of: try #require(model.tab(tab2)?.focusedPaneID), in: model)
         let s3 = try session(of: try #require(model.tab(tab3)?.focusedPaneID), in: model)
         let other = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let lone = try session(of: try #require(model.selectedTab(in: other)?.focusedPaneID), in: model)
         let (registry, settings) = makeRegistry(model, restored: [s1, s2, s3, lone])
         defer { settings.removeTestDefaults() }
@@ -136,10 +145,14 @@ struct CleanExitTests {
         let runtime = ZmxRuntime(directory: directory)
         let model = AppModel(defaultWorkingDirectory: "/")
         let first = model.newWorkspace(name: "Workspace")
+        model.fillEmptyPanes()
         let second = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(first)?.selectedTabGroupID)
         _ = model.newTab(in: group)
+        model.fillEmptyPanes()
         _ = model.newTabGroup(in: second)
+        model.fillEmptyPanes()
         let restored = model.sessionOrder
         #expect(restored.count == 4)
         for (index, id) in restored.enumerated() {
@@ -156,6 +169,9 @@ struct CleanExitTests {
         #expect(opened.count == 1)
         #expect(model.workspaces.map(\.id) == opened)
         #expect(model.workspaces.first?.name == "Workspace", "the name is free again")
+        #expect(model.sessions.isEmpty, "its pane is empty")
+        #expect(model.emptyPaneIDs(in: try #require(opened.first)).count == 1)
+        model.fillEmptyPanes() // what opening its window does until step 10c
         #expect(model.sessions.count == 1)
         #expect(Set(model.sessions.map(\.id)).isDisjoint(with: restored))
     }
@@ -170,9 +186,11 @@ struct CleanExitTests {
         let runtime = ZmxRuntime(directory: directory)
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let tab1 = try #require(model.selectedTab(in: workspace)?.id)
         for _ in 0..<4 { _ = model.newTab(in: group) }
+        model.fillEmptyPanes()
         let ids = model.sessionIDs(in: workspace)
         #expect(ids.count == 5)
         let (clean, killed, unrecorded, notPersistent, kept) = (ids[0], ids[1], ids[2], ids[3], ids[4])
@@ -193,11 +211,12 @@ struct CleanExitTests {
     @Test func restoredRemoteSessionsThatExitedCleanlyAreClosedWhenTheHostAnswers() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let host = model.addHost(name: "VM", sshDestination: "vm")
         var remote: [SessionID] = []
         for _ in 0..<4 {
-            let tab = try #require(model.newTab(in: group, onHost: host))
+            let tab = try #require(model.newTab(in: group, starting: Profile.shell.id, at: .remote(host: host), workingDirectory: "~"))
             let id = try session(of: try #require(model.tab(tab)?.focusedPaneID), in: model)
             model.setRuntimeVersion("0.8.1", for: id)
             remote.append(id)
@@ -223,11 +242,13 @@ struct CleanExitTests {
     @Test func aHostsFirstListingCanEmptyAWorkspace() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let other = model.newWorkspace(name: "Other")
+        model.fillEmptyPanes()
         let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
         let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
         let localTab = try #require(model.selectedTab(in: workspace)?.id)
         let host = model.addHost(name: "VM", sshDestination: "vm")
-        let tab = try #require(model.newTab(in: group, onHost: host))
+        let tab = try #require(model.newTab(in: group, starting: Profile.shell.id, at: .remote(host: host), workingDirectory: "~"))
         model.closeTab(localTab)
         let remote = try session(of: try #require(model.tab(tab)?.focusedPaneID), in: model)
         model.setRuntimeVersion("0.8.1", for: remote)
