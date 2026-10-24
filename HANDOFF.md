@@ -5,7 +5,7 @@ whenever work pauses. The durable rules for working in this repository are
 in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
 instructions are in `README.md`.
 
-## Status (October 23, 2026)
+## Status (October 24, 2026)
 
 Steps 1–9 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
@@ -171,7 +171,32 @@ the bundled persistence helper stays universal for Intel Mac hosts.
 
 ## Next
 
-The build order is complete. Candidates, each needing an owner decision:
+**Step 10, New Session (owner's request, October 24, 2026), specified,
+not started.** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
+and favorites", §2 (`Pane.sessionID` optional, `SessionOptions`,
+`SessionRequest`, `Favorite`, the new intents), §3 (schema 2), §10 and
+§12 (step 10, three sub-steps) hold the agreed design. In short: a new
+pane never starts a shell by itself; it shows a chooser with the saved
+favorites, Cancel and New Session…; the New Session dialog (a sheet)
+takes Local or SSH (a picker of saved hosts plus Add Host…), a working
+directory, a profile, per-agent options (Claude Code: skip permissions,
+continue, model; Codex: bypass approvals and sandbox, sandbox mode,
+model; both: additional arguments) and an Add to Favorites checkbox with
+a prefilled name; Cancel and Start. Favorites are saved with the layout
+and get a Settings › Favorites page. Removed: File › New Tab with
+Profile, File › New Tab on Host, the tab bar "+" context menu, General's
+default profile and directory. Splits ask too; Respawn is unchanged; a
+chooser pane survives a quit as a chooser pane. Decisions the owner made
+on the way: keep the word Profile and the Profiles and Hosts pages as
+they are; the word for the thing is "session"; the button is Start; a
+favorite whose host or profile is gone is shown broken until edited or
+removed. The flag names were read from `claude 2.1.304 --help` and
+`codex-cli 0.163.0 --help` on October 24, 2026 (Codex has no
+`--full-auto` any more). Order: 10a model and removals, 10b dialog and
+Settings › Favorites, 10c the chooser; each through the implementer →
+reviewer loop with the owner's go-ahead first.
+
+Other candidates, each needing an owner decision:
 the Ghostty second renderer (below), the open items below, a public home
 for an update feed, and what step 8 should say or do about macOS 27's
 "Allow in the Background" switch, which ends every session a few seconds

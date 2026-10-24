@@ -52,12 +52,17 @@ App
   of the selected tab group.
 - **Tab** — a layout of one or more panes. Its title defaults to the focused
   pane's session title and can be renamed.
-- **Pane** — a rectangle in the tab's split tree. A pane always has exactly
-  one session, so the pane tree is also the session layout.
+- **Pane** — a rectangle in the tab's split tree. A pane has exactly one
+  session, or none yet: since October 24, 2026 a new pane starts **empty**
+  and shows the *New Session* chooser (section 8, "New sessions") until
+  the user picks a favorite or fills in the New Session dialog, so the pane
+  tree is the session layout plus the panes still being decided.
 - **Session** — the persistent thing: a working directory, a launch profile
   (shell, command, Claude, Codex…), a location (local or an SSH host), and a
   runtime state. Sessions are only ever created by Armadale; it never adopts
-  sessions created elsewhere.
+  sessions created elsewhere. A **favorite** is a saved recipe for one
+  (profile, location, directory, options, and a name); starting it creates
+  a fresh session every time.
 
 ### Sidebar semantics
 
@@ -201,7 +206,7 @@ indirect enum PaneLayout: Codable, Sendable {
 
 struct Pane: Identifiable, Codable, Sendable {
     let id: PaneID
-    var sessionID: SessionID
+    var sessionID: SessionID?              // nil: empty pane showing the New Session chooser
 }
 
 struct Session: Identifiable, Codable, Sendable {
@@ -213,6 +218,28 @@ struct Session: Identifiable, Codable, Sendable {
     var title: String                      // last OSC 0/2 title, for display
     var createdAt: Date
     var runtimeVersion: String?            // zmx version that created the daemon; nil for ephemeral
+    var options: SessionOptions?           // the dialog's per-session choices; nil for older files
+}
+
+struct SessionOptions: Codable, Sendable {  // what the New Session dialog adds to a profile
+    var skipPermissions: Bool              // Claude: --dangerously-skip-permissions; Codex: --dangerously-bypass-approvals-and-sandbox
+    var continueConversation: Bool         // Claude: --continue (Codex has no flag; ignored)
+    var model: String?                     // --model <m> for either; nil: the agent's default
+    var sandbox: String?                   // Codex: --sandbox <mode>; nil: default
+    var additionalArguments: [String]      // appended last, for any profile with a program
+}
+
+struct SessionRequest: Codable, Sendable { // the dialog's result; a favorite minus its name
+    var location: Location
+    var profileID: ProfileID
+    var workingDirectory: String           // "" or "~": home; remote paths are the host's
+    var options: SessionOptions
+}
+
+struct Favorite: Identifiable, Codable, Sendable {
+    let id: FavoriteID
+    var name: String
+    var request: SessionRequest
 }
 
 struct Host: Identifiable, Codable, Sendable {   // SSH target
@@ -239,6 +266,20 @@ struct Profile: Identifiable, Codable, Sendable {
 Built-in profiles ship for **Shell**, **Claude Code** (`claude`), and
 **Codex** (`codex`). Users can add their own in Settings. An SSH session is
 not a profile: it is any profile with a `.remote(host)` location.
+
+*October 24, 2026:* a session's arguments are the profile's
+`launchArguments` (its own plus the attention integration's), then the
+`SessionOptions` the New Session dialog chose
+(`AgentIntegration.arguments(for: options)`, a data table per agent that
+is re-checked against the installed agents like the rest of section 10;
+nothing for a shell or a `.command` profile except `additionalArguments`),
+then `additionalArguments`. The options are recorded on the session
+(`Session.options`), so **Respawn** composes the profile as it is then with
+the session's own options (`launchForRespawn(of:)`), and an older file's
+session without options respawns as before. `Favorite`s are saved with the
+layout, in the order the user keeps them in Settings › Favorites; a
+favorite whose host or profile is gone is kept and shown as broken
+(`AppModel.favoriteProblem(_:)` says why) until edited or removed.
 
 *Step 5:* a session still records the `LaunchSpec` it was created with, so
 a running session is unaffected by later profile edits, but **Respawn uses
@@ -307,10 +348,21 @@ host intents `addHost` (a blank name becomes a unique "New Host"),
 default; a blank or relative remote directory becomes `~/.armadale`),
 `removeHost` (its sessions stay, see section 6), `sessionIDs(onHost:)` and
 `newTab(in:onHost:profile:)` (home directory on the host, default
-profile). The default
-profile and directory are not model state: they are preferences
-(section 8) that the app copies into `defaultProfileID` /
-`defaultWorkingDirectory`. Every mutation goes through it, which is what makes the
+profile). *October 24, 2026:* the default profile and directory
+preferences are gone with the chooser (below); `newWorkspace`, `newTabGroup`,
+`newTab(in:)` and `splitPane` now create an **empty pane**
+(`Pane.sessionID == nil`) and no session, `newTab(in:onHost:profile:)` is
+removed, and `startSession(in: PaneID, request: SessionRequest) ->
+SessionID?` creates the session (refused, returning `nil`, for a pane that
+already has one, a request naming a missing profile or host, or a pane that
+is gone) and binds the pane to it. `closePane` on an empty pane removes it
+like any other, cascading tab, group and workspace as section 8 describes,
+with no session to end. Favorites: `addFavorite(_:)` (a blank name becomes
+one made from the request, as the dialog proposes), `updateFavorite(_:)`,
+`removeFavorite(_:)`, `moveFavorite(_:to:)`, `favoriteProblem(_:)`
+(`nil`, or "Host removed" / "Profile removed"). `defaultWorkingDirectory`
+stays, as the home directory a blank request directory means. Every
+mutation goes through `AppModel`, which is what makes the
 sidebar and tab bar trivially consistent across windows and what triggers
 persistence.
 
@@ -322,9 +374,18 @@ persistence.
   `schemaVersion` at the top and explicit migration steps per version.
 - Written atomically (temp file + rename), debounced 500 ms after any model
   change, and synchronously on quit.
-- Stores workspaces, selections, window frames, sessions, hosts, profiles.
+- Stores workspaces, selections, window frames, sessions, hosts, profiles
+  and (schema 2) favorites.
   A window's frame is always its normal (windowed) frame; `isFullScreen`
   says whether it was in full screen (section 8, "App lifecycle").
+- **Schema 2** (October 24, 2026): a pane may have no `sessionID` (an empty
+  pane showing the New Session chooser; it is restored as one, and nothing
+  is started for it), `favorites` is a top-level array, and a session may
+  carry `options`. Every schema 1 file is a valid schema 2 document, so the
+  1 → 2 migration step only bumps the version. The bump exists for the
+  other direction: a build from before this change would fail to decode a
+  pane without a session and fall back to the backup, so it refuses the file
+  as "written by a newer Armadale" instead (`MigrationError.newerVersion`).
 - A field added after a schema version shipped decodes with a default
   when absent (`decodeIfPresent`), without a version bump, when the
   default is right for every file written before it (`Profile.attentionIntegration`,
@@ -1203,10 +1264,11 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
         ├── TabBarHostingView<TabBarView>              SwiftUI, ⌘N badges, "+"
         └── PaneContainerView (NSView)                 or an empty-group state
             └── SplitTreeView (nested PaneSplitViews mirroring PaneLayout)
-                └── PaneView per leaf
-                    ├── surface.view                   terminal
-                    ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
-                    └── focus overlay                  focus border, no hit testing
+                └── PaneView per leaf with a session
+                │   ├── surface.view                   terminal
+                │   ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
+                │   └── focus overlay                  focus border, no hit testing
+                └── NewSessionPaneView per empty leaf  the New Session chooser
 ```
 
 - Window uses `titlebarAppearsTransparent`, `toolbarStyle = .unified`, and
@@ -1376,10 +1438,12 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   (`AppDelegate.sheetOwner(of:)`), so the focused pane under a sheet is
   still looked at.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
-  **General** (default profile, default directory, notifications (step
-  7), confirm‑on‑close),
+  **General** (notifications (step 7), confirm‑on‑close, menu bar mode;
+  the default profile and directory were removed on October 24, 2026 with
+  the New Session chooser, below),
   **Appearance** (font, size, theme, cursor, renderer), **Profiles**,
-  **Hosts**, **Shortcuts** (read‑only table in v1).
+  **Hosts**, **Favorites** (October 24, 2026), **Shortcuts** (read‑only
+  table in v1).
   *Implementation (step 5):* `SettingsWindowController` (one instance,
   owned by the app delegate, opened by ⌘,) hosts an `NSTabViewController`
   with `tabStyle = .toolbar` whose items are `NSHostingController`s of the
@@ -1393,8 +1457,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   - **Preferences** (`Settings/Preferences.swift`) is a typed,
     `@Observable` store over an injected `UserDefaults`; the app's is the
     standard domain, or the suite named by `ARMADALE_DEFAULTS_SUITE` /
-    `-ArmadaleDefaultsSuite <name>`. It holds the default profile and
-    directory (empty = home, `~` expanded), `confirmClosingRunningSession`
+    `-ArmadaleDefaultsSuite <name>`. It holds `confirmClosingRunningSession`
     (same key as step 4), font name and size (6–48, stored; ⌘= / ⌘- / ⌘0
     write through it), the theme choice (one theme, or a light and a dark
     one that follow the system appearance), cursor shape and blink, the
@@ -1438,8 +1501,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   - General › Notifications (step 7): "Notify when an unfocused pane needs
     attention" (`notifyOnAttention`, default on), "Only for agent profiles"
     (`notifyOnlyForAgents`, default on), "Play sound"
-    (`notificationPlaysSound`, default off). File › New Tab with Profile and the tab bar's
-    "+" context menu open a tab with any profile.
+    (`notificationPlaysSound`, default off). (File › New Tab with Profile
+    and the tab bar's "+" context menu, which opened a tab with any
+    profile, were removed on October 24, 2026: every new pane asks.)
   - **Hosts** (step 6, `Settings/HostsSettingsView.swift`): a list with
     add / remove and an editor like Profiles: name, destination (`user@host`
     or an alias; a blank or `-`-prefixed one is flagged), port, identity
@@ -1454,11 +1518,11 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     sessions run on asks first; those sessions become unavailable, never
     killed. Nothing user-visible names the runtime: it is "the persistence
     helper". Hosts are saved with the layout (`state.json`).
-  - **New sessions on hosts**: File › New Tab on Host (filled when it
-    opens: one item per host, "No Hosts", Add Host… which opens Settings ›
-    Hosts) and a "On Host" section in the tab bar "+" context menu create a
-    remote tab in the selected tab group with the default profile in the
-    host's home directory (`~`). Splitting a remote pane stays on its host.
+  - **New sessions on hosts**: the New Session dialog's SSH choice (below;
+    until October 24, 2026 File › New Tab on Host and an "On Host" section
+    in the tab bar "+" context menu created a remote tab with the default
+    profile in the host's home directory, and splitting a remote pane
+    stayed on its host; both are gone with the chooser).
     Remote tabs carry a small host badge (a network glyph; with the host's
     name in the sidebar; orange when not persistent). The window subtitle
     is unchanged by remote tabs, except that it shows the existing
@@ -1485,8 +1549,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     does not reset the cursor: the surface only pushes the cursor style
     when the preference changed, so a program's own DECSCUSR choice
     (vim's insert-mode bar) stays.
-  - A deleted default profile resets the preference to the shell.
-    Ghostty import also accepts the basic X11 colour names (black … white,
+  - Ghostty import also accepts the basic X11 colour names (black … white,
     bright/light variants, grey), meaning the default palette's entries;
     the default palette is the light one when the background is light
     (luminance > 0.5). A rejected file reports its bad lines. User theme
@@ -1494,6 +1557,100 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     Remove deletes an imported theme, and choices using it fall back to
     the defaults. A font picked in the font panel that is not fixed-pitch
     is refused with a message.
+
+### New sessions: the chooser, the dialog and favorites (October 24, 2026)
+
+Owner's request: a new pane never starts a local shell by itself. It asks.
+
+- **Every new pane is empty** (`Pane.sessionID == nil`) and shows the
+  **New Session chooser** in place of a terminal: File › New Workspace
+  (⌘N), New Tab Group (⇧⌘N), New Tab (⌘T), Split Right / Down (⌘D / ⇧⌘D),
+  the tab bar's "+", the sidebar's New Tab / New Tab Group, and the fresh
+  workspace a launch with nothing to restore makes
+  (`ensureWorkspacesToOpen`). A split no longer copies the pane's profile
+  and directory; it asks like the rest. Respawn is untouched: it belongs to
+  a pane that has a session.
+- **The chooser** (`NewSessionPaneView`, SwiftUI hosted in the pane's
+  place, one per empty pane, owned by the content controller rather than
+  the `SessionRegistry`, which only knows sessions) shows the heading
+  "New Session", the list of favorites (profile icon and name, host badge
+  for a remote one, directory in secondary text; a broken favorite is
+  dimmed with its reason and does nothing), and two buttons: **Cancel** and
+  **New Session…**. A single click on a favorite starts it in this pane.
+  Keyboard: the empty pane is first responder when focused (as a pane with
+  a placeholder is); ↑/↓ move a selection through the favorites, Return
+  starts the selected favorite or, with none selected, opens the dialog,
+  and Escape cancels. A right-click on a favorite offers **Edit…** (the
+  dialog in edit mode) and **Remove**. Cancel closes the pane through the
+  normal close path with no confirmation (nothing is running), so when it
+  was the tab's only pane the tab, group and workspace cascade as a clean
+  exit does (section 4): New Workspace then Cancel closes the new window
+  again. An empty pane's tab is titled "New Session" and has no status
+  glyph; it needs no attention, counts as no session for the quit question
+  and menu bar mode, and does not block anything.
+- **The New Session dialog** (`NewSessionSheet`, a SwiftUI form in a sheet
+  on the workspace window; `WorkspaceActions.newSession(in: PaneID)`) has:
+  - **Location**: Local or SSH (segmented). SSH shows a picker of the saved
+    hosts (`Host.displayName`) and an **Add Host…** button that opens
+    Settings › Hosts; the sheet stays and its picker follows the model, so
+    the host added there can be picked without starting over. With no host
+    saved the picker reads "No Hosts" and Start is disabled while SSH is
+    selected. Host details (port, identity file, config file, remote
+    directory) stay in Settings › Hosts; the dialog never duplicates them.
+  - **Working directory**: a text field, prefilled with the directory of
+    the window's focused pane that has a session (the registry's last
+    known directory, else the session's), else the home directory; empty
+    or `~` means home. Local shows **Choose…** (an open panel for a folder;
+    `~` abbreviation as the old General setting did). Remote directories
+    are the host's and are passed through untouched.
+  - **Profile**: a picker of every profile (icon and name), built-ins and
+    the user's own, in Settings order; the shell is preselected.
+  - **Options**, shown for a profile whose flavor Armadale knows (section
+    10) and otherwise only the arguments field: for **Claude Code** "Skip
+    permission checks (--dangerously-skip-permissions)", "Continue the most
+    recent conversation (--continue)", and a **Model** text field (empty:
+    Claude's default; the flag is `--model`); for **Codex** "Skip approvals
+    and sandbox (--dangerously-bypass-approvals-and-sandbox)", a
+    **Sandbox** picker (Default, read-only, workspace-write,
+    danger-full-access; `--sandbox`) and **Model** (`--model`). A free
+    **Additional arguments** field (one line, split like a shell: spaces
+    separate, single and double quotes group, `ShellWords.split` in
+    `ArmadaleCore`, pure and tested) for any profile with a program. The
+    flag names come from `claude 2.1.304 --help` and `codex-cli 0.163.0
+    --help` on this Mac (Codex has no `--full-auto` any more and no resume
+    flag; `resume` is a subcommand), and live in `AgentIntegration` with
+    the other researched facts, so an upgrade re-check covers them. The
+    text next to each option says the flag, as the Profiles editor does
+    for the attention setting.
+  - **Add to Favorites**: a checkbox that reveals a **Name** field
+    prefilled from the choices ("Claude Code in ~/work", "Shell on
+    lima-default in ~"), editable. The favorite is saved when Start is
+    pressed, in addition to starting the session.
+  - Buttons **Cancel** and **Start** (Return; disabled while the form is
+    invalid: SSH with no host, a directory containing NUL). Escape cancels.
+    Start calls `startSession(in:request:)`; the pane's view becomes the
+    session's `PaneView` and takes keyboard focus. In **edit mode** (from
+    a favorite's Edit… or Settings › Favorites) the title is "Edit
+    Favorite", the name field is always shown, the buttons are Cancel and
+    **Save**, and nothing is started.
+- **Settings › Favorites** (`Settings/FavoritesSettingsView.swift`): the
+  list (drag to reorder, which is the chooser's order) with add / remove
+  and the same form as an editor on the right, like Profiles and Hosts;
+  edits save when a field's editing ends. A broken favorite shows its
+  reason and lets the user pick another host or profile. Removing a host
+  or deleting a profile leaves the favorites that used it, broken; the
+  host removal alert mentions how many.
+- **Removed**: File › New Tab with Profile, File › New Tab on Host (and the
+  Add Host… item under it), the tab bar "+" context menu (its help text is
+  now just "New Tab"), Settings › General's default profile and directory
+  (the preference keys are left unread), `Preferences.defaultProfileID` /
+  `defaultWorkingDirectory`, `AppModel.defaultProfileID`,
+  `newTab(in:onHost:profile:)`. The Shortcuts table is unchanged: nothing
+  here has a key equivalent.
+- **Persistence**: an empty pane is saved as a pane without a session and
+  comes back as an empty pane showing the chooser (section 3, schema 2).
+  The repair step keeps it; only a pane whose `sessionID` names a missing
+  session is still repaired as before.
 
 ### App lifecycle
 
@@ -1896,6 +2053,11 @@ without a default key: Close Tab, Close Tab Group, Delete Workspace, and
 (step 7) Window › Clear All Attention. (Renaming is inline, in the sidebar
 and the tab bar, and has no menu command.)
 
+*October 24, 2026:* in an empty pane (section 8, "New sessions") Return
+opens the New Session dialog or starts the selected favorite, ↑/↓ select a
+favorite and Escape cancels; the dialog's Return is Start. No menu item was
+added or rebound.
+
 *Step 7:* Window › Next Pane Needing Attention is ⌃⌘A. It is free in this
 table, in Ghostty's macOS defaults (checked against `src/config/Config.zig`:
 Ghostty binds ⌃⌘ only with arrows, `=`, `f`, `[`, `]` and ⇧⌃⌘J) and in
@@ -1909,11 +2071,18 @@ nothing needs attention.
 
 ## 10. Agent sessions
 
-A pane is "just a shell" by default. The agent profiles only add:
+A pane runs whatever the New Session dialog chose (until October 24, 2026
+it was "just a shell" by default). The agent profiles only add:
 
 - a launch program (`claude`, `codex`) and arguments; the resolved
   `LaunchSpec` is stored on the session, and a respawn takes the profile
-  as it is then (falling back to the stored launch if the profile is gone);
+  as it is then plus the session's own `SessionOptions` (falling back to
+  the stored launch if the profile is gone);
+- (October 24, 2026) the per-session options the dialog offers for the
+  agents Armadale knows, as a flag table in `AgentIntegration`
+  (section 8, "New sessions"); checked against `claude 2.1.304` and
+  `codex-cli 0.163.0`, to be re-checked with the rest of this section when
+  either is upgraded;
 - an **attention** rule: a bell (BEL) or an OSC 9 / OSC 777 notification in
   an unfocused pane sets the tab's attention state, shows a badge on the Dock
   icon count, and optionally posts a `UNUserNotification`.
@@ -2387,11 +2556,27 @@ The build order is complete.
 9. **Ship** — Developer ID signing, `scripts/release.sh` (archive,
    verify, notarize, staple, DMG), README release section (section 11,
    "Release pipeline"). No updater and no crash reporting in v1. *Done.*
+10. **New Session** (owner's request, October 24, 2026; section 8, "New
+    sessions"), in three sub-steps, each through the loop: **10a** the
+    model (empty panes, `SessionOptions`, `Favorite`, `startSession`, the
+    favorite intents, `ShellWords`, schema 2) and the removals (the two
+    File items, the "+" context menu, General's defaults), with the app
+    still starting a shell in every new pane through `startSession` so it
+    stays usable; **10b** the New Session dialog, the option flag table,
+    and Settings › Favorites; **10c** the chooser in every new pane,
+    Cancel's cascade, restore of empty panes, and the README.
 
 ---
 
 ## 13. Risks and open points
 
+- **New Session (step 10).** A schema 2 file is refused by builds before
+  it (by design; the installed app must be updated before the test build
+  writes the owner's real state, which the isolated state directory already
+  guarantees). The Codex and Claude flag names are version facts and will
+  rot; the chooser adds one more "pane without a terminal" state whose focus
+  and first-responder behaviour must match the placeholder's (the Return
+  bug fixed on October 23, 2026 came from exactly that gap).
 - **zmx maturity.** It is pre‑1.0 (0.8.x) and built with a pre‑release Zig.
   Pinning a release and running a private copy limits exposure. There is
   **no version handshake** between client and daemon: the wire format is
