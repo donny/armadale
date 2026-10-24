@@ -121,7 +121,7 @@ struct PTYProcessTests {
         // exactly three extra bytes a few times (October 23, 2026; see
         // HANDOFF.md); when the count is off, say where the stream first
         // differs so the next failure can be read.
-        #expect(bytes.count == digits + 2 * 1_000_000, Self.describeMismatch(bytes, sizes: sizes))
+        #expect(bytes.count == digits + 2 * 1_000_000, Self.describeMismatch(bytes, sizes: sizes, tty: process.ttyPath))
         #expect(bytes.reduce(0) { $0 + ($1 == 10 ? 1 : 0) } == 1_000_000)
         #expect(bytes.suffix(9) == Array("1000000\r\n".utf8))
         #expect((sizes.max() ?? 0) <= OutputBuffer.maxBatch)
@@ -146,7 +146,7 @@ struct PTYProcessTests {
     /// Where `bytes` first differs from the output of `seq 1 1000000`
     /// (digits plus "\r\n" per line): the offset, the batch it fell in and
     /// the bytes around it, for the count expectation's message.
-    private static func describeMismatch(_ bytes: [UInt8], sizes: [Int]) -> Comment {
+    private static func describeMismatch(_ bytes: [UInt8], sizes: [Int], tty: String) -> Comment {
         var expected: [UInt8] = []
         expected.reserveCapacity(bytes.count)
         for n in 1...1_000_000 { expected.append(contentsOf: Array("\(n)\r\n".utf8)) }
@@ -161,7 +161,8 @@ struct PTYProcessTests {
             offset += size
         }
         return Comment(rawValue: "\(bytes.count) bytes, expected \(expected.count); first difference at \(firstDiff) "
-            + "in batch \(batch) of \(sizes.count); bytes[\(lo)..<\(hi)] = \(hex) | \(text)")
+            + "in batch \(batch) of \(sizes.count) (first batch \(sizes.first ?? 0) bytes) on \(tty); "
+            + "bytes[\(lo)..<\(hi)] = \(hex) | \(text)")
     }
 
     /// Large input is written completely despite partial writes and EAGAIN.

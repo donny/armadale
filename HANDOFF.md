@@ -131,11 +131,27 @@ Session layer
   records that share as a known issue with the numbers, as the zmx flood
   test does, keeps the byte count strict, and prints the first
   mismatching bytes when the count is off (`describeMismatch`), so the
-  next three-byte failure says what the bytes are and which batch they
-  fell in. A possible cause worth checking first: a master file
-  descriptor closed and reused by another PTY while a read source is
-  still registered (the suites run concurrently in one process), which
-  would leak a fragment of one process's output into another's stream.
+  next three-byte failure says what the bytes are, which batch they
+  fell in, and the PTY's device path. Investigated the same evening
+  without a reproduction: 6 runs of the sessions bundle alone and 5
+  full-gate runs with the diagnostic armed all passed (the three
+  failures had coincided with the release build, notarization and DMG
+  install running on the same Mac). Excluded by reading the code: a
+  master descriptor reused while its read source is live (the master is
+  closed only in the source's cancel handler, after the last event
+  handler; reads, the exit source, the exit poll and the drain all run
+  on one serial queue; writes are refused once the descriptor is set to
+  −1 before the close; both PTY ends are close-on-exec), duplication in
+  `OutputBuffer` (batches are taken from one pending array under a lock
+  and never re-delivered), and the app tests' detached notify helper
+  writing to a reallocated device by path (its `sh` waits for it, and
+  its payload is one BEL or a long OSC 777, never three bytes). What is
+  three bytes long in this code base is a focus report, `ESC [ I` or
+  `ESC [ O`, which only a terminal view emits when DECSET 1004 is on;
+  no test writes one to a PTY. Open: wait for the diagnostic to catch
+  the next occurrence; if it shows a focus report, look for a surface
+  answering a replayed `?1004h` into a live PTY in the concurrent
+  session-controller tests.
 - One unexplained rendering glitch: a Claude Code prompt once showed a
   colour code as literal text (`185;249m`) after a replay. Not reproduced.
 
