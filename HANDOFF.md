@@ -57,12 +57,13 @@ warnings; 467 from step 8 on). The working tree was clean and nothing was
 running when work paused (October 19, 2026, evening).
 
 **Releases.** Armadale 0.1.0 (build 1) was built, notarized and stapled
-twice on October 19, 2026 from the committed tree (the second time by
-`install-release.sh` with `--allow-dirty` while that script itself was
-still uncommitted; the app's sources were those of 72cf014). No tag was
-created: `git tag -a v0.1.0 -m "Armadale 0.1.0" 72cf014 && git push
-origin v0.1.0` is the owner's call. The DMG is not kept in the
-repository (`build/` is ignored and wiped by the script).
+on October 19, 2026 from 72cf014 and installed to `~/Applications`
+(untagged). Armadale 0.1.0 (build 2) was built, notarized and stapled by
+`scripts/install-release.sh` on October 23, 2026 from 524c9da (both
+notary submissions accepted) and installed to `~/Applications`, replacing
+build 1; it is tagged **`v0.1.0`** (annotated, pushed). The build number
+is raised with `scripts/bump-build.sh` before each release. The DMG is
+not kept in the repository (`build/` is ignored and wiped by the script).
 
 Step 8 (October 19, 2026) came out of the macOS 27 investigation below:
 Armadale asks before quitting with running sessions and can stay in the
@@ -115,14 +116,26 @@ Session layer
 - The flood test `aFloodIsCutShortByReattaching` is load-sensitive; it
   records a known issue under heavy CPU load rather than failing.
 - `floodArrivesCompleteInBoundedBatches` (PTYProcess, `ArmadaleSessions`)
-  failed once in the full gate on October 23, 2026 while the five
-  packages' tests ran concurrently: 7,888,899 bytes arrived for a
-  `seq 1 1000000` flood instead of 7,888,896 (three unexplained extra
-  bytes), and only 42 % of the bytes came in full 64 KB batches (the
-  test wants over 80 %, which assumes the consumer falls behind). It
-  passed three times in a row on its own afterwards. Load-sensitive like
-  the test above; the three bytes are not understood. Rerun the gate
-  before concluding anything from a single failure.
+  failed in two of three full-gate runs on October 23, 2026 (the five
+  packages' tests run concurrently under `xcodebuild test`), each time
+  with the same delta: 7,888,899 bytes arrived for a `seq 1 1000000`
+  flood instead of 7,888,896, three extra bytes, and the share of bytes
+  in full 64 KB batches was 42 % and then 79.75 % against the 80 % the
+  test wants. It passed three times in a row under `swift test` on its
+  own, and in the gate run between the two failures. The identical
+  three-byte excess means something in the gate's environment adds to
+  the PTY stream, not random loss; not investigated. In two further
+  runs the count was right but no batch was full at all (0 %, 165
+  batches of about 50 KB) on a loaded machine: `seq` was not outrunning
+  the reader, so batches closed on the 16 ms interval. The test now
+  records that share as a known issue with the numbers, as the zmx flood
+  test does, keeps the byte count strict, and prints the first
+  mismatching bytes when the count is off (`describeMismatch`), so the
+  next three-byte failure says what the bytes are and which batch they
+  fell in. A possible cause worth checking first: a master file
+  descriptor closed and reused by another PTY while a read source is
+  still registered (the suites run concurrently in one process), which
+  would leak a fragment of one process's output into another's stream.
 - One unexplained rendering glitch: a Claude Code prompt once showed a
   colour code as literal text (`185;249m`) after a replay. Not reproduced.
 
