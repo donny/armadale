@@ -21,7 +21,7 @@ reviewed and committed on `main`:
 | 7 Agents | dac547f | attention, Dock badge, notifications, Claude Code / Codex integration |
 | 8 Menu bar | bf40d94 | quit question, General preference, accessory mode with status item, End Sessions and Quit |
 | 9 Ship | cb63ef7 | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
-| 10 New Session | 507a52a, 9168f0b, 91f50fb | empty panes, the New Session dialog, favorites, the chooser in every new pane (October 24, 2026) |
+| 10 New Session | 507a52a, 9168f0b, 18faf87 | empty panes, the New Session dialog, favorites, the chooser in every new pane (October 24, 2026) |
 
 The app icon ("Panes": a graphite tile with three panes, the top-right
 one lit coral) was added after step 7: `scripts/render-app-icon.swift`
@@ -173,7 +173,7 @@ the bundled persistence helper stays universal for Intel Mac hosts.
 ## Next
 
 **Step 10, New Session (owner's request, October 24, 2026): done in
-three sub-steps (10a 507a52a, 10b 9168f0b, 10c 91f50fb).** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
+three sub-steps (10a 507a52a, 10b 9168f0b, 10c 18faf87).** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
 and favorites", §2 (`Pane.sessionID` optional, `SessionOptions`,
 `SessionRequest`, `Favorite`, the new intents), §3, §10 and
 §12 (step 10, three sub-steps) hold the agreed design. In short: a new
