@@ -137,9 +137,23 @@ struct HostsSettingsView: View {
     }
 
     private func removalMessage(for id: HostID) -> String {
-        let count = model.sessionIDs(onHost: id).count
+        Self.removalMessage(
+            sessions: model.sessionIDs(onHost: id).count,
+            favorites: model.favorites.filter { $0.request.location == .remote(host: id) }.count)
+    }
+
+    /// The host removal question's text: the sessions on the host (there is
+    /// at least one, or nothing is asked) and the favorites that will be
+    /// broken until edited (DESIGN §8, "New sessions").
+    static func removalMessage(sessions count: Int, favorites: Int) -> String {
         let sessions = count == 1 ? "A session runs" : "\(count) sessions run"
-        return "\(sessions) on this host. \(count == 1 ? "It stays" : "They stay") in \(count == 1 ? "its pane" : "their panes") and \(count == 1 ? "keeps" : "keep") running on the host, but Armadale won’t be able to reach \(count == 1 ? "it" : "them")."
+        var text = "\(sessions) on this host. \(count == 1 ? "It stays" : "They stay") in \(count == 1 ? "its pane" : "their panes") and \(count == 1 ? "keeps" : "keep") running on the host, but Armadale won’t be able to reach \(count == 1 ? "it" : "them")."
+        if favorites > 0 {
+            text += favorites == 1
+                ? " A favorite uses this host and won’t start until you edit it."
+                : " \(favorites) favorites use this host and won’t start until you edit them."
+        }
+        return text
     }
 
     private func remove(_ id: HostID) {

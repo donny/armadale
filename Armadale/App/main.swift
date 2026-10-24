@@ -4,7 +4,8 @@ import AppKit
 // main actor; `delegate` is a global, so it outlives the weak
 // `NSApplication.delegate` reference.
 let delegate = AppDelegate()
-let application = NSApplication.shared
+// The subclass ends sheets before a quit (ArmadaleApplication).
+let application = ArmadaleApplication.shared
 application.delegate = delegate
 application.setActivationPolicy(.regular)
 application.run()

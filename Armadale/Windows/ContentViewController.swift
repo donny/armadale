@@ -149,9 +149,35 @@ final class ContentViewController: NSViewController {
         focusedPaneView?.focusTerminal()
     }
 
-    /// The pane view of the focused pane, if it is on screen.
+    /// The pane view of the focused pane, if it is on screen. `nil` for an
+    /// empty pane (no session yet), which shows a plain view and is never
+    /// given keyboard focus.
     var focusedPaneView: PaneView? {
         shown.flatMap { visiblePanes[$0.focusedPaneID] }
+    }
+
+    /// Called after a new display has been laid out (the New Session
+    /// sheet waits for its pane to be on screen).
+    var onDisplayed: (() -> Void)?
+
+    /// Whether `pane` is on screen in a window, laid out.
+    func isShowing(_ pane: PaneID) -> Bool {
+        !isStopped && view.window != nil && shown?.layout.contains(pane) == true
+    }
+
+    /// A pane whose terminal takes keyboard focus once it is shown (a
+    /// session just started from the New Session dialog).
+    private var pendingFocus: PaneID?
+
+    /// Gives `pane`'s terminal keyboard focus now if it is shown, else as
+    /// soon as it is.
+    func focusWhenShown(_ pane: PaneID) {
+        if let view = visiblePanes[pane] {
+            pendingFocus = nil
+            view.focusTerminal()
+        } else {
+            pendingFocus = pane
+        }
     }
 
     // MARK: Showing the model
@@ -205,6 +231,11 @@ final class ContentViewController: NSViewController {
         if focusChanged || responderLost {
             focusedPaneView?.focusTerminal()
         }
+        if let pending = pendingFocus, let pane = panes[pending] {
+            pendingFocus = nil
+            pane.focusTerminal()
+        }
+        onDisplayed?()
     }
 
     // MARK: From the view to the model
@@ -282,8 +313,9 @@ final class PaneContainerView: NSView {
 
     /// Stands in for a pane whose session is missing (never expected: the
     /// saved state is repaired at launch), or an empty pane (no session
-    /// yet; until step 10c every one is given a shell as it is made, and
-    /// 10c shows the New Session chooser here instead).
+    /// yet): a plain view that never takes keyboard focus. Until step 10c
+    /// the New Session dialog is shown over it as a sheet
+    /// (``NewSessionPresenter``); 10c shows the chooser here instead.
     func blankView(for paneID: PaneID) -> NSView {
         if let view = blankViews[paneID] { return view }
         let view = NSView()

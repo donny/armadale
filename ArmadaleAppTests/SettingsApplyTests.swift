@@ -167,6 +167,34 @@ struct SettingsApplyTests {
         #expect(registry.paneView(for: thirdSession)?.controller.surface is SwiftTermSurface)
     }
 
+    /// The New Session dialog's options survive every respawn, not only the
+    /// first (the fresh session carries them on).
+    @Test func optionsSurviveRepeatedRespawns() async throws {
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        let (model, registry, workspace) = makeRegistry(settings: settings)
+        let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
+        let tab = try #require(model.newTab(in: group))
+        let pane = try #require(model.tab(tab)?.focusedPaneID)
+        let options = SessionOptions(skipPermissions: true, model: "opus", additionalArguments: ["--x"])
+        let first = try #require(model.startSession(
+            in: pane, request: SessionRequest(profileID: Profile.claudeCode.id, options: options)))
+        let controller = try #require(registry.paneView(for: first)?.controller)
+        let expected = Profile.claudeCode.launchArguments
+            + ["--dangerously-skip-permissions", "--model", "opus", "--x"]
+        #expect(model.session(first)?.launch.arguments == expected)
+
+        for round in 1...2 {
+            let before = controller.session.id
+            controller.markEnded()
+            await controller.respawn()
+            #expect(controller.session.id != before, "round \(round)")
+            #expect(controller.session.options == options, "round \(round)")
+            #expect(controller.session.launch.arguments == expected, "round \(round)")
+            #expect(model.session(controller.session.id)?.launch.arguments == expected, "round \(round)")
+        }
+    }
+
     @Test func respawnUsesTheProfileAsItIsNow() async throws {
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }

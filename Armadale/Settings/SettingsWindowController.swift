@@ -3,13 +3,14 @@ import ArmadaleCore
 import SwiftUI
 
 /// Armadale › Settings… (⌘,): one window, with the standard toolbar of
-/// settings tabs (General, Appearance, Profiles, Hosts, Shortcuts), each a
+/// settings tabs (General, Appearance, Profiles, Hosts, Favorites,
+/// Shortcuts), each a
 /// SwiftUI view. The app keeps a single instance; the window remembers
 /// where it was and which tab was shown (in ``Preferences``).
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     enum Tab: String, CaseIterable {
-        case general, appearance, profiles, hosts, shortcuts
+        case general, appearance, profiles, hosts, favorites, shortcuts
 
         var title: String {
             switch self {
@@ -17,6 +18,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .appearance: "Appearance"
             case .profiles: "Profiles"
             case .hosts: "Hosts"
+            case .favorites: "Favorites"
             case .shortcuts: "Shortcuts"
             }
         }
@@ -27,6 +29,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .appearance: "paintpalette"
             case .profiles: "terminal"
             case .hosts: "network"
+            case .favorites: "star"
             case .shortcuts: "keyboard"
             }
         }
@@ -38,6 +41,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .appearance: NSSize(width: 620, height: 640)
             case .profiles: NSSize(width: 780, height: 560)
             case .hosts: NSSize(width: 780, height: 600)
+            case .favorites: NSSize(width: 780, height: 600)
             case .shortcuts: NSSize(width: 620, height: 560)
             }
         }
@@ -56,7 +60,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
         self.settings = settings
         // Read first: adding the tabs selects the first one, which is recorded.
         let saved = settings.preferences.settingsTab.flatMap(Tab.init(rawValue:)) ?? .general
-        tabs = SettingsTabViewController(preferences: settings.preferences)
+        let tabs = SettingsTabViewController(preferences: settings.preferences)
+        self.tabs = tabs
         tabs.tabStyle = .toolbar
         // The window is "Settings" whichever tab is shown (Window menu, accessibility).
         tabs.canPropagateSelectedChildViewControllerTitle = false
@@ -66,6 +71,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .appearance: AnyView(AppearanceSettingsView(settings: settings))
             case .profiles: AnyView(ProfilesSettingsView(model: model))
             case .hosts: AnyView(HostsSettingsView(model: model, tools: hostTools))
+            case .favorites: AnyView(FavoritesSettingsView(model: model) { [weak tabs] in
+                tabs?.selectedTabViewItemIndex = Tab.allCases.firstIndex(of: .hosts) ?? 0
+            })
             case .shortcuts: AnyView(ShortcutsSettingsView(rows: ShortcutTable.rows(from: mainMenu())))
             }
             let hosting = NSHostingController(rootView: root.frame(width: tab.contentSize.width, height: tab.contentSize.height))

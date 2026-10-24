@@ -171,8 +171,8 @@ the bundled persistence helper stays universal for Intel Mac hosts.
 
 ## Next
 
-**Step 10, New Session (owner's request, October 24, 2026): 10a done,
-10b and 10c to go.** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
+**Step 10, New Session (owner's request, October 24, 2026): 10a and 10b
+done, 10c to go.** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
 and favorites", §2 (`Pane.sessionID` optional, `SessionOptions`,
 `SessionRequest`, `Favorite`, the new intents), §3, §10 and
 §12 (step 10, three sub-steps) hold the agreed design. In short: a new
@@ -220,6 +220,37 @@ whether they, like the `-c` overrides §10 records, make Codex run
 (`codex … completion zsh` exits 0). "Add Host…" needs its own way to open
 Settings › Hosts in 10b, since `showHostsSettings` went with the menu.
 Tests: 578 at 10a (129 app + 223 core + 206 sessions + 13 + 7).
+
+**10b (the dialog and Settings › Favorites) is committed:** the New
+Session sheet (`NewSessionSheet` over the view-free `NewSessionForm`,
+tested), Settings › Favorites, `AppDelegate.showSettings(tab:)` for Add
+Host…, and the interim changed: every empty pane now gets the sheet from a
+per-window `NewSessionPresenter` (marked `Step 10b interim`), Cancel
+closes the pane and cascades, so between 10b and 10c the app already
+asks for every new pane, only without the favorites list in the pane.
+The reviewer's blocker: **AppKit's `terminate:` returns without calling
+`applicationShouldTerminate` while any window has a sheet attached**
+(confirmed with a standalone program; `presentAsSheet` and `beginSheet`
+alike), so ⌘Q, the Quit item and SIGTERM did nothing with a New Session
+sheet up. Fixed by `ArmadaleApplication` (an `NSApplication` subclass,
+the principal class) that takes every New Session sheet down before the
+terminate runs; panes stay empty and saved; a cancelled quit brings the
+sheets back. `scripts/check-quit.sh` now has three scenarios (sheet up,
+normal, fallback alert), all passing (SIGTERM with the sheet up quit in
+351 ms). Also fixed from the review: respawn dropped `Session.options`
+after the first respawn (10a bug in `SessionController`); a sheet
+outliving its pane's move to another workspace; a host added while the
+sheet is open becomes the selected host; Choose… is a sheet on the sheet;
+switching Claude Code ↔ Codex clears skip, continue, sandbox and model;
+the New Favorite sheet sizing (`.presentationSizing(.fitted)`, **not
+checked live**). Known from the live passes: the directory prefill comes
+from `Session.workingDirectory`, which only OSC 7 updates, and the
+owner's zsh sends none, so the prefill is `~` until shell integration
+exists (owner decision, not started). Not checked live in 10b: full
+screen and menu bar mode with a sheet up, a host deleted while the sheet
+is open, broken favorites in Settings, the host-removal count sentence,
+Codex options, a real SSH start. Tests: 604 at 10b (155 app + 223 core
++ 206 sessions + 13 + 7).
 
 Other candidates, each needing an owner decision:
 the Ghostty second renderer (below), the open items below, a public home

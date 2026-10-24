@@ -1695,24 +1695,126 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   sessions) and shows nothing, the blank view, until 10c, when the repair
   should turn it into an empty pane that shows the chooser.
 
-*Step 10a interim (removed by 10c).* Until the chooser exists the app
-never shows an empty pane: `WorkspaceActions.withInterimShells(model:near:_:)`
-wraps every intent that makes panes (`WorkspaceActions.newTab`,
-`newTabGroup`, the new `splitFocusedPane(axis:)` behind ⌘D / ⇧⌘D, and
-`AppDelegate.openWindow`, through which ⌘N, the fresh workspace at
-launch and a reopened workspace's fresh group pass) and then starts the
-shell profile, locally, in **every** empty pane of the model, a restored
-one included. The directory is that of the focused pane of the acting
-window's workspace as it was before the intent (its session's
-`workingDirectory`, which OSC 7 keeps current), or home when that pane has
-no session, runs on a host (its directory is the host's) or there is no
-such window. So a split of a remote pane is a local shell at home until
-10b, and no session can be started on a host or with another profile
-(Respawn is unchanged). File › New Tab on Host's Add Host… action
-(`AppDelegate.showHostsSettings`) went with the menu; 10b's dialog needs
-its own way to open Settings › Hosts. `WorkspaceActions.closePane` closes
-an empty pane at once, with no question and nothing to end, which 10c's
-Cancel relies on.
+*Step 10b interim (removed by 10c).* Until the chooser exists, an empty
+pane is asked about with the New Session dialog itself. 10a's interim
+(`withInterimShells`, a local shell in every new pane) is gone: every
+intent that makes panes just makes them empty, and each workspace window
+has a `NewSessionPresenter` (`Windows/NewSessionPresenter.swift`, marked
+`Step 10b interim`) that presents `WorkspaceActions.newSession(in:)` for
+its empty panes, one sheet at a time. That covers every path the 10a
+interim did (⌘T, ⇧⌘N, ⌘D / ⇧⌘D, the tab bar's "+", the sidebar's New Tab
+and New Tab Group, ⌘N, the fresh workspace at launch, a reopened
+workspace's fresh group) and an empty pane restored from the state file,
+without a hook per path. The pane asked about is the focused pane of the
+selected tab if it is empty, else an empty pane on screen, else the first
+empty pane of the workspace, which is revealed first (its tab selected,
+focused, its tab unzoomed). The sheet is presented only once the window
+is on screen with no sheet, not closing and not in a full-screen
+transition, and the content has laid the pane out; the presenter looks
+again when the workspace's empty panes change, the content shows a new
+layout, the window becomes key (after menu bar mode too), a sheet of the
+window ends, or a full-screen transition ends. A sheet whose pane was
+closed, given a session elsewhere, or moved to another workspace (its tab
+dragged there; that workspace's window asks instead) is taken down, and a
+closing window takes its sheet down. **Cancel** (and Escape) closes the empty pane
+through `WorkspaceActions.closePane` with no question, cascading tab,
+group, workspace and window like a clean exit: ⌘N then Cancel closes the
+new window, and cancelling the fresh workspace at launch leaves the app
+with no workspace (its Dock icon stays; ⌘N or a Dock click makes one).
+**Start** starts the session, focuses the pane in the model and gives its
+terminal keyboard focus once it is shown
+(`ContentViewController.focusWhenShown`). An empty pane shows a plain view
+that never takes keyboard focus (`focusedPaneView` is `nil` for it, so
+⌘K and the rename fallback do nothing there).
+
+*Implementation (step 10b).* What the code decides beyond the above:
+
+- The form's rules are `NewSessionForm` (`Panes/NewSessionForm.swift`, an
+  `@Observable` class in the app target with no view code; unit-tested in
+  `NewSessionFormTests`); `NewSessionSheet` and `NewSessionFormFields`
+  (`Panes/NewSessionSheet.swift`) are its views. Modes: new session
+  (Start), new favorite (Settings' "+", Save via `addFavorite`), edit
+  favorite (Save via `updateFavorite`).
+- **Directory prefill.** The source is the window's focused session, or,
+  when the focused pane is the new empty one, the session focused before
+  it was made: `WorkspaceActions.lastFocusedSessionID`, noted by every
+  intent there that makes a pane (and by the target window's actions when
+  the pane is made in another workspace from the sidebar). A window made
+  by ⌘N takes it from the window it was made from (a deviation from "the
+  window's focused pane": the new window has none; 10a did the same). The
+  directory is that session's `Session.workingDirectory`, which only OSC 7
+  updates (there is no separate registry record): with a shell that does
+  not send OSC 7 (seen live: the owner's zsh sets the title but sends no
+  OSC 7) it is the directory the session started in. A remote session
+  gives `~` and the form starts Local.
+- **Hosts.** The picker preselects the only saved host; with several it
+  reads "Choose a Host" and Start waits for a choice. A host added while
+  the dialog is open and SSH is selected becomes the selected host (it was
+  added for this session); otherwise an explicit choice is kept, and the
+  only host, chosen implicitly, becomes an explicit choice when a second
+  appears (`NewSessionForm.hostsDidChange`). It follows
+  `model.hosts`, so a host added through **Add Host…**
+  (`AppDelegate.showSettings(tab:)`, now internal, reached through
+  `WorkspaceActions.showSettings`) can be picked; a host whose destination
+  is blank or unusable (`Host.destinationProblem`, e.g. one just added
+  with "+") disables Start with a note to set it in Settings › Hosts. A
+  favorite's removed host shows as "Host removed" in the picker (and a
+  removed profile as "Profile removed").
+- **Options.** Rows come from the flag table (`OptionFlags`): a row is
+  shown when the profile runs a program and its agent has that flag, its
+  footnote and help name the flag. Titles: Claude Code "Skip permission
+  checks", Codex "Skip approvals and sandbox". A hidden field adds
+  nothing to the request; switching between agent flavors clears
+  everything agent-specific (skip, continue, sandbox, model; the
+  additional arguments stay), so neither a dangerous flag nor a model name
+  the other agent does not know carries over unseen; a favorite whose
+  profile is gone keeps its options until another profile is picked. In
+  edit mode the additional arguments are shown re-quoted
+  (`NewSessionForm.joinedShellWords`, which `ShellWords.split` turns back
+  into the same words).
+- **Name.** It follows `proposedFavoriteName` until the user types one; a
+  saved favorite whose name equals the proposal for its request keeps
+  following when edited.
+- **Validity.** `problem` is, in order: SSH without a host, a NUL in the
+  directory, `requestProblem` (host or profile removed), a host without a
+  usable destination. The problem is shown beside the buttons.
+  Settings' editor saves a broken favorite's other edits (`canSave`: only
+  SSH without any host and a NUL refuse), so it stays broken until a host
+  or profile is picked.
+- **Keys.** Return presses Start / Save, Escape cancels. A focused text
+  field takes Return before the default button sees it (found live), so
+  the fields' `onSubmit` confirms the sheet too; confirming twice is
+  harmless (the pane already has its session; Settings' New Favorite
+  sheet saves once).
+- **Layout.** The sheet is a `.columns` form (it sizes to its content);
+  Settings › Favorites uses `.grouped` like Profiles and Hosts, and its
+  New Favorite sheet uses `.presentationSizing(.fitted)` so it shrinks
+  again when rows go. Choose… opens its folder panel as a sheet on the
+  window the form is in, so the panel cannot outlive the dialog.
+- **Respawn** keeps the session's options on the fresh session too
+  (`SessionController.respawn`), so every respawn composes them, not only
+  the first.
+- **Settings › Favorites.** "+" opens the form as a sheet titled "New
+  Favorite" (rather than adding a blank row, which would save a favorite
+  nobody asked for); the new favorite is selected. Pickers, toggles and
+  the location save at once, text fields when focus leaves them or on
+  Return, and the editor when it goes away. Rows show the profile's icon,
+  the name, and "This Mac · ~/dir" or "host · dir", or the problem in
+  orange with a warning icon. Drag reorders (`moveFavorite`).
+- **Host removal.** The existing question (asked only when sessions run
+  on the host) adds how many favorites will be broken
+  (`HostsSettingsView.removalMessage(sessions:favorites:)`); a host with
+  no sessions is still removed without a question.
+- **Hand-off to 10c.** The chooser replaces `NewSessionPresenter`: delete
+  it and its wiring in `WorkspaceWindowController` (`newSessions`,
+  `canPresentSheet`, the `check()` calls in `windowDidBecomeKey`,
+  `windowDidEndSheet`, the full-screen ends and `content.onDisplayed`),
+  and show the chooser where `PaneContainerView.blankView(for:)` puts the
+  plain view (`ContentViewController.show`). Its New Session… button calls
+  `WorkspaceActions.newSession(in:)`, its Cancel
+  `WorkspaceActions.cancelNewSession(in:)`, and a favorite's Edit… the
+  form in `.editFavorite` mode. `NewSessionForm.Mode` already has
+  everything the chooser needs.
 
 ### App lifecycle
 
@@ -1736,7 +1838,18 @@ Cancel relies on.
   synchronous save) runs from inside the modal session.
   `scripts/check-quit.sh` checks both cases: exit within 2 s (measured:
   119 ms each), with no client left and the daemons alive, and with the
-  fallback alert up, the state saved on the way out. Closing a pane kills its session after a confirmation if it is
+  fallback alert up, the state saved on the way out. *Step 10b:* AppKit's
+  `terminate(_:)` does nothing at all, without asking the delegate, while
+  any window has a sheet attached (measured on macOS 27), so the app's
+  `NSApplication` subclass (`ArmadaleApplication`, the principal class)
+  lets the delegate end every window's New Session sheet first, and any
+  sheet in Settings; the panes stay empty, are saved so and ask again at
+  the next launch, and no sheet comes back unless the quit is cancelled.
+  Every quit path goes through it (⌘Q, the quit Apple Event, SIGTERM, the
+  status menu's Quit and End Sessions and Quit); `check-quit.sh` has a
+  third case, the fresh launch's sheet up (its "normal" case now attaches
+  to a session the helper creates beforehand, since a fresh launch starts
+  none). A close confirmation sheet still holds a quit up, as before. Closing a pane kills its session after a confirmation if it is
   still running or disconnected (configurable), and also kills a session
   that was never shown (restored but not yet attached). Closing a window
   keeps the workspace.

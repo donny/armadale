@@ -143,7 +143,8 @@ agent configuration files. Design deviations are written into
   offers for completion signals and the source lines consulted; re-check
   them when either is upgraded.
 - `scripts/check-quit.sh /path/to/Armadale.app` checks the SIGTERM quit
-  path in two scenarios; run it when touching `AppDelegate` quit code.
+  path in three scenarios (New Session sheet up, normal, fallback alert
+  up); run it when touching `AppDelegate` quit code or sheets.
 - `scripts/release.sh` (Developer ID signed, notarized, stapled DMG) and
   `scripts/install-release.sh` (the same, then installed to
   `~/Applications`) need the Developer ID certificate in the login

@@ -2,9 +2,9 @@ import Foundation
 @testable import ArmadaleCore
 
 extension AppModel {
-    /// What the app's step 10a interim does with a new pane: starts a
-    /// session (by default the shell, locally, in the home directory) in
-    /// every empty pane of every workspace. Returns the sessions started.
+    /// Starts a session (by default the shell, locally, in the home
+    /// directory) in every empty pane of every workspace, as step 10a's
+    /// interim did with new panes. Returns the sessions started.
     @discardableResult
     func fillEmptyPanes(
         profile: ProfileID = Profile.shell.id, location: Location = .local, workingDirectory: String = ""

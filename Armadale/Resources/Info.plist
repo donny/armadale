@@ -28,7 +28,7 @@
 	<string>Copyright © 2026 Donny Kurniawan.
 All rights reserved.</string>
 	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
+	<string>ArmadaleApplication</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

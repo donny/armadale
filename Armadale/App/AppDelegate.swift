@@ -7,7 +7,7 @@ import UserNotifications
 /// Loads state, owns the ``AppModel``, opens one window per open workspace,
 /// and persists every model change (debounced) and on quit.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, QuitPreparing {
     let model: AppModel
     /// Preferences, themes and renderers.
     let settings: AppSettings
@@ -390,7 +390,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// Before AppKit's `terminate(_:)` (``ArmadaleApplication``), which does
+    /// nothing while a sheet is attached: every window's New Session sheet
+    /// is taken down without closing its pane (saved empty, it asks again at
+    /// the next launch) and no new one comes up until the quit is cancelled;
+    /// a sheet in Settings (New Favorite, Configure…) is ended too.
+    func prepareForQuit() {
+        for controller in windowControllers.values { controller.suspendNewSessionsForQuit() }
+        if let window = settingsWindowController?.window, let sheet = window.attachedSheet {
+            NotificationCenter.default.post(name: .armadaleWillQuit, object: nil)
+            if window.attachedSheet === sheet { window.endSheet(sheet) }
+        }
+    }
+
+    /// The quit was cancelled (asked, kept in the menu bar, or ending
+    /// sessions first): empty panes may ask again.
+    private func resumeAfterCancelledQuit() {
+        for controller in windowControllers.values { controller.resumeNewSessions() }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let reply = terminateReply()
+        if reply == .terminateCancel { resumeAfterCancelledQuit() }
+        return reply
+    }
+
+    private func terminateReply() -> NSApplication.TerminateReply {
         // A name typed into an inline rename field counts (on every quit,
         // SIGTERM's included: its handler calls `terminate`), before the
         // state is saved in `applicationWillTerminate`.
@@ -488,7 +513,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         showSettings(tab: nil)
     }
 
-    private func showSettings(tab: SettingsWindowController.Tab?) {
+    /// Settings, on `tab` (the New Session dialog's Add Host… opens Hosts),
+    /// else on the tab shown last.
+    func showSettings(tab: SettingsWindowController.Tab?) {
         if settingsWindowController == nil {
             let registry = registry
             settingsWindowController = SettingsWindowController(
@@ -584,19 +611,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             existing.showWindow(nil)
             return
         }
-        // Step 10a interim: replaced by the New Session chooser in 10c. A
-        // new workspace (⌘N, or the fresh one at launch), a reopened one's
-        // fresh group and any empty pane restored from the state file get
-        // a shell before the window shows them.
-        let near = windowControllers.first { $0.value.window === reference }?.key
-        WorkspaceActions.withInterimShells(model: model, near: near) {
-            if let workspace = model.workspace(id), workspace.window?.isOpen != true || workspace.tabGroups.isEmpty {
-                model.reopenWorkspace(id)
-            }
+        if let workspace = model.workspace(id), workspace.window?.isOpen != true || workspace.tabGroups.isEmpty {
+            model.reopenWorkspace(id)
         }
+        // A new workspace's empty pane (⌘N, the fresh one at launch), a
+        // reopened one's fresh group and an empty pane restored from the
+        // state file ask for their session once the window is on screen
+        // (NewSessionPresenter). The dialog's directory comes from the
+        // window this one was made from.
+        let near = windowControllers.first { $0.value.window === reference }?.value
         let controller = WorkspaceWindowController(model: model, workspaceID: id, registry: registry)
+        controller.actions.lastFocusedSessionID = near.flatMap {
+            model.focusedSessionID(in: $0.workspaceID) ?? $0.actions.lastFocusedSessionID
+        }
         controller.actions.showWorkspace = { [weak self] id in self?.showWorkspace(id) }
         controller.actions.actionsOfWorkspace = { [weak self] id in self?.windowControllers[id]?.actions }
+        controller.actions.showSettings = { [weak self] tab in self?.showSettings(tab: tab) }
         controller.fullScreenSteps = fullScreenSteps
         // Cascade from the current window instead of opening exactly on top.
         if !controller.hadSavedFrame, let reference, let window = controller.window, window !== reference {

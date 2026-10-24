@@ -1,5 +1,6 @@
 import AppKit
 import ArmadaleCore
+import SwiftUI
 
 /// The hierarchy operations of one workspace window, shared by its menu
 /// commands, tab bar and sidebar: selecting, creating, renaming in place
@@ -47,66 +48,126 @@ final class WorkspaceActions {
     // MARK: Creating
 
     /// A new tab in `group`, or in this workspace's selected group. Its
-    /// pane starts empty; until step 10c it is given a shell at once
-    /// (``withInterimShells(model:near:_:)``).
+    /// pane starts empty and asks for its session (DESIGN §8, "New
+    /// sessions"; until step 10c through ``NewSessionPresenter``).
     func newTab(in group: TabGroupID? = nil) {
-        Self.withInterimShells(model: model, near: workspaceID) {
-            if let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID {
-                model.newTab(in: group)
-            } else {
-                model.newTabGroup(in: workspaceID)
-            }
+        noteFocusedSession(beforeCreatingIn: group.flatMap { model.workspaceID(containing: $0) })
+        if let group = group ?? model.workspace(workspaceID)?.selectedTabGroupID {
+            model.newTab(in: group)
+        } else {
+            model.newTabGroup(in: workspaceID)
         }
         if let group { showIfElsewhere(model.workspaceID(containing: group)) }
     }
 
     func newTabGroup(in workspace: WorkspaceID? = nil) {
         let target = workspace ?? workspaceID
-        Self.withInterimShells(model: model, near: workspaceID) {
-            _ = model.newTabGroup(in: target)
-        }
+        noteFocusedSession(beforeCreatingIn: target)
+        _ = model.newTabGroup(in: target)
         showIfElsewhere(target)
     }
 
     /// ⌘D / ⇧⌘D: splits the focused pane. The new pane starts empty (a
-    /// split no longer copies the pane's profile and directory); until step
-    /// 10c it is given a shell in the focused pane's directory.
-    func splitFocusedPane(axis: Axis) {
-        Self.withInterimShells(model: model, near: workspaceID) {
-            _ = model.splitFocusedPane(axis: axis, in: workspaceID)
+    /// split no longer copies the pane's profile and directory) and asks
+    /// like any new pane.
+    func splitFocusedPane(axis: ArmadaleCore.Axis) {
+        noteFocusedSession(beforeCreatingIn: workspaceID)
+        _ = model.splitFocusedPane(axis: axis, in: workspaceID)
+    }
+
+    // MARK: New Session
+
+    /// The session of the last focused pane of this window that had one:
+    /// the New Session dialog's directory comes from it when the focused
+    /// pane is the new, empty one. Noted before every intent here that
+    /// makes a pane; a new window (⌘N) is given the focused session of the
+    /// window it was made from.
+    var lastFocusedSessionID: SessionID?
+
+    /// Records this workspace's focused session, if it has one, as
+    /// ``lastFocusedSessionID``, and that of `other` in its own window's
+    /// actions when a pane is about to be made there.
+    private func noteFocusedSession(beforeCreatingIn other: WorkspaceID? = nil) {
+        if let id = model.focusedSessionID(in: workspaceID) { lastFocusedSessionID = id }
+        if let other, other != workspaceID, let actions = actionsOfWorkspace(other) {
+            actions.noteFocusedSession()
         }
     }
 
-    // MARK: Step 10a interim
+    /// Opens Settings on a tab (the dialog's Add Host…).
+    var showSettings: (SettingsWindowController.Tab) -> Void = { _ in }
+    /// Gives keyboard focus to a pane's terminal once it is on screen.
+    var focusPaneWhenShown: (PaneID) -> Void = { _ in }
+    /// Called when the New Session sheet has gone (started, cancelled or
+    /// dismissed), so the next empty pane can be asked about.
+    var onNewSessionSheetEnded: () -> Void = {}
 
-    // Step 10a interim: replaced by the New Session chooser in 10c.
-    /// Runs `create`, an intent that may add empty panes (new workspace,
-    /// tab group, tab, split, a reopened workspace's fresh group), and then
-    /// starts a session in every empty pane of the model, as Armadale did
-    /// before step 10: the shell profile, on this Mac, in the directory of
-    /// the focused pane of `workspace` as it was *before* `create` (its
-    /// session's last known directory, which OSC 7 keeps current), or the
-    /// home directory when that pane has no session, is remote (its
-    /// directory is the host's) or there is no such workspace. Every path
-    /// that makes panes goes through here (``WorkspaceActions`` and
-    /// `AppDelegate.openWindow`), so the user never sees an empty pane
-    /// before the chooser exists. Returns what `create` returned.
-    @discardableResult
-    static func withInterimShells<Result>(
-        model: AppModel, near workspace: WorkspaceID?, _ create: () -> Result
-    ) -> Result {
-        let directory = workspace
-            .flatMap { model.focusedSessionID(in: $0) }
-            .flatMap { model.session($0) }
-            .flatMap { $0.location == .local ? $0.workingDirectory : nil } ?? ""
-        let result = create()
-        let request = SessionRequest(location: .local, profileID: Profile.shell.id, workingDirectory: directory)
-        for id in model.workspaces.map(\.id) {
-            for pane in model.emptyPaneIDs(in: id) {
-                model.startSession(in: pane, request: request)
-            }
+    /// The pane whose New Session sheet is up, if one is.
+    private(set) var newSessionPane: PaneID?
+    private var newSessionSheet: NSViewController?
+    /// The form of the sheet that is up.
+    private(set) var newSessionForm: NewSessionForm?
+
+    /// The New Session dialog for the empty pane `paneID`, as a sheet on
+    /// this window (DESIGN §8). Start starts the session there (saving a
+    /// favorite first when asked) and focuses the pane; Cancel closes the
+    /// pane like a clean exit (``cancelNewSession(in:)``). Does nothing
+    /// while a sheet is up, without a window, or for a pane that is gone
+    /// or has a session.
+    func newSession(in paneID: PaneID) {
+        guard newSessionPane == nil, let window, window.attachedSheet == nil,
+              let presenter = window.contentViewController,
+              model.pane(paneID)?.isEmpty == true
+        else { return }
+        rename.commit()
+        let directorySession = model.focusedSessionID(in: workspaceID) ?? lastFocusedSessionID
+        let form = NewSessionForm(model: model, mode: .newSession(paneID), directorySession: directorySession)
+        let sheet = NSHostingController(rootView: NewSessionSheet(
+            form: form,
+            showHosts: { [weak self] in self?.showSettings(.hosts) },
+            onCancel: { [weak self] in self?.cancelNewSession(in: paneID) },
+            onConfirm: { [weak self] in self?.startNewSession(form) }))
+        sheet.sizingOptions = [.preferredContentSize]
+        newSessionPane = paneID
+        newSessionSheet = sheet
+        newSessionForm = form
+        presenter.presentAsSheet(sheet)
+    }
+
+    /// Start: the session begins in the pane, the sheet goes, and the
+    /// pane's terminal takes keyboard focus once it is shown.
+    func startNewSession(_ form: NewSessionForm) {
+        guard case .newSession(let paneID) = form.mode, form.isValid else { return }
+        // The model first, so the pane is no longer empty when the next
+        // one is looked for.
+        let started = form.start() != nil
+        endNewSessionSheet()
+        guard started else { return }
+        model.focus(pane: paneID)
+        focusPaneWhenShown(paneID)
+    }
+
+    /// Cancel: the sheet goes and the empty pane closes through the normal
+    /// close path with no question (nothing runs there), cascading to its
+    /// tab, tab group and workspace as a clean exit does, so a new window
+    /// whose dialog is cancelled closes again.
+    func cancelNewSession(in paneID: PaneID) {
+        if model.pane(paneID)?.isEmpty == true { closePane(paneID, confirm: false) }
+        endNewSessionSheet()
+    }
+
+    /// Takes the New Session sheet down, if one is up, without starting or
+    /// closing anything (its pane was closed or started elsewhere).
+    func endNewSessionSheet() {
+        guard newSessionPane != nil else { return }
+        let sheet = newSessionSheet
+        newSessionPane = nil
+        newSessionSheet = nil
+        newSessionForm = nil
+        if let sheet, sheet.presentingViewController != nil {
+            sheet.presentingViewController?.dismiss(sheet)
         }
-        return result
+        onNewSessionSheetEnded()
     }
 
     // MARK: Renaming

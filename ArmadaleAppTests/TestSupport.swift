@@ -128,10 +128,10 @@ struct TestDefaults {
 }
 
 extension AppModel {
-    /// What the app's step 10a interim does with new panes
-    /// (`WorkspaceActions.withInterimShells`): starts a session, by default
-    /// the shell on this Mac in the home directory, in every empty pane of
-    /// every workspace. Returns the sessions started.
+    /// Starts a session, by default the shell on this Mac in the home
+    /// directory, in every empty pane of every workspace (what step 10a's
+    /// interim did with new panes; a quick way to give fixtures sessions).
+    /// Returns the sessions started.
     @discardableResult
     func fillEmptyPanes(
         profile: ProfileID = Profile.shell.id, location: Location = .local, workingDirectory: String = ""

@@ -48,23 +48,26 @@ What works today:
   over its last screen, with the status or signal when it is known, and
   Respawn / Close Pane. **Workspace › Respawn All Ended** (⌥⌘R) respawns every ended
   pane of a workspace.
-- **New sessions are chosen per pane** (step 10, in progress): the profile,
-  the location (this Mac or a saved host), the directory and per-agent
-  options are picked for each new pane, and recipes can be saved as
-  favorites. The New Session dialog and the chooser arrive in steps 10b and
-  10c; until then every new tab, tab group, window and split starts the
-  shell on this Mac, in the directory of the window's focused pane (else
-  the home folder), and no other profile or host can be picked. File › New Tab with Profile, File › New Tab on Host,
-  the "+" button's menu and General's default profile and directory are
-  gone.
+- **New sessions are chosen per pane** (step 10, in progress): every new
+  tab, tab group, window and split asks with the **New Session** dialog:
+  Local or SSH (a saved host, with Add Host… opening Settings › Hosts), a
+  directory (prefilled from the window's focused session), a profile, the
+  agent options for Claude Code (skip permission checks, continue, model)
+  and Codex (skip approvals and sandbox, sandbox mode, model), additional
+  arguments, and Add to Favorites. Start starts it; Cancel closes the new
+  pane (so ⌘N then Cancel closes the new window). **Settings › Favorites**
+  lists, edits, reorders and removes favorites. The chooser that lists
+  favorites in a new pane arrives in step 10c. File › New Tab with
+  Profile, File › New Tab on Host, the "+" button's menu and General's
+  default profile and directory are gone.
 - **Settings** (⌘,): General (close confirmation, quitting with running
   sessions, notifications), Appearance (font, size, light and dark themes,
-  Ghostty theme import, cursor, renderer), Profiles, Hosts, and a
-  read-only Shortcuts table generated from the menus.
+  Ghostty theme import, cursor, renderer), Profiles, Hosts, Favorites,
+  and a read-only Shortcuts table generated from the menus.
 - **Remote hosts.** **Settings › Hosts** adds SSH hosts (destination, port,
   identity file, SSH config file, remote folder) with Test Connection and
-  Deploy Now. (Until the New Session dialog in step 10b there is no way
-  to start a new session on a host; existing ones keep working.) A session
+  Deploy Now; a session is started on a host from the New Session
+  dialog's SSH choice. A session
   on a host keeps running there: Armadale installs its private persistence helper under
   `~/.armadale` there on first use, quitting leaves the session running, a
   relaunch reattaches it, and a lost connection shows *Reconnecting…* and
@@ -165,12 +168,16 @@ ZMX_DIR=~/Library/Application\ Support/Armadale/run \
 ```
 
 `scripts/check-quit.sh /path/to/Armadale.app` checks quitting as logout
-does it, in two cases, each with its own scratch state directory: it sends
-SIGTERM (`pkill -x Armadale`) and checks that the app is gone within 2 s.
-Normally, no session client may be left and the session daemon must still
-be alive. With the fallback alert up (it makes `<state dir>/bin` a regular
-file so the session runtime cannot be set up), the quit must not wait for
-the alert and must still save the state.
+does it, in three cases: it sends SIGTERM (`pkill -x Armadale`) and checks
+that the app is gone within 2 s. With the New Session sheet up (a fresh
+launch), the quit must not be held up by the sheet, and the state must be
+saved with the pane still empty. Normally (that pane given a session the
+helper creates beforehand, which the app attaches to), no session client
+may be left and the session daemon must still be alive. With the fallback
+alert up (it makes `<state dir>/bin` a regular file so the session runtime
+cannot be set up, in a second scratch state directory), the quit must not
+wait for the alert and must still save the state. It refuses to run while
+any Armadale is running.
 
 `aFloodIsCutShortByReattaching` floods a session until the client has
 passed the 16 MB limit and been reattached (up to 15 s), then expects the

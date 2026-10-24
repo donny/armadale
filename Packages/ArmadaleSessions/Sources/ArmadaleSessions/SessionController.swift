@@ -361,7 +361,10 @@ public final class SessionController {
             location: old.location,
             profileID: old.profileID,
             launch: delegate?.sessionController(self, launchForRespawning: old) ?? old.launch,
-            workingDirectory: old.workingDirectory)
+            workingDirectory: old.workingDirectory,
+            // The dialog's choices stay with the pane, so every later
+            // respawn composes them again (not only the first).
+            options: old.options)
         session = fresh
         // Full reset: a program that died in the alternate screen or with
         // mouse reporting on must not leave those modes behind.

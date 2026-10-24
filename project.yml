@@ -49,7 +49,7 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "Copyright © 2026 Donny Kurniawan.\nAll rights reserved."
-        NSPrincipalClass: NSApplication
+        NSPrincipalClass: ArmadaleApplication
         # Quitting must go through applicationWillTerminate so state is saved.
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
