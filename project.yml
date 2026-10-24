@@ -48,7 +48,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
-        NSHumanReadableCopyright: "Copyright © 2026 Donny Kurniawan. All rights reserved."
+        NSHumanReadableCopyright: "Copyright © 2026 Donny Kurniawan.\nAll rights reserved."
         NSPrincipalClass: NSApplication
         # Quitting must go through applicationWillTerminate so state is saved.
         NSSupportsAutomaticTermination: false

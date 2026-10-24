@@ -1024,7 +1024,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
                 └── PaneView per leaf
                     ├── surface.view                   terminal
                     ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
-                    └── focus overlay                  border / dim, no hit testing
+                    └── focus overlay                  focus border, no hit testing
 ```
 
 - Window uses `titlebarAppearsTransparent`, `toolbarStyle = .unified`, and
@@ -1081,8 +1081,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   content view extends under both the transparent title bar and the
   floating sidebar.
 - Keyboard focus follows `focusedPaneID`; the focused pane has a subtle
-  accent border, the unfocused ones dim slightly (only while more than one
-  pane is on screen).
+  accent border (only while more than one pane is on screen). Unfocused
+  panes keep their terminal's own background: the dimming overlay of
+  steps 2 to 9 was dropped on October 23, 2026 at the owner's request.
 - The tab bar is custom SwiftUI (not `NSTabView`): it needs shortcut badges,
   status glyphs, drag reordering, and dragging a tab onto a sidebar tab group
   to move it. Tabs share the width (110–220 pt) and scroll when they do not

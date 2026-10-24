@@ -27,8 +27,9 @@ final class PaneView: NSView {
     var titleProvider: () -> String = { "Shell" }
 
     /// How the pane shows focus: nothing while it is the only pane on
-    /// screen; with several, the focused one gets a subtle accent border and
-    /// the others dim slightly.
+    /// screen; with several, the focused one gets a subtle accent border.
+    /// The others are left alone: their terminal keeps its own background
+    /// (an earlier dimming overlay was dropped on October 23, 2026).
     enum FocusStyle: Equatable {
         case alone, focused, unfocused
     }
@@ -140,18 +141,13 @@ final class PaneView: NSView {
     private func updateFocusOverlay() {
         guard let layer = focusOverlay.layer else { return }
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            layer.backgroundColor = nil
             switch focusStyle {
-            case .alone:
+            case .alone, .unfocused:
                 layer.borderWidth = 0
-                layer.backgroundColor = nil
             case .focused:
                 layer.borderWidth = 1.5
                 layer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.55).cgColor
-                layer.backgroundColor = nil
-            case .unfocused:
-                layer.borderWidth = 0
-                layer.backgroundColor = NSColor.black.withAlphaComponent(isDark ? 0.22 : 0.07).cgColor
             }
         }
     }
