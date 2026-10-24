@@ -3,7 +3,8 @@ import Observation
 
 /// What closing a pane or tab ended up closing. Closing cascades upward:
 /// the last pane closes its tab, the last tab removes its tab group, and the
-/// last tab group closes the workspace's window (the workspace itself stays).
+/// last tab group deletes the workspace, even the only one (DESIGN §8,
+/// October 23, 2026: an empty workspace is never kept).
 public enum CloseResult: Equatable, Sendable {
     /// Nothing matched the ID.
     case notFound
@@ -13,9 +14,11 @@ public enum CloseResult: Equatable, Sendable {
     case closedTab(TabID, in: TabGroupID)
     /// The tab group's last tab was closed, so the group was removed too.
     case closedTabGroup(TabGroupID, in: WorkspaceID)
-    /// The workspace's last tab group was removed. The workspace stays in
-    /// the model with `window.isOpen == false`; its window should close.
-    case closedWindow(WorkspaceID)
+    /// The workspace's last tab group was removed, so the workspace was
+    /// deleted from the model (it had no sessions left), even if it was the
+    /// only one; its window closes. With none left, the app opens a fresh
+    /// workspace when it is next asked for a window.
+    case deletedWorkspace(WorkspaceID)
 }
 
 /// The single owner of Armadale's state. Every mutation goes through an
@@ -175,6 +178,26 @@ public final class AppModel {
         return group.tabs.flatMap { tab in tab.layout.leaves().compactMap { tab.pane($0)?.sessionID } }
     }
 
+    /// The workspace that closing `tabGroup` would delete (it is the
+    /// workspace's only group), if any.
+    public func workspaceRemoved(byClosingTabGroup tabGroup: TabGroupID) -> WorkspaceID? {
+        guard let id = workspaceID(containing: tabGroup), workspace(id)?.tabGroups.count == 1 else { return nil }
+        return id
+    }
+
+    /// The workspace that closing `tab` would delete (the only tab of the
+    /// workspace's only group), if any.
+    public func workspaceRemoved(byClosingTab tab: TabID) -> WorkspaceID? {
+        guard let location = location(of: tab), tabGroup(location.tabGroup)?.tabs.count == 1 else { return nil }
+        return workspaceRemoved(byClosingTabGroup: location.tabGroup)
+    }
+
+    /// The workspace that closing `pane` would delete (its last pane), if any.
+    public func workspaceRemoved(byClosingPane pane: PaneID) -> WorkspaceID? {
+        guard let tab = tab(containing: pane), tab.panes.count == 1 else { return nil }
+        return workspaceRemoved(byClosingTab: tab.id)
+    }
+
     /// The title shown for `tab`: its custom title, else the focused
     /// session's title, else the focused session's profile name.
     public func displayTitle(for tab: Tab) -> String {
@@ -216,13 +239,26 @@ public final class AppModel {
         didChange()
     }
 
+    /// At launch: makes a fresh workspace if there is none (the last one
+    /// was emptied and deleted, or a first launch), then returns the
+    /// workspaces whose windows open: every one whose window was open at
+    /// the last quit (or has no window state yet), else the first.
+    public func ensureWorkspacesToOpen() -> [WorkspaceID] {
+        if workspaces.isEmpty { newWorkspace() }
+        let open = workspaces.filter { $0.window?.isOpen ?? true }
+        return (open.isEmpty ? Array(workspaces.prefix(1)) : open).map(\.id)
+    }
+
     /// Records window geometry and visibility for a workspace.
     public func updateWindowState(_ state: WindowState, for id: WorkspaceID) {
         mutateWorkspace(id) { $0.window = state }
     }
 
-    /// Marks a workspace's window open. A workspace whose tab groups were all
-    /// closed gets a fresh "Main" group with one tab of the default profile.
+    /// Marks a workspace's window open. A workspace with no tab groups gets
+    /// a fresh "Main" group with one tab of the default profile. (Closing
+    /// the last group deletes a workspace, and loading drops closed empty
+    /// ones, so only a hand-edited file still holds one: open, or with no
+    /// window state yet.)
     public func reopenWorkspace(_ id: WorkspaceID) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
         if workspaces[index].tabGroups.isEmpty {
@@ -284,7 +320,7 @@ public final class AppModel {
     }
 
     /// Closes a tab group with all its tabs and sessions. Closing the
-    /// workspace's last group marks its window closed (the workspace stays);
+    /// workspace's last group deletes the workspace (even the only one);
     /// otherwise a neighbouring group is selected if this one was.
     @discardableResult
     public func closeTabGroup(_ id: TabGroupID) -> CloseResult {
@@ -324,7 +360,7 @@ public final class AppModel {
 
     /// Closes a tab and removes its sessions. If it was the group's last
     /// tab the group is removed; if that was the workspace's last group the
-    /// workspace's window is marked closed. See ``CloseResult``.
+    /// workspace is deleted. See ``CloseResult``.
     @discardableResult
     public func closeTab(_ id: TabID) -> CloseResult {
         guard let path = path(ofTab: id) else { return .notFound }
@@ -387,14 +423,35 @@ public final class AppModel {
     /// and workspaces. `index` counts positions in the destination *after*
     /// the tab has been removed from its source, and is clamped to the valid
     /// range. The moved tab becomes selected in its new group. A source group
-    /// left empty by a move is kept (only closing removes groups).
+    /// left without tabs is removed, as closing its last tab removes it,
+    /// and so is its workspace if that was its last group (October 23,
+    /// 2026: a tab group is never kept without tabs, nor a workspace
+    /// without tab groups); the window of a removed workspace closes. If
+    /// the removed group was its workspace's selected group and the target
+    /// is in the same workspace, the target becomes the selected group.
     public func moveTab(_ id: TabID, to tabGroupID: TabGroupID, index: Int) {
         guard let source = path(ofTab: id), path(ofTabGroup: tabGroupID) != nil else { return }
         let tab = workspaces[source.workspace].tabGroups[source.tabGroup].tabs.remove(at: source.tab)
-        if workspaces[source.workspace].tabGroups[source.tabGroup].id != tabGroupID {
-            fixTabSelection(workspace: source.workspace, tabGroup: source.tabGroup, removedIndex: source.tab, removedID: id)
+        let sourceGroupID = workspaces[source.workspace].tabGroups[source.tabGroup].id
+        if sourceGroupID != tabGroupID {
+            if workspaces[source.workspace].tabGroups[source.tabGroup].tabs.isEmpty {
+                let wasShown = workspaces[source.workspace].selectedTabGroupID == sourceGroupID
+                workspaces[source.workspace].tabGroups.remove(at: source.tabGroup)
+                let result = groupRemoved(
+                    sourceGroupID, at: TabGroupPath(workspace: source.workspace, tabGroup: source.tabGroup))
+                // The window showed the emptied group: it shows the target
+                // instead, when that is in the same workspace, rather than
+                // the removed group's neighbour.
+                if result == nil, wasShown,
+                   workspaces[source.workspace].tabGroups.contains(where: { $0.id == tabGroupID }) {
+                    workspaces[source.workspace].selectedTabGroupID = tabGroupID
+                }
+            } else {
+                fixTabSelection(
+                    workspace: source.workspace, tabGroup: source.tabGroup, removedIndex: source.tab, removedID: id)
+            }
         }
-        // Re-resolve: indices are unchanged by a tab removal, but be explicit.
+        // Re-resolve: the source group, or its workspace, may be gone.
         guard let target = path(ofTabGroup: tabGroupID) else { return }
         var group = workspaces[target.workspace].tabGroups[target.tabGroup]
         let clamped = min(max(index, 0), group.tabs.count)
@@ -836,17 +893,14 @@ public final class AppModel {
     }
 
     /// Bookkeeping after the group `id` at `path` has been removed from its
-    /// workspace: marks the window closed if no group is left (and returns
-    /// `.closedWindow`), else moves the selection off the removed group and
-    /// returns `nil`.
+    /// workspace. If no group is left, the workspace is deleted, even the
+    /// only one (returns `.deletedWorkspace`; nothing runs in it, so no
+    /// sessions are removed). Otherwise moves the selection off the removed
+    /// group and returns `nil`.
     private func groupRemoved(_ id: TabGroupID, at path: TabGroupPath) -> CloseResult? {
         let groups = workspaces[path.workspace].tabGroups
         guard !groups.isEmpty else {
-            workspaces[path.workspace].selectedTabGroupID = nil
-            var window = workspaces[path.workspace].window ?? WindowState()
-            window.isOpen = false
-            workspaces[path.workspace].window = window
-            return .closedWindow(workspaces[path.workspace].id)
+            return .deletedWorkspace(workspaces.remove(at: path.workspace).id)
         }
         if workspaces[path.workspace].selectedTabGroupID == id {
             workspaces[path.workspace].selectedTabGroupID = groups[min(path.tabGroup, groups.count - 1)].id

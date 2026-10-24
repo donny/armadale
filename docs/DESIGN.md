@@ -40,7 +40,14 @@ App
 - **Workspace** — a window. Owns an ordered list of tab groups and remembers
   its frame, sidebar width and selection. Closing the window does not delete
   the workspace; it stays in the sidebar of other windows and can be reopened.
-  Deleting a workspace (explicit, confirmed) kills its sessions.
+  Deleting a workspace (explicit, confirmed) kills its sessions. Since
+  October 23, 2026 **a tab group is never kept without tabs, and a
+  workspace is never kept without tab groups**: closing or moving away a
+  group's last tab removes the group, and removing a workspace's last group
+  deletes the workspace (section 8), even the only one, so the app may be
+  left with no workspace at all. Loading applies the same rule to older
+  files (section 3), so a closed workspace in the sidebar always has tab
+  groups.
 - **Tab Group** — a named folder of tabs. The tab bar always shows the tabs
   of the selected tab group.
 - **Tab** — a layout of one or more panes. Its title defaults to the focused
@@ -127,10 +134,15 @@ anything: a tab group dropped on another of the same workspace takes its
 place; a tab (from the tab bar or the sidebar) dropped on a tab group
 moves to its end and becomes that group's
 selected tab, while the window keeps showing its current group (Finder-like
-filing; a group left empty by a move is kept and shows an empty state with
-New Tab; ⌘W there closes the group, without asking since nothing runs in
-it). The first click of a double click on a row of another workspace
-brings that workspace's window forward, so the edit happens in that
+filing). Moving a group's last tab away removes the group, as closing that
+tab would, and the workspace too when it was its last group (its window
+closes). If the emptied group was the one the window showed and the target
+is in the same workspace, the window shows the target group. (Since October
+23, 2026; until then the emptied group was kept and showed an empty state
+with New Tab. The repair after every load drops such a group, so that
+state and ⌘W closing it without asking remain only as defensive code,
+should one appear.) The first click of a double click on a row of another
+workspace brings that workspace's window forward, so the edit happens in that
 window's sidebar, where the keyboard now is; Rename chosen from a context
 menu edits in the window it was chosen in. (Renaming used to be a sheet;
 inline editing replaced it, and the Workspace menu's three Rename items
@@ -141,7 +153,12 @@ running or disconnected, or *starting* when a process may exist: a session
 restored from an earlier run before the launch probe has answered, or one
 whose start is under way. A session created in this run whose pane was
 never shown has no process and does not ask. Unreachable (unavailable)
-sessions always ask (`CloseRisk`, unit-tested).
+sessions always ask (`CloseRisk`, unit-tested). When the close removes the
+workspace's last tab group, and so the workspace (section 8), the question
+ends with "The workspace “<name>” will be removed too."
+(`WorkspaceActions.closeConfirmationText`, unit-tested, with
+`AppModel.workspaceRemoved(byClosingPane:)`, `…Tab:`, `…TabGroup:`); this
+never adds a question where none would be asked.
 
 ---
 
@@ -313,6 +330,21 @@ persistence.
   default is right for every file written before it (`Profile.attentionIntegration`,
   `WindowState.isFullScreen`); a change old files cannot be read as
   gets a migration step.
+- Loading drops empty closed workspaces (no tab groups, window closed),
+  the husks that closing a workspace's last tab group left before October
+  23, 2026, even when that leaves none (the app then makes a fresh one).
+  `StateStore.decode` applies `PersistedState.droppingEmptyClosedWorkspaces()`
+  to every file it reads, the backup included, without a version bump:
+  such a workspace holds no tab groups and so no sessions, and files are
+  still readable by older builds; `StateStore.load` reports how many it
+  dropped and the app logs it. The repair that follows every load
+  (`PersistedState.repaired()`) drops tab groups left without tabs (moves
+  kept them before October 23, 2026, and a repair can empty one) and then
+  closed workspaces it left without groups (one whose only group was a
+  duplicate, say), logging each. An empty workspace that is open or has
+  no window state (only a hand-edited file has one) is kept, and opening
+  it makes a fresh "Main" group. The next save writes the file without
+  the husks.
 - Does **not** store scrollback or terminal state; the session daemon holds
   that.
 - A backup of the previous file is kept as `state.json.bak`; a parse failure
@@ -1446,8 +1478,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
 
 - `NSApplicationDelegate` loads `StateStore`, builds `AppModel`, probes each
   backend's live sessions once, then opens every workspace whose window was
-  open at last quit and attaches its visible panes first, the rest lazily
-  when their tab is first shown.
+  open at last quit (else the first workspace; with none at all, a fresh
+  one: `AppModel.ensureWorkspacesToOpen()`) and attaches its visible
+  panes first, the rest lazily when their tab is first shown.
 - A plain quit never kills sessions (with sessions running, the quit asks
   first; see "Quitting with running sessions" below; only *End Sessions
   and Quit* ends them). `applicationShouldTerminate` hangs every
@@ -1468,9 +1501,28 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   that was never shown (restored but not yet attached). Closing a window
   keeps the workspace.
 - Closing the last tab in a tab group removes the tab group. Closing the
-  last tab group in a workspace closes the workspace's window; the workspace
-  stays in the model and in the sidebar, and reopening it creates a fresh
-  "Main" group with one Shell tab.
+  last tab group in a workspace (⌘W on its last pane, Close Tab, Close Tab
+  Group, the placeholder's Close Pane), or dragging its last tab into
+  another workspace, **deletes the workspace** (October 23, 2026, owner's
+  request; until then it stayed in the model and the sidebar as a dimmed,
+  empty "closed" row, and reopening it made a fresh "Main" group). It has
+  no sessions left, so nothing is ended (a dragged tab's sessions go with
+  the tab); its window closes and its row leaves every sidebar. A
+  confirmation that is asked anyway names it (section 1). This holds for
+  the only workspace too: the model may then hold none, the app keeps
+  running with its Dock icon
+  (`applicationShouldTerminateAfterLastWindowClosed` is false), and a Dock
+  click (`applicationShouldHandleReopen` with no visible window), ⌘N,
+  *Open Armadale* from menu bar mode or the next launch makes a fresh
+  workspace (named "Workspace" again, the name being free). The model
+  returns `CloseResult.deletedWorkspace` (the old `.closedWindow` is
+  gone). The window closes the way Delete Workspace closes it: its
+  controller sees the workspace leave the model, closes once, reports its
+  close (which the app delegate does not record, the workspace being gone)
+  and is released; `ArmadaleAppTests` checks this. A clean exit never gets
+  here: the last-pane rule (section 4) keeps a workspace's last pane. A
+  workspace closed *with* tab groups (the window's close button, ⇧⌘W) is
+  unchanged: it stays, dimmed, its sessions running, and can be reopened.
 - A new workspace's window (⌘N), or a reopened one without a saved frame,
   cascades from the key window. Open windows, their frames, sidebar width,
   and every workspace's selected group, tab and focused pane are in the

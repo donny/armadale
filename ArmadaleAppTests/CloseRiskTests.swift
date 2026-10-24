@@ -43,3 +43,32 @@ struct CloseRiskTests {
         #expect(SessionStatus.summary(of: []) == .ended)
     }
 }
+
+/// The close confirmation names the workspace a close removes (its last
+/// tab group goes, DESIGN §8), and only then.
+@Suite("Close confirmation wording")
+struct CloseConfirmationTextTests {
+    @Test func namesTheWorkspaceThatWillBeRemoved() {
+        let text = WorkspaceActions.closeConfirmationText(
+            subject: .tabGroup, unreachable: false, removingWorkspace: "Agents")
+        #expect(text.message == "Close this tab group?")
+        #expect(text.informative == "Processes are still running in this tab group. Closing it will end its sessions. "
+            + "The workspace “Agents” will be removed too.")
+        let pane = WorkspaceActions.closeConfirmationText(subject: .pane, unreachable: true, removingWorkspace: "W")
+        #expect(pane.informative.hasPrefix("This session may still be running"))
+        #expect(pane.informative.hasSuffix(" The workspace “W” will be removed too."))
+    }
+
+    @Test func saysNothingMoreWhenTheWorkspaceStays() {
+        for subject in [WorkspaceActions.CloseSubject.pane, .tab, .otherTabs, .tabGroup] {
+            for unreachable in [false, true] {
+                let text = WorkspaceActions.closeConfirmationText(
+                    subject: subject, unreachable: unreachable, removingWorkspace: nil)
+                #expect(!text.informative.contains("workspace"))
+                #expect(!text.informative.isEmpty)
+            }
+        }
+        let tab = WorkspaceActions.closeConfirmationText(subject: .tab, unreachable: false, removingWorkspace: nil)
+        #expect(tab.informative == "A process is still running in this tab. Closing it will end its sessions.")
+    }
+}

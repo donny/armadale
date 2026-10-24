@@ -39,6 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var zmxRuntime: ZmxRuntime?
     /// The state file loaded as written (or there was none yet). Only then
     /// are the saved sessions a complete list of what Armadale created.
+    /// Loading drops closed workspaces with no tab groups (``StateStore``);
+    /// they hold no sessions, so the list stays complete.
     private let stateLoadedCleanly: Bool
 
     /// Menu bar mode (docs/DESIGN.md section 8, "Quitting with running
@@ -63,7 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     override init() {
         let url = StateLocation.stateFile()
-        let result = StateStore.load(from: url)
+        var droppedWorkspaces = 0
+        let result = StateStore.load(from: url) { droppedWorkspaces = $0 }
         var state = result.state ?? .empty
         var report: LoadReport?
 
@@ -98,6 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 isFatal: true)
         }
 
+        if droppedWorkspaces > 0 {
+            NSLog("Armadale: dropped %d closed workspace(s) with no tab groups from the saved layout", droppedWorkspaces)
+        }
         let (repaired, issues) = state.repaired()
         if !issues.isEmpty {
             NSLog("Armadale: repaired saved layout: %@", issues.joined(separator: "; "))
@@ -375,13 +381,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return
         }
 
-        if model.workspaces.isEmpty {
-            model.newWorkspace()
-        }
+        // Before any workspace is made: a fresh one has no restored sessions.
         closePanesOfSessionsThatEndedCleanly()
-        let open = model.workspaces.filter { $0.window?.isOpen ?? true }
-        for workspace in open.isEmpty ? Array(model.workspaces.prefix(1)) : open {
-            openWindow(for: workspace.id, restoringFullScreen: true)
+        for id in model.ensureWorkspacesToOpen() {
+            openWindow(for: id, restoringFullScreen: true)
         }
         restoreFullScreenWindows()
 

@@ -49,16 +49,49 @@ struct HierarchyTests {
         #expect(model.closeTabGroup(TabGroupID.generate()) == .notFound)
     }
 
-    @Test func closingLastTabGroupClosesWindowAndReopenMakesMain() throws {
+    /// Closing a workspace's last tab group deletes the workspace when
+    /// others exist; they are untouched (DESIGN §8, October 23, 2026).
+    @Test func closingLastTabGroupDeletesTheWorkspace() throws {
         let (model, ws, g1) = makeModel()
-        model.renameTabGroup(g1, to: "Work")
-        #expect(model.closeTabGroup(g1) == .closedWindow(ws))
-        #expect(model.workspace(ws)?.window?.isOpen == false)
-        #expect(model.workspace(ws)?.tabGroups.isEmpty == true)
+        let other = model.newWorkspace(name: "Other")
+        let otherBefore = try #require(model.workspace(other))
+        let sessionsBefore = model.sessions.count
+        let changes = model.changeCount
+        #expect(model.closeTabGroup(g1) == .deletedWorkspace(ws))
+        #expect(model.workspace(ws) == nil)
+        #expect(model.workspaces.map(\.id) == [other])
+        #expect(model.workspace(other) == otherBefore, "the other workspace is unchanged")
+        #expect(model.sessions.count == sessionsBefore - 1)
+        #expect(model.changeCount > changes)
+        #expect(model.closeTabGroup(g1) == .notFound)
+    }
+
+    /// The only workspace is deleted too: the model is left with none, and
+    /// the next new workspace takes the free name "Workspace" again.
+    @Test func closingTheOnlyWorkspacesLastTabGroupLeavesNoWorkspace() throws {
+        let model = AppModel(defaultWorkingDirectory: "/work")
+        let ws = model.newWorkspace()
+        #expect(model.workspace(ws)?.name == "Workspace")
+        let group = try #require(model.workspace(ws)?.selectedTabGroupID)
+        #expect(model.closeTabGroup(group) == .deletedWorkspace(ws))
+        #expect(model.workspaces.isEmpty)
         #expect(model.sessions.isEmpty)
-        model.reopenWorkspace(ws)
-        #expect(model.workspace(ws)?.tabGroups.map(\.name) == ["Main"])
-        #expect(model.selectedTab(in: ws) != nil)
+        #expect(model.persistedState.workspaces.isEmpty)
+        let fresh = model.newWorkspace()
+        #expect(fresh != ws)
+        #expect(model.workspace(fresh)?.name == "Workspace")
+        #expect(model.workspace(fresh)?.tabGroups.map(\.name) == ["Main"])
+    }
+
+    /// A workspace with groups left keeps them, its window and itself.
+    @Test func closingOneOfSeveralTabGroupsKeepsTheWorkspace() throws {
+        let (model, ws, g1) = makeModel()
+        let g2 = try #require(model.newTabGroup(in: ws, name: "B"))
+        let tab = try #require(model.tabGroup(g2)?.tabs.first?.id)
+        #expect(model.closeTab(tab) == .closedTabGroup(g2, in: ws))
+        #expect(model.workspace(ws)?.tabGroups.map(\.id) == [g1])
+        #expect(model.workspace(ws)?.window?.isOpen == true)
+        #expect(model.workspaces.count == 1)
     }
 
     @Test func selectTabGroupByNumber() throws {
@@ -179,10 +212,14 @@ struct HierarchyTests {
         #expect(model.selectedTab(in: ws)?.id == t2)
     }
 
+    /// A group without tabs is no longer kept by any intent; one from a
+    /// hand-edited file must still not break navigation.
     @Test func adjacentTabInEmptyGroupDoesNothing() throws {
-        let (model, ws, g1) = makeModel()
-        let g2 = try #require(model.newTabGroup(in: ws))
-        model.moveTab(tabs(model, g1)[0], to: g2, index: 0)
+        let empty = TabGroup(name: "Empty", tabs: [])
+        let g1 = empty.id
+        let workspace = Workspace(name: "W", tabGroups: [empty], window: WindowState(isOpen: true))
+        let ws = workspace.id
+        let model = AppModel(state: PersistedState(workspaces: [workspace]), defaultWorkingDirectory: "/work")
         model.select(tabGroup: g1)
         #expect(!model.selectAdjacentTab(offset: 1, in: ws))
         #expect(!model.selectTab(number: 1, in: ws))

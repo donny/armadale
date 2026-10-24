@@ -74,10 +74,20 @@ public enum StateStore {
         return decoder
     }
 
-    /// Migrates and decodes a state document.
+    /// Migrates and decodes a state document. Loading drops the empty
+    /// closed workspaces older versions kept
+    /// (``PersistedState/droppingEmptyClosedWorkspaces()``), so the result
+    /// may hold fewer workspaces than the file.
     public static func decode(_ data: Data) throws -> PersistedState {
+        try decodeCountingDrops(data).state
+    }
+
+    /// ``decode(_:)``, also saying how many empty closed workspaces it dropped.
+    static func decodeCountingDrops(_ data: Data) throws -> (state: PersistedState, droppedWorkspaces: Int) {
         let migrated = try Migrations.migrate(data: data)
-        return try makeDecoder().decode(PersistedState.self, from: migrated)
+        let decoded = try makeDecoder().decode(PersistedState.self, from: migrated)
+        let state = decoded.droppingEmptyClosedWorkspaces()
+        return (state, decoded.workspaces.count - state.workspaces.count)
     }
 
     /// Encodes a state document.
@@ -90,7 +100,7 @@ public enum StateStore {
     /// How one file read went.
     private enum FileRead {
         case missing
-        case ok(PersistedState)
+        case ok(PersistedState, droppedWorkspaces: Int)
         case unparseable(String)
         case newer(Int)
         case ioError(String)
@@ -107,7 +117,8 @@ public enum StateStore {
             return .ioError(error.localizedDescription)
         }
         do {
-            return .ok(try decode(data))
+            let decoded = try decodeCountingDrops(data)
+            return .ok(decoded.state, droppedWorkspaces: decoded.droppedWorkspaces)
         } catch MigrationError.newerVersion(let version) {
             return .newer(version)
         } catch {
@@ -117,15 +128,20 @@ public enum StateStore {
 
     /// Loads state from `url` (normally `…/state.json`), falling back to its
     /// `.bak` sibling as described in ``LoadResult``. Also removes temporary
-    /// files left by an interrupted save.
-    public static func load(from url: URL, fileManager: FileManager = .default) -> LoadResult {
+    /// files left by an interrupted save. Empty closed workspaces are
+    /// dropped (``decode(_:)``); `droppedEmptyWorkspaces` is called with
+    /// their number when the state returned had any, for the log.
+    public static func load(
+        from url: URL, fileManager: FileManager = .default, droppedEmptyWorkspaces: (Int) -> Void = { _ in }
+    ) -> LoadResult {
         removeStaleTemporaryFiles(for: url, fileManager: fileManager)
         let backup = backupURL(for: url)
 
         let primaryProblem: String
         let primaryIsDamaged: Bool
         switch read(url, fileManager: fileManager) {
-        case .ok(let state):
+        case .ok(let state, let dropped):
+            if dropped > 0 { droppedEmptyWorkspaces(dropped) }
             return .loaded(state, isFirstLaunch: false)
         case .newer(let version):
             return .newerVersion(version, file: url)
@@ -142,7 +158,8 @@ public enum StateStore {
         switch read(backup, fileManager: fileManager) {
         case .missing where !primaryIsDamaged:
             return .loaded(.empty, isFirstLaunch: true)
-        case .ok(let state):
+        case .ok(let state, let dropped):
+            if dropped > 0 { droppedEmptyWorkspaces(dropped) }
             let moved = primaryIsDamaged ? [quarantine(url, fileManager: fileManager)].compactMap { $0 } : []
             return .unparseable(problem: primaryProblem, recovered: state, quarantined: moved)
         case .newer(let version):

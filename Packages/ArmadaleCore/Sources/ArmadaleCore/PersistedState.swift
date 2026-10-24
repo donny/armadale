@@ -28,6 +28,29 @@ public struct PersistedState: Codable, Sendable, Hashable {
     public static let empty = PersistedState()
 }
 
+// MARK: - Housekeeping
+
+extension PersistedState {
+    /// Whether `workspace` is a closed window with no tab groups: what
+    /// closing a workspace's last group left behind before October 23,
+    /// 2026, when it started deleting the workspace instead (DESIGN §3, §8).
+    public static func isEmptyClosedWorkspace(_ workspace: Workspace) -> Bool {
+        workspace.tabGroups.isEmpty && workspace.window?.isOpen == false
+    }
+
+    /// A copy without empty closed workspaces (``isEmptyClosedWorkspace(_:)``),
+    /// even if none is left: the app makes a fresh workspace when it has
+    /// none. A workspace with no window state yet counts as open, as at
+    /// launch, and is kept (reopening it makes a fresh "Main" group).
+    /// ``StateStore`` applies this on every load, without a schema bump:
+    /// such a workspace holds nothing (no tab groups, so no sessions).
+    public func droppingEmptyClosedWorkspaces() -> PersistedState {
+        var state = self
+        state.workspaces.removeAll(where: Self.isEmptyClosedWorkspace)
+        return state
+    }
+}
+
 // MARK: - Validation
 
 extension PersistedState {
@@ -44,6 +67,11 @@ extension PersistedState {
     /// - `focusedPaneID` is a leaf (else the first leaf); `zoomedPaneID` is
     ///   a leaf or `nil`.
     /// - Selections point at existing children (else the first one, or `nil`).
+    /// - A tab group left with no tabs is dropped, and then a closed
+    ///   workspace left with no tab groups
+    ///   (``droppingEmptyClosedWorkspaces()``, which loading has applied
+    ///   already, but a repair can empty one more): a tab group is never
+    ///   kept without tabs, nor a workspace without tab groups (DESIGN §1).
     /// - Built-in profiles and other profile references are left alone.
     public func repaired() -> (state: PersistedState, issues: [String]) {
         var issues: [String] = []
@@ -88,6 +116,10 @@ extension PersistedState {
                     }
                 }
                 group.tabs = tabs
+                guard !tabs.isEmpty else {
+                    issues.append("Dropped tab group \(group.id) with no tabs")
+                    continue
+                }
                 if let selected = group.selectedTabID, !tabs.contains(where: { $0.id == selected }) {
                     issues.append("Reset selected tab of tab group \(group.id)")
                     group.selectedTabID = tabs.first?.id
@@ -97,6 +129,10 @@ extension PersistedState {
                 groups.append(group)
             }
             workspace.tabGroups = groups
+            if Self.isEmptyClosedWorkspace(workspace) {
+                issues.append("Dropped closed workspace \(workspace.id) with no tab groups")
+                continue
+            }
             if let selected = workspace.selectedTabGroupID, !groups.contains(where: { $0.id == selected }) {
                 issues.append("Reset selected tab group of workspace \(workspace.id)")
                 workspace.selectedTabGroupID = groups.first?.id

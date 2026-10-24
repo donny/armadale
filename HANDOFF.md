@@ -76,9 +76,28 @@ the pane. `docs/DESIGN.md` sections 4, 6, 7 and 13; README. The owner's
 request to remove the "Ask Siri" field from the sidebar's context menus
 was **withdrawn** the same day (open items, Hierarchy and UI).
 
+Later on October 23, 2026 (implementer → reviewer loop, two live passes):
+**an empty workspace is deleted automatically.** A tab group is never
+kept without tabs and a workspace never without tab groups: closing or
+moving away the last tab removes the group, and removing the last group
+deletes the workspace and closes its window, the only workspace
+included, so the model may hold zero workspaces (the app stays running
+with its Dock icon; ⌘N or a Dock click makes a fresh "Workspace";
+`CloseResult.deletedWorkspace`, `AppModel.ensureWorkspacesToOpen()`).
+A workspace closed with tabs in it (red button, ⇧⌘W) is unchanged: it
+stays dimmed in the sidebar with its sessions running. A close that
+asks anyway adds "The workspace “X” will be removed too." (after
+committing an open inline rename). Loading the state file drops closed
+workspaces with no tab groups and, in the repair pass, groups with no
+tabs, logged and with no schema bump; the owner's own "Workspace 2" husk
+goes at the next launch of a build with this change. After a move
+empties the group the window showed, the target group is shown when it
+is in the same workspace. `docs/DESIGN.md` sections 1, 3 and 8; README.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
-warnings; 467 from step 8 on; 523 at the clean-exit change). The working tree was clean and nothing was
+warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
+empty-workspace change). The working tree was clean and nothing was
 running when work paused (October 19, 2026, evening).
 
 **Releases.** Armadale 0.1.0 (build 1) was built, notarized and stapled
@@ -207,6 +226,15 @@ Hierarchy and UI
   ruled out private API and **withdrew the request**. If it comes back,
   the public route is AppKit-built pop-up menus for the sidebar rows,
   which means mapping the click to its row.
+- Empty workspaces (October 23, 2026), predating the change: a Dock
+  click does nothing while the Settings window is the only window and
+  no workspace exists (`hasVisibleWindows` is true; ⌘N works); a
+  session record in a hand-edited state file that no pane refers to
+  survives a launch and keeps its daemon alive (orphan reclaim counts
+  `model.sessions`; real empty workspaces never hold sessions). Not
+  tested live: menu bar mode with zero workspaces (it needs running
+  sessions, which a deleted workspace cannot have; the code falls back
+  to `newWindow`).
 - Clean exit (October 23, 2026): clicking the dimmed area around a
   placeholder's card to focus that pane was built and gate-tested but
   not seen live (the screen check failed when the implementer got to
@@ -533,9 +561,11 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   2027; the notarization keychain profile is `armadale-notary` (created
   by the owner on October 19, 2026; the notary history under that account
   lists the accepted submissions). Debug builds never need either.
-- `~/Applications/Armadale.app` is the notarized 0.1.0 (build 2) installed
-  by `scripts/install-release.sh` on October 23, 2026 (it predates the
-  clean-exit change). It has a different
+- `~/Applications/Armadale.app` is whatever the owner last installed with
+  `scripts/install-release.sh` (0.1.0 build 4 was bumped on October 23,
+  2026, after the clean-exit change and before the empty-workspace one;
+  `--skip-notarize --allow-existing-tag` builds a local, signed but
+  unnotarized copy of a version whose tag exists). It has a different
   code identity from Debug builds, so privacy prompts from inside its
   sessions may appear once more; it uses the real state directory
   (`~/Library/Application Support/Armadale`), never a test one. Do not

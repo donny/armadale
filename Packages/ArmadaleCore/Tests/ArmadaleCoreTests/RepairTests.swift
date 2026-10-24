@@ -60,6 +60,44 @@ struct RepairTests {
         #expect(group.selectedTabID == good.id)
     }
 
+    /// A group whose tabs were all dropped goes too, and a closed workspace
+    /// left without groups after that; an open one is kept (opening it
+    /// makes a fresh group).
+    @Test func emptiedGroupsAndClosedWorkspacesAreDropped() throws {
+        let (p, q) = (PaneID.generate(), PaneID.generate())
+        let good = tab(layout: .pane(p), panes: [p], focus: p)
+        let broken = tab(layout: .pane(q), panes: [], focus: q)
+        let emptied = TabGroup(name: "Broken", tabs: [broken])
+        let kept = TabGroup(name: "Good", tabs: [good])
+        let alreadyEmpty = TabGroup(name: "Empty", tabs: [])
+        let mixed = Workspace(name: "Mixed", tabGroups: [emptied, kept, alreadyEmpty], selectedTabGroupID: emptied.id)
+        let closed = Workspace(
+            name: "Closed", tabGroups: [TabGroup(name: "Empty too", tabs: [])], window: WindowState(isOpen: false))
+        let open = Workspace(name: "Open", tabGroups: [TabGroup(name: "Empty three", tabs: [])],
+                             window: WindowState(isOpen: true))
+        let (repaired, issues) = PersistedState(workspaces: [mixed, closed, open]).repaired()
+        #expect(repaired.workspaces.map(\.id) == [mixed.id, open.id])
+        #expect(repaired.workspaces[0].tabGroups.map(\.id) == [kept.id])
+        #expect(repaired.workspaces[0].selectedTabGroupID == kept.id)
+        #expect(repaired.workspaces[1].tabGroups.isEmpty)
+        #expect(repaired.workspaces[1].selectedTabGroupID == nil)
+        #expect(issues.contains("Dropped closed workspace \(closed.id) with no tab groups"))
+        #expect(issues.filter { $0.hasPrefix("Dropped tab group") }.count == 4)
+    }
+
+    /// A closed workspace whose only group is a duplicate of an earlier one
+    /// is dropped once the duplicate is.
+    @Test func aClosedWorkspaceEmptiedByDuplicateRemovalIsDropped() throws {
+        let p = PaneID.generate()
+        let group = TabGroup(name: "G", tabs: [tab(layout: .pane(p), panes: [p], focus: p)])
+        let first = Workspace(name: "First", tabGroups: [group])
+        let copy = Workspace(name: "Copy", tabGroups: [group], window: WindowState(isOpen: false))
+        let (repaired, issues) = PersistedState(workspaces: [first, copy]).repaired()
+        #expect(repaired.workspaces.map(\.id) == [first.id])
+        #expect(issues.contains("Dropped duplicate tab group \(group.id)"))
+        #expect(issues.contains("Dropped closed workspace \(copy.id) with no tab groups"))
+    }
+
     @Test func duplicateIDsAreDropped() throws {
         let p = PaneID.generate()
         let t = tab(layout: .pane(p), panes: [p], focus: p)

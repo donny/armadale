@@ -65,16 +65,92 @@ struct AppModelTests {
         #expect(model.sessions.count == 1)
     }
 
-    @Test func moveTabAcrossGroups() throws {
+    /// Moving a group's last tab away removes the group, as closing its
+    /// last tab does; the workspace keeps its other group, now selected.
+    @Test func moveTabAcrossGroupsRemovesTheEmptiedGroup() throws {
         let (model, ws, group) = makeModel()
         let other = try #require(model.newTabGroup(in: ws, name: "Other"))
+        model.select(tabGroup: group)
         let tab = model.workspaces[0].tabGroups[0].tabs[0].id
+        let sessions = model.sessionIDs(ofTab: tab)
         model.moveTab(tab, to: other, index: 0)
-        #expect(model.workspaces[0].tabGroups[0].tabs.isEmpty)
-        #expect(model.workspaces[0].tabGroups[0].selectedTabID == nil)
-        #expect(model.workspaces[0].tabGroups[1].tabs.map(\.id).first == tab)
+        #expect(model.tabGroup(group) == nil)
+        #expect(model.workspace(ws)?.tabGroups.map(\.id) == [other])
+        #expect(model.workspace(ws)?.selectedTabGroupID == other)
+        #expect(model.tabGroup(other)?.tabs.map(\.id).first == tab)
         #expect(model.location(of: tab)?.tabGroup == other)
-        _ = group
+        #expect(model.sessionIDs(ofTab: tab) == sessions, "the moved tab keeps its sessions")
+        #expect(model.workspace(ws)?.window?.isOpen == true)
+    }
+
+    /// Groups A, B, C with C shown: moving C's only tab onto A removes C and
+    /// shows A, the target, not B, C's neighbour. A move out of a group the
+    /// window does not show leaves the shown group alone.
+    @Test func emptyingTheShownGroupByAMoveShowsTheTarget() throws {
+        let (model, ws, a) = makeModel()
+        let b = try #require(model.newTabGroup(in: ws, name: "B"))
+        let c = try #require(model.newTabGroup(in: ws, name: "C"))
+        #expect(model.workspace(ws)?.selectedTabGroupID == c)
+        let tab = try #require(model.tabGroup(c)?.tabs.first?.id)
+        model.moveTab(tab, to: a, index: Int.max)
+        #expect(model.workspace(ws)?.tabGroups.map(\.id) == [a, b])
+        #expect(model.workspace(ws)?.selectedTabGroupID == a)
+        #expect(model.tabGroup(a)?.selectedTabID == tab)
+
+        // B is not shown: emptying it keeps A shown.
+        let bTab = try #require(model.tabGroup(b)?.tabs.first?.id)
+        let other = model.newWorkspace(name: "Other")
+        let otherGroup = try #require(model.workspace(other)?.tabGroups.first?.id)
+        model.moveTab(bTab, to: otherGroup, index: 0)
+        #expect(model.workspace(ws)?.tabGroups.map(\.id) == [a])
+        #expect(model.workspace(ws)?.selectedTabGroupID == a)
+
+        // Into another workspace: the source shows its remaining neighbour.
+        let a2 = try #require(model.newTabGroup(in: ws, name: "A2"))
+        let a2Tab = try #require(model.tabGroup(a2)?.tabs.first?.id)
+        model.moveTab(a2Tab, to: otherGroup, index: 0)
+        #expect(model.workspace(ws)?.selectedTabGroupID == a)
+        #expect(model.workspace(other)?.selectedTabGroupID == otherGroup)
+    }
+
+    /// Moving a workspace's last tab into another workspace removes its
+    /// group and the workspace with it; its sessions move, none ends.
+    @Test func moveTheLastTabToAnotherWorkspaceRemovesTheWorkspace() throws {
+        let (model, ws, _) = makeModel()
+        let other = model.newWorkspace(name: "Other")
+        let target = try #require(model.workspace(other)?.tabGroups.first?.id)
+        let tab = model.workspaces[0].tabGroups[0].tabs[0].id
+        var removed: Set<SessionID> = []
+        model.onSessionsRemoved = { removed.formUnion($0) }
+        model.moveTab(tab, to: target, index: Int.max)
+        #expect(model.workspace(ws) == nil)
+        #expect(model.workspaces.map(\.id) == [other])
+        #expect(model.location(of: tab)?.workspace == other)
+        #expect(model.tabGroup(target)?.tabs.last?.id == tab)
+        #expect(model.tabGroup(target)?.selectedTabID == tab)
+        #expect(model.sessions.count == 2)
+        #expect(removed.isEmpty, "no session ends")
+    }
+
+    /// What a close would delete, for the confirmation's wording.
+    @Test func whichCloseRemovesTheWorkspace() throws {
+        let (model, ws, group) = makeModel()
+        let tab = try #require(model.tabGroup(group)?.tabs.first)
+        #expect(model.workspaceRemoved(byClosingPane: tab.focusedPaneID) == ws)
+        #expect(model.workspaceRemoved(byClosingTab: tab.id) == ws)
+        #expect(model.workspaceRemoved(byClosingTabGroup: group) == ws)
+        let split = try #require(model.splitPane(tab.focusedPaneID, axis: .vertical))
+        #expect(model.workspaceRemoved(byClosingPane: split) == nil, "another pane stays")
+        #expect(model.workspaceRemoved(byClosingTab: tab.id) == ws)
+        let second = try #require(model.newTab(in: group))
+        #expect(model.workspaceRemoved(byClosingTab: second) == nil, "another tab stays")
+        #expect(model.workspaceRemoved(byClosingTabGroup: group) == ws)
+        let otherGroup = try #require(model.newTabGroup(in: ws))
+        #expect(model.workspaceRemoved(byClosingTabGroup: group) == nil, "another group stays")
+        #expect(model.workspaceRemoved(byClosingTabGroup: otherGroup) == nil)
+        #expect(model.workspaceRemoved(byClosingTabGroup: TabGroupID.generate()) == nil)
+        #expect(model.workspaceRemoved(byClosingTab: TabID.generate()) == nil)
+        #expect(model.workspaceRemoved(byClosingPane: PaneID.generate()) == nil)
     }
 
     @Test func selectionAndFocus() throws {
@@ -177,18 +253,60 @@ struct AppModelTests {
         #expect(model.workspace(ws)?.window?.isOpen == true)
     }
 
-    @Test func closingLastGroupClosesWindowButKeepsWorkspace() throws {
+    /// ⌘W on a workspace's last pane closes its tab, its group and deletes
+    /// the workspace, whether others exist or not.
+    @Test(arguments: [true, false])
+    func closingTheLastPaneDeletesTheWorkspace(otherWorkspace: Bool) throws {
         let (model, ws, _) = makeModel()
+        let other = otherWorkspace ? model.newWorkspace(name: "Other") : nil
         let pane = model.workspaces[0].tabGroups[0].tabs[0].focusedPaneID
-        #expect(model.closePane(pane) == .closedWindow(ws))
-        let workspace = try #require(model.workspace(ws))
-        #expect(workspace.tabGroups.isEmpty)
-        #expect(workspace.selectedTabGroupID == nil)
-        #expect(workspace.window?.isOpen == false)
-        #expect(model.sessions.isEmpty)
+        let session = try #require(model.tab(containing: pane)?.pane(pane)?.sessionID)
+        var removed: Set<SessionID> = []
+        model.onSessionsRemoved = { removed.formUnion($0) }
+        #expect(model.closePane(pane) == .deletedWorkspace(ws))
+        #expect(model.workspace(ws) == nil)
+        #expect(model.workspaces.map(\.id) == (other.map { [$0] } ?? []))
+        #expect(model.session(session) == nil)
+        #expect(removed == [session])
+    }
 
-        model.reopenWorkspace(ws)
-        let reopened = try #require(model.workspace(ws))
+    /// Launch: with no workspace (the last one was deleted) a fresh one is
+    /// made and opened; otherwise the open ones, else the first.
+    @Test func launchOpensAFreshWorkspaceWhenThereIsNone() throws {
+        let model = AppModel(state: PersistedState(), defaultWorkingDirectory: "/work")
+        let opened = model.ensureWorkspacesToOpen()
+        #expect(opened.count == 1)
+        #expect(model.workspaces.map(\.id) == opened)
+        #expect(model.workspaces[0].name == "Workspace")
+        #expect(model.workspaces[0].tabGroups.map(\.name) == ["Main"])
+        #expect(model.sessions.count == 1)
+
+        let closedA = Workspace(name: "A", window: WindowState(isOpen: false))
+        let closedB = Workspace(name: "B", window: WindowState(isOpen: false))
+        let neverShown = Workspace(name: "C")
+        let allClosed = AppModel(state: PersistedState(workspaces: [closedA, closedB]))
+        #expect(allClosed.ensureWorkspacesToOpen() == [closedA.id])
+        let some = AppModel(state: PersistedState(workspaces: [closedA, neverShown]))
+        #expect(some.ensureWorkspacesToOpen() == [neverShown.id])
+        #expect(some.workspaces.count == 2)
+    }
+
+    /// Closing a workspace's last tab (Close Tab) deletes it the same way.
+    @Test func closingTheLastTabDeletesTheWorkspace() throws {
+        let (model, ws, group) = makeModel()
+        let other = model.newWorkspace(name: "Other")
+        let tab = try #require(model.tabGroup(group)?.tabs.first?.id)
+        #expect(model.closeTab(tab) == .deletedWorkspace(ws))
+        #expect(model.workspaces.map(\.id) == [other])
+    }
+
+    /// A workspace with no tab groups, open (only a hand-edited file holds
+    /// one now), gets a fresh "Main" group when reopened.
+    @Test func reopeningAnEmptyWorkspaceMakesMain() throws {
+        let empty = Workspace(name: "Empty", window: WindowState(isOpen: true))
+        let model = AppModel(state: PersistedState(workspaces: [empty]), defaultWorkingDirectory: "/work")
+        model.reopenWorkspace(empty.id)
+        let reopened = try #require(model.workspace(empty.id))
         #expect(reopened.window?.isOpen == true)
         #expect(reopened.tabGroups.map(\.name) == ["Main"])
         #expect(reopened.tabGroups[0].tabs.count == 1)

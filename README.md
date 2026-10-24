@@ -32,7 +32,9 @@ What works today:
   groups and tabs are renamed in place (double-click the row or the tab),
   tabs and groups are reordered by dragging, and a tab dragged onto a
   sidebar tab group moves there. Closing a window keeps its workspace in
-  the sidebar. The full shortcut table is in docs/DESIGN.md section 9 and
+  the sidebar, with its sessions running; closing a workspace's last tab
+  (or tab group) deletes the workspace, since nothing is left in it. The
+  full shortcut table is in docs/DESIGN.md section 9 and
   in Settings.
 - **Persistence.** Sessions outlive Armadale (see [Quitting and the menu
   bar](#quitting-and-the-menu-bar)); a relaunch

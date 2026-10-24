@@ -90,6 +90,117 @@ struct StateStoreTests {
         #expect(loaded.schemaVersion == PersistedState.currentSchemaVersion)
     }
 
+    /// Empty closed workspaces (what closing the last tab group left before
+    /// October 23, 2026) are dropped on load, even the last one; the app
+    /// then makes a fresh workspace.
+    @Test func loadingDropsEmptyClosedWorkspaces() throws {
+        let dir = try TempDirectory()
+        var state = sampleState()
+        let kept = state.workspaces[0]
+        let husk = Workspace(name: "Workspace 2", window: WindowState(isOpen: false))
+        state.workspaces.append(husk)
+        try StateStore.save(state, to: dir.stateFile)
+        // The file holds it; the load leaves it out.
+        #expect(try String(contentsOf: dir.stateFile, encoding: .utf8).contains("Workspace 2"))
+        guard case .loaded(let loaded, _) = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(loaded.workspaces.map(\.id) == [kept.id])
+        #expect(loaded.sessions.count == state.sessions.count, "nothing else changes")
+        #expect(loaded.schemaVersion == PersistedState.currentSchemaVersion)
+
+        // The only workspace goes too.
+        try StateStore.save(PersistedState(workspaces: [husk]), to: dir.stateFile)
+        guard case .loaded(let alone, let firstLaunch) = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(alone.workspaces.isEmpty)
+        #expect(!firstLaunch)
+    }
+
+    /// The number dropped is reported for the log, from the file whose
+    /// state is returned.
+    @Test func loadingReportsHowManyWorkspacesItDropped() throws {
+        let dir = try TempDirectory()
+        var state = sampleState()
+        state.workspaces += (1...2).map { Workspace(name: "Husk \($0)", window: WindowState(isOpen: false)) }
+        try StateStore.save(state, to: dir.stateFile)
+        var reported: [Int] = []
+        _ = StateStore.load(from: dir.stateFile) { reported.append($0) }
+        #expect(reported == [2])
+        try StateStore.save(sampleState(), to: dir.stateFile)
+        reported = []
+        _ = StateStore.load(from: dir.stateFile) { reported.append($0) }
+        #expect(reported.isEmpty, "nothing dropped, nothing reported")
+    }
+
+    /// The backup is read the same way when the primary file is damaged.
+    @Test func recoveringFromTheBackupDropsEmptyClosedWorkspaces() throws {
+        let dir = try TempDirectory()
+        var state = sampleState()
+        let kept = state.workspaces[0].id
+        state.workspaces.append(Workspace(name: "Husk", window: WindowState(isOpen: false)))
+        try StateStore.save(state, to: dir.stateFile)
+        try StateStore.save(state, to: dir.stateFile) // now the .bak holds it too
+        try Data("{ not json".utf8).write(to: dir.stateFile)
+        var reported: [Int] = []
+        let result = StateStore.load(from: dir.stateFile) { reported.append($0) }
+        guard case .unparseable(_, let recovered, _) = result else {
+            Issue.record("expected .unparseable, got \(result)"); return
+        }
+        #expect(recovered?.workspaces.map(\.id) == [kept])
+        #expect(reported == [1])
+    }
+
+    /// A closed workspace whose only group duplicates an earlier one loads
+    /// (it has a group in the file) and goes in the repair that follows
+    /// every load, so it never shows as an empty row.
+    @Test func aClosedWorkspaceHoldingOnlyADuplicateGroupGoesInTheRepair() throws {
+        let dir = try TempDirectory()
+        var state = sampleState()
+        let duplicate = Workspace(
+            name: "Copy", tabGroups: [state.workspaces[0].tabGroups[0]], window: WindowState(isOpen: false))
+        state.workspaces.append(duplicate)
+        try StateStore.save(state, to: dir.stateFile)
+        guard case .loaded(let loaded, _) = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(loaded.workspaces.count == 2)
+        let (repaired, issues) = loaded.repaired()
+        #expect(repaired.workspaces.map(\.id) == [state.workspaces[0].id])
+        #expect(issues.contains("Dropped closed workspace \(duplicate.id) with no tab groups"))
+    }
+
+    /// A closed workspace with tab groups is kept (its sessions run on), and
+    /// so is an empty one that is open or has no window state yet.
+    @Test func loadingKeepsClosedWorkspacesWithGroupsAndOpenEmptyOnes() throws {
+        let dir = try TempDirectory()
+        var state = sampleState()
+        state.workspaces[0].window = WindowState(isOpen: false)
+        let open = Workspace(name: "Open", window: WindowState(isOpen: true))
+        let neverShown = Workspace(name: "Never shown")
+        state.workspaces += [open, neverShown]
+        try StateStore.save(state, to: dir.stateFile)
+        guard case .loaded(let loaded, _) = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(loaded.workspaces.map(\.id) == state.workspaces.map(\.id))
+        #expect(loaded.workspaces[0].window?.isOpen == false)
+        #expect(loaded.workspaces[0].tabGroups == state.workspaces[0].tabGroups)
+    }
+
+    /// No workspaces at all saves and loads as such (not as a first launch).
+    @Test func anEmptyWorkspaceListRoundTrips() throws {
+        let dir = try TempDirectory()
+        try StateStore.save(PersistedState(), to: dir.stateFile)
+        guard case .loaded(let loaded, let firstLaunch) = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .loaded"); return
+        }
+        #expect(!firstLaunch)
+        #expect(loaded.workspaces.isEmpty)
+        #expect(loaded.profiles == Profile.builtIns)
+    }
+
     @Test func missingFilesLoadEmpty() throws {
         let dir = try TempDirectory()
         let result = StateStore.load(from: dir.stateFile)

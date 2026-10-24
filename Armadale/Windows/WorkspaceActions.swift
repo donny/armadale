@@ -104,6 +104,7 @@ final class WorkspaceActions {
     /// Closes a pane (⌘W), killing its session; asks first if it may be
     /// running (and confirmation is on) or cannot be reached.
     func closePane(_ paneID: PaneID, confirm: Bool) {
+        rename.commit() // a name being typed counts, in the question too
         guard let tab = model.tab(containing: paneID), let sessionID = tab.pane(paneID)?.sessionID else { return }
         let perform: @MainActor () -> Void = { [model, registry] in
             let result = model.closePane(paneID)
@@ -113,14 +114,18 @@ final class WorkspaceActions {
             }
         }
         guard confirm else { return perform() }
-        confirmClose(sessions: [sessionID], subject: .pane, perform: perform)
+        confirmClose(
+            sessions: [sessionID], subject: .pane, removing: model.workspaceRemoved(byClosingPane: paneID),
+            perform: perform)
     }
 
     /// Closes a tab and its sessions (tab bar close button, middle click,
     /// context menu); asks like ⌘W.
     func closeTab(_ id: TabID) {
+        rename.commit()
         let sessions = model.sessionIDs(ofTab: id)
-        confirmClose(sessions: sessions, subject: .tab) { [model, registry] in
+        let removing = model.workspaceRemoved(byClosingTab: id)
+        confirmClose(sessions: sessions, subject: .tab, removing: removing) { [model, registry] in
             model.closeTab(id)
             sessions.forEach(registry.close)
         }
@@ -128,22 +133,26 @@ final class WorkspaceActions {
 
     /// Closes every other tab of `id`'s group; one confirmation for all.
     func closeOtherTabs(than id: TabID) {
+        rename.commit()
         guard let location = model.location(of: id), let group = model.tabGroup(location.tabGroup) else { return }
         let others = group.tabs.map(\.id).filter { $0 != id }
         guard !others.isEmpty else { return }
         let sessions = others.flatMap { model.sessionIDs(ofTab: $0) }
-        confirmClose(sessions: sessions, subject: .otherTabs) { [model, registry] in
+        confirmClose(sessions: sessions, subject: .otherTabs, removing: nil) { [model, registry] in
             model.closeOtherTabs(than: id)
             sessions.forEach(registry.close)
         }
     }
 
-    /// Closes a tab group with all its tabs. Its last group closes the
-    /// workspace's window; the workspace stays.
+    /// Closes a tab group with all its tabs. Closing the workspace's last
+    /// group deletes the workspace (``CloseResult/deletedWorkspace(_:)``);
+    /// its window closes itself when the workspace leaves the model.
     func closeTabGroup(_ id: TabGroupID) {
+        rename.commit()
         guard let group = model.tabGroup(id) else { return }
         let sessions = group.tabs.flatMap { model.sessionIDs(ofTab: $0.id) }
-        confirmClose(sessions: sessions, subject: .tabGroup) { [model, registry] in
+        let removing = model.workspaceRemoved(byClosingTabGroup: id)
+        confirmClose(sessions: sessions, subject: .tabGroup, removing: removing) { [model, registry] in
             model.closeTabGroup(id)
             sessions.forEach(registry.close)
         }
@@ -168,36 +177,29 @@ final class WorkspaceActions {
         }
     }
 
-    private enum Subject {
+    /// What a close confirmation is about.
+    enum CloseSubject {
         case pane, tab, otherTabs, tabGroup
     }
 
-    private func confirmClose(sessions: [SessionID], subject: Subject, perform: @escaping @MainActor () -> Void) {
+    /// `removing`: the workspace the close deletes (its last tab group goes),
+    /// named in the question; nothing more is asked because of it.
+    private func confirmClose(
+        sessions: [SessionID], subject: CloseSubject, removing workspace: WorkspaceID?,
+        perform: @escaping @MainActor () -> Void
+    ) {
         let risk = registry.closeRisk(of: sessions)
         let preferences = registry.settings.preferences
         let wantsConfirmation = preferences.confirmClosingRunningSession
         guard risk.unreachable || (risk.mayBeRunning && wantsConfirmation) else { return perform() }
 
         let alert = NSAlert()
-        switch subject {
-        case .pane: alert.messageText = "Close this pane?"
-        case .tab: alert.messageText = "Close this tab?"
-        case .otherTabs: alert.messageText = "Close the other tabs?"
-        case .tabGroup: alert.messageText = "Close this tab group?"
-        }
-        if risk.unreachable {
-            alert.informativeText = subject == .pane
-                ? "This session may still be running and cannot be reached right now. Closing the pane leaves it "
-                    + "running until Armadale next starts with sessions available, and then ends it."
-                : "Some of these sessions may still be running and cannot be reached right now. Closing leaves "
-                    + "them running until Armadale next starts with sessions available, and then ends them."
-        } else {
-            alert.informativeText = switch subject {
-            case .pane: "A process is still running in this pane. Closing it will end the session."
-            case .tab: "A process is still running in this tab. Closing it will end its sessions."
-            case .otherTabs: "Processes are still running in the other tabs. Closing them will end their sessions."
-            case .tabGroup: "Processes are still running in this tab group. Closing it will end its sessions."
-            }
+        let text = Self.closeConfirmationText(
+            subject: subject, unreachable: risk.unreachable,
+            removingWorkspace: workspace.flatMap { model.workspace($0)?.name })
+        alert.messageText = text.message
+        alert.informativeText = text.informative
+        if !risk.unreachable {
             alert.showsSuppressionButton = true
             alert.suppressionButton?.title = "Don’t ask again"
         }
@@ -210,6 +212,39 @@ final class WorkspaceActions {
             guard response == .alertFirstButtonReturn else { return }
             perform()
         }
+    }
+
+    /// The close confirmation's question and explanation. When the close
+    /// removes the workspace's last tab group, and so the workspace
+    /// (DESIGN §8), the explanation ends by saying so.
+    nonisolated static func closeConfirmationText(
+        subject: CloseSubject, unreachable: Bool, removingWorkspace workspaceName: String?
+    ) -> (message: String, informative: String) {
+        let message = switch subject {
+        case .pane: "Close this pane?"
+        case .tab: "Close this tab?"
+        case .otherTabs: "Close the other tabs?"
+        case .tabGroup: "Close this tab group?"
+        }
+        var informative: String
+        if unreachable {
+            informative = subject == .pane
+                ? "This session may still be running and cannot be reached right now. Closing the pane leaves it "
+                    + "running until Armadale next starts with sessions available, and then ends it."
+                : "Some of these sessions may still be running and cannot be reached right now. Closing leaves "
+                    + "them running until Armadale next starts with sessions available, and then ends them."
+        } else {
+            informative = switch subject {
+            case .pane: "A process is still running in this pane. Closing it will end the session."
+            case .tab: "A process is still running in this tab. Closing it will end its sessions."
+            case .otherTabs: "Processes are still running in the other tabs. Closing them will end their sessions."
+            case .tabGroup: "Processes are still running in this tab group. Closing it will end its sessions."
+            }
+        }
+        if let workspaceName {
+            informative += " The workspace “\(workspaceName)” will be removed too."
+        }
+        return (message, informative)
     }
 
     private func present(_ alert: NSAlert, completion: @escaping @MainActor (NSApplication.ModalResponse, NSAlert) -> Void) {

@@ -18,7 +18,8 @@ final class WorkspaceWindow: NSWindow {
 /// One window per open workspace: a sidebar (SwiftUI) and the content area,
 /// in an `NSSplitViewController`. Title and subtitle track the workspace and
 /// its selected tab group, and the window closes itself when the model marks
-/// the workspace closed (its last tab group was closed) or deletes it.
+/// the workspace closed or deletes it (Delete Workspace, or its last tab
+/// group was closed).
 ///
 /// It is also where the workspace's menu commands land (DESIGN §9): the
 /// window controller is always in the responder chain, whether a terminal
@@ -268,8 +269,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     /// ⌘W: the last pane closes the tab, the last tab the group, the last
-    /// group the window. In a tab group left empty (its tabs were moved
-    /// away) it closes the group; nothing runs there, so it does not ask.
+    /// group the workspace (and so its window). A tab group without tabs is
+    /// never kept (moving its last tab away removes it, and the repair after
+    /// every load drops one); this branch is defensive: should one appear,
+    /// ⌘W closes it, without asking since nothing runs there.
     @objc func closePane(_ sender: Any?) {
         guard let group = model.workspace(workspaceID)?.selectedTabGroup else { return }
         guard let pane = group.selectedTab?.focusedPaneID else {
