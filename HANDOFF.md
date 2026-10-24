@@ -114,6 +114,15 @@ Session layer
   SwiftTerm's blinking block rather than the configured cursor preference.
 - The flood test `aFloodIsCutShortByReattaching` is load-sensitive; it
   records a known issue under heavy CPU load rather than failing.
+- `floodArrivesCompleteInBoundedBatches` (PTYProcess, `ArmadaleSessions`)
+  failed once in the full gate on October 23, 2026 while the five
+  packages' tests ran concurrently: 7,888,899 bytes arrived for a
+  `seq 1 1000000` flood instead of 7,888,896 (three unexplained extra
+  bytes), and only 42 % of the bytes came in full 64 KB batches (the
+  test wants over 80 %, which assumes the consumer falls behind). It
+  passed three times in a row on its own afterwards. Load-sensitive like
+  the test above; the three bytes are not understood. Rerun the gate
+  before concluding anything from a single failure.
 - One unexplained rendering glitch: a Claude Code prompt once showed a
   colour code as literal text (`185;249m`) after a replay. Not reproduced.
 
