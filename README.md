@@ -412,7 +412,14 @@ To release:
 1. Bump `MARKETING_VERSION` (the version users see, e.g. `0.2.0`) and
    `CURRENT_PROJECT_VERSION` (the build number, which must increase with
    every release) in the app target's settings in `project.yml`, and
-   commit.
+   commit. `scripts/bump-build.sh` does it: with no options it raises the
+   build number by one; `--set N` picks a number (it must be higher),
+   `--version X.Y.Z` also sets the marketing version, and `--commit`
+   commits the change as "Bump to X.Y.Z (N)" from a clean tree. The
+   build number is an integer compared numerically by Launch Services
+   and by updaters, so a git commit hash cannot stand in for it; the
+   commit a build came from is the one the release's suggested tag
+   points at.
 2. From a clean working tree, run `scripts/release.sh`. It refuses a tree
    with uncommitted or untracked changes unless given `--allow-dirty`,
    and a version whose tag `v<version>` already exists unless given
@@ -465,5 +472,5 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
-| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
+| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |

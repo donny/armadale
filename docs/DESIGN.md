@@ -1995,9 +1995,15 @@ stapled DMG**.
   explains this when the profile is missing. Nothing in the repository
   holds credentials.
 - **Versions.** `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` live in
-  `project.yml` and are bumped by hand before a release (the build
-  number must increase every release). A release is a commit; the tag
-  is the owner's.
+  `project.yml` and are bumped before a release (the build number must
+  increase every release); `scripts/bump-build.sh` (October 23, 2026)
+  raises the build number by one, or sets it and the marketing version,
+  and can commit the bump from a clean tree. The build number stays an
+  integer: a git commit hash was considered and rejected, since
+  `CFBundleVersion` is compared numerically by Launch Services and by
+  updaters; the commit a build came from is the one the release's
+  suggested tag points at. A release is a commit; the tag is the
+  owner's.
 - **Identity change.** A Developer ID build has a different code
   identity (designated requirement) from the ad-hoc development build.
   Notification permission is kept per bundle identifier, so it carries
