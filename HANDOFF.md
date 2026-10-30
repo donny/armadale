@@ -236,7 +236,33 @@ This also accounts for the earlier "unexplained" semibold "Main": it was
 that window's workspace, and a semibold tab under it would have been one
 needing attention. **Not checked live** (the owner will see it on the next
 install): a screenshot of an inactive window with its path semibold and
-all icons gray. Tests: 626, zero warnings.
+all icons gray. Tests: 626, zero warnings. Committed as 9162c7e; the
+owner installed it (build 14) and accepted the look.
+
+October 30, 2026 (owner's request, implementer → reviewer loop): **the
+tab bar is drawn like the native macOS 27 window tab bar**, at the
+native 36 pt height: a capsule track holding the tabs, the selected tab
+a raised pill (flat in a window that is not key), hairline dividers
+between plain tabs and none beside a pill, a hovered tab and a tab
+needing attention (purple) as pills too, and "+" as a circle at the
+bar's right end outside the track. Style only: tab content, alignment,
+widths, scrolling, drag, rename, context menu, middle click and "+" are
+as before (`TabBarStyle` in `Tabs/TabBarView.swift`, `TabBarStyleTests`;
+`docs/DESIGN.md` section 8, "Tab bar look", with the measurements, the
+per-appearance tints and what deliberately differs from native).
+Increase Contrast strengthens the hairlines (tested, not seen live).
+**Checked live** by both agents in light (against a Terminal window with
+its tab bar) and in dark (the test build forced dark with a test-only
+injected library, since deleted, against a scratch native-tab window):
+1, 3 and 9+ tabs, hover, inactive window, rename with Return and Escape,
+middle click, drag reorder and the drop indicator, attention, a narrow
+window, scrolling. **Older bugs found by the reviewer and not fixed**
+(reproduced on the unchanged build; recorded in DESIGN section 8): the
+track can stay scrolled about 30 pt past its start after the window is
+narrowed and widened again, until relaunch; a new tab beyond the visible
+ones is selected but not scrolled into view; and, from code reading, a
+hidden overflow tab's stored frame could catch a middle click near "+".
+Tests: 632, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

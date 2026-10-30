@@ -1432,6 +1432,58 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   button close it with the ⌘W confirmation; double-click or the context
   menu's Rename Tab edits the title in place; the context menu also has
   Close Tab, Close Other Tabs.
+- *Tab bar look (owner's decision, October 30, 2026).* The bar is drawn
+  like the native macOS 27 window tab bar (Terminal's Window › Show Tab
+  Bar), in light and dark, and takes its height: **36 pt** (a native
+  window grows by 36 pt when it shows its tab bar; ours was 32). The
+  content of a tab, its alignment, the 110–220 pt range of the shared
+  width and every behaviour above are as before; what changed is the look,
+  the place of the "+" (now at the bar's right end, where native puts it,
+  also when there are no tabs) and the width sharing below. Measured from
+  screenshots of the native bar (Terminal in light; an AppKit window with
+  native tabs forced to each appearance for dark and for the inactive
+  look): one capsule **track** 28 pt high, centred in the bar with 8 pt
+  at either end, a 0.5 pt border; the **selected tab** is a pill 24 pt
+  high (fully rounded, inset 2 pt in the track) with a hairline border and
+  a faint shadow, its title in the primary colour; the other titles are
+  dimmer, and the ⌘N badges and the split/zoom hint are never brighter
+  than an unselected title; plain tabs are separated by 1 × 16 pt
+  **dividers**, none next to a pill (`TabBarStyle.showsDivider`, tested);
+  the **"+"** is a 28 pt circle (fill and hairline ring) 4 pt to the right
+  of the track, outside it. A hovered tab is a faint pill darker than the
+  track in both appearances (so in dark it stays clearly below the lighter
+  selected pill); a tab needing attention is the pill shape in purple
+  (fill and border, as before); both hide the dividers beside them like
+  the selected pill. In a window that is not key the selected pill goes
+  flat (lighter than the track in light, darker in dark, as native) and
+  every title, badge and the "+" glyph turn tertiary. The drop indicator
+  is a 2 × 16 pt accent bar just inside the target tab's leading edge, so
+  the track's rounded end does not clip it. When the tabs do not fit at
+  110 pt the track scrolls, clipped to its capsule. New: the shared width
+  subtracts the 2 pt gaps between tabs (they were ignored before, so the
+  track could scroll a few points early; `TabBarStyle.tabWidth`, tested).
+  Colours (`TabBarStyle`) are black tints in light and white tints in
+  dark, chosen per appearance through a dynamic `NSColor`, so the bar
+  follows the window's appearance; their strengths were tuned until the
+  pixels on screen matched the native screenshots (track, track border,
+  divider and "+" within a few levels of 8-bit grey in both appearances),
+  because the native bar's tints are not exposed as named system colours
+  and SwiftUI renders the same alpha lighter than AppKit does in light
+  mode. With Increase Contrast (SwiftUI's `colorSchemeContrast`) the
+  track border, pill border, dividers and "+" ring are clearly stronger
+  (`TabBarStyle.tint`, tested; not seen live). Not native, kept on
+  purpose: our tab content (status glyph, host badge, title at 12 pt,
+  left-aligned and truncated in the middle, split/zoom hint, ⌘N badge and
+  hover close button) instead of the native centred title and left-hand
+  close button; tabs share at most 220 pt instead of always filling the
+  track; the bar sits under the title bar's title and subtitle rather than
+  inside the title bar. Known and not fixed in this change (older than
+  it): after the window is narrowed and widened again the track can stay
+  scrolled about 30 pt past its start with no way to scroll back until
+  relaunch; a new tab beyond the visible ones is selected but not
+  scrolled into view (there is no scroll-to-selection); and, from reading
+  the code, with overflow a hidden tab's stored frame could catch a middle
+  click near the "+".
 - *Inline rename.* The editing state is `InlineRename`
   (`Windows/InlineRename.swift`, `@Observable`), one per window, owned by
   its `WorkspaceActions` (`actions.rename`): that is already the one object
@@ -1514,11 +1566,11 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   read it. The app delegate keeps its `isAppActive` (application
   did-become/resign-active) and `keyWorkspaceID` (window did-become/
   resign-key, mapped to the window's workspace; nil for Settings or no
-  window) current. The tab bar tints a tab needing attention (purple fill
-  and border) and shows ◐; the sidebar shows ◐ on the tab row (its title's
-  weight is the shown path's, section 1, since October 30, 2026) and a
-  purple count capsule (`AttentionCount`) on the tab group and workspace
-  rows. The Dock badge (`NSApp.dockTile.badgeLabel`) is the total,
+  window) current. The tab bar tints a tab needing attention (a purple
+  pill, fill and border) and shows ◐; the sidebar shows ◐ on the tab row
+  (its title's weight is the shown path's, section 1, since October 30,
+  2026) and a purple count capsule (`AttentionCount`) on the tab group and
+  workspace rows. The Dock badge (`NSApp.dockTile.badgeLabel`) is the total,
   nil when zero (`AttentionBadge.label`). Window titles are unchanged.
   Notifications go through `NotificationService` (`UserNotificationService`
   in the app, a fake in tests); the app delegate is the
