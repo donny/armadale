@@ -67,7 +67,9 @@ App
 ### Sidebar semantics
 
 The sidebar is app-global and identical in every window. It lists every
-workspace, with the current window's workspace expanded and in semibold.
+workspace, with the current window's workspace expanded; the window's
+shown path (its workspace, the tab group it shows, that group's selected
+tab) is in semibold.
 Clicking another workspace brings that window to front, or opens it if its
 window is closed. Under a workspace: tab groups, and under each tab group its
 tabs. Panes are not listed; a tab row shows a status summary of its panes.
@@ -106,18 +108,17 @@ A session needing attention shows ◐ whatever its state, except disconnected
 or unavailable, which matter more (it may be gone); an ended one still
 shows ◐ (it rang before it exited). The glyph is for display only: close
 confirmation (`CloseRisk`) looks at the underlying state. Tabs needing
-attention also get a purple tint in the tab bar and a semibold title in the
-sidebar, and workspace and tab group rows show how many of their panes need
-attention.
+attention also get a purple tint in the tab bar (the sidebar title is not
+emphasised: semibold there means the shown path, below), and workspace and
+tab group rows show how many of their panes need attention.
 
-The current workspace's row is emphasised (semibold), and a closed
-workspace is dimmed with a "reopen" icon. **The sidebar has no selection
+A closed workspace is dimmed with a "reopen" icon. **The sidebar has no selection
 and no highlight** (owner's decision, October 29, 2026): the `List` has
 no selection binding, so no row is ever drawn selected, gray or blue.
 The step 4 highlight on the shown tab group's row, and then the
 shown-path highlight of the same day, both kept leaving the List with
 the keyboard or the wrong row highlighted. Where the window is shows in
-the icon colours below and the semibold current workspace. Rows are
+the semibold titles and icon colours below. Rows are
 acted on by tap gestures, as the tab bar's tabs are: a click anywhere
 across a row acts on it, a double-click (a double-tap gesture) renames
 it, and each row has its own context menu. A click on a row of the
@@ -136,15 +137,22 @@ bar's controls and a window drag above the sidebar do not count. With
 no selection and the outline view refused, arrow keys and Full Keyboard
 Access no longer reach sidebar rows (owner's decision); each row is an
 accessibility button whose default action acts on it, with a Rename
-action, for VoiceOver (not checked live). **Icon colours** (owner's rule, October 29,
-2026; `SidebarIconTint`, unit-tested): in a window that looks active
-(SwiftUI's `appearsActive`: key, or main under a panel) the icons of its
-*shown path*, its own workspace, the tab group it shows and that group's
-selected tab, are accent-coloured; every other icon, the window's other
-groups and tabs and the other workspaces included, is gray, and in an
-inactive window every icon is gray. Until then the sidebar List tinted
-every icon blue in the key window and gray otherwise, and the current
-workspace's icon was blue in every window. The colours are `Color`
+action, for VoiceOver (not checked live). **Title weight and icon
+colours** (owner's rules, October 29 and 30, 2026; `SidebarShownPath`,
+unit-tested). A window's *shown path* is its own workspace, the tab group
+it shows and that group's selected tab. Those three rows' titles are
+semibold in every window, active or not, so an inactive window still says
+what it shows; every other title, the window's other groups and tabs and
+the other workspaces included, is regular. In a window that looks active
+(SwiftUI's `appearsActive`: key, or main under a panel) the shown path's
+icons are accent-coloured; every other icon is gray, and in an inactive
+window every icon is gray, so blue alone says which window is active.
+Until October 29 the sidebar List tinted every icon blue in the key window
+and gray otherwise, and the current workspace's icon was blue in every
+window; until October 30 only the current workspace's row was semibold
+(in every window) and a tab needing attention was semibold wherever it
+was (owner's decision: semibold means the shown path and nothing else;
+attention keeps ◐ and the purple counts). The colours are `Color`
 values: the hierarchical `.secondary` inside a sidebar label is a level
 of the list's tint and still reads blue in an active window. Rows: a
 click on another workspace shows or opens its window (on the current
@@ -1507,9 +1515,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   did-become/resign-active) and `keyWorkspaceID` (window did-become/
   resign-key, mapped to the window's workspace; nil for Settings or no
   window) current. The tab bar tints a tab needing attention (purple fill
-  and border) and shows ◐; the sidebar shows ◐ and a semibold title on the
-  tab row and a purple count capsule (`AttentionCount`) on the tab group and
-  workspace rows. The Dock badge (`NSApp.dockTile.badgeLabel`) is the total,
+  and border) and shows ◐; the sidebar shows ◐ on the tab row (its title's
+  weight is the shown path's, section 1, since October 30, 2026) and a
+  purple count capsule (`AttentionCount`) on the tab group and workspace
+  rows. The Dock badge (`NSApp.dockTile.badgeLabel`) is the total,
   nil when zero (`AttentionBadge.label`). Window titles are unchanged.
   Notifications go through `NotificationService` (`UserNotificationService`
   in the app, a fake in tests); the app delegate is the

@@ -5,7 +5,7 @@ whenever work pauses. The durable rules for working in this repository are
 in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
 instructions are in `README.md`.
 
-## Status (October 29, 2026)
+## Status (October 30, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
@@ -148,7 +148,7 @@ the gate, no agents, code-only): **sidebar icon colours**. Icons are
 accent-coloured only in a window that looks active and only on its shown
 path (its workspace, the tab group it shows, that group's selected tab);
 every other icon is gray, and all of them are in an inactive window
-(`SidebarIconTint` in `Sidebar/SidebarView.swift`, `SidebarIconTintTests`,
+(then `SidebarIconTint` in `Sidebar/SidebarView.swift`, now `SidebarShownPath`, `SidebarShownPathTests`,
 `docs/DESIGN.md` section 1). Removing the selection highlight was
 discussed and **deferred by the owner** ("I'll test it later"): there is
 no supported way to hide a List's selection highlight on macOS, so it
@@ -220,7 +220,23 @@ sidebar do not commit a rename; `SidebarFocusTests` covers the refusal;
 each row is an accessibility button with a default action and a Rename
 action. Arrow keys and Full Keyboard Access no longer reach sidebar rows
 (owner's decision); **VoiceOver was not checked live.** Tests: 625, zero
-warnings.
+warnings. Committed as 831b9af.
+
+October 30, 2026 (owner's rule, coordinating session, through the gate,
+no agents, code-only): **sidebar title weight follows the shown path.**
+The three rows of a window's shown path (its workspace, the tab group it
+shows, that group's selected tab) are semibold in every window, active or
+not; every other row is regular, including a tab needing attention, which
+was semibold before (it keeps ◐ and the purple counts). So bold says what
+a window shows and blue alone says which window is active. The tint
+helper became `SidebarShownPath` (`contains`, `isAccented`, `font`,
+`color`; `SidebarShownPathTests` replaces `SidebarIconTintTests`), and
+the shown-path click guard uses it. `docs/DESIGN.md` sections 1 and 8.
+This also accounts for the earlier "unexplained" semibold "Main": it was
+that window's workspace, and a semibold tab under it would have been one
+needing attention. **Not checked live** (the owner will see it on the next
+install): a screenshot of an inactive window with its path semibold and
+all icons gray. Tests: 626, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
