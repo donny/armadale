@@ -1488,8 +1488,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   the default profile and directory were removed on October 24, 2026 with
   the New Session chooser, below),
   **Appearance** (font, size, theme, cursor, renderer), **Profiles**,
-  **Hosts**, **Favorites** (October 24, 2026), **Shortcuts** (read‑only
-  table in v1).
+  **Hosts**, **Favorites** (October 24, 2026). The read‑only Shortcuts
+  tab of steps 5 to 10 moved to **Help › Keyboard Shortcuts** on October
+  29, 2026 (below): Settings is for what can be changed, and a shortcut
+  cannot be changed in Armadale yet.
   *Implementation (step 5):* `SettingsWindowController` (one instance,
   owned by the app delegate, opened by ⌘,) hosts an `NSTabViewController`
   with `tabStyle = .toolbar` whose items are `NSHostingController`s of the
@@ -1575,14 +1577,21 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     "Sessions won’t survive quitting" warning while one of the workspace's
     sessions is a non-persistent fallback (section 6). Remote sessions
     restore on relaunch like local ones.
-  - Shortcuts is generated from the menu bar `MainMenu` builds
-    (`ShortcutTable`): every item with a key equivalent, hidden alternates
-    folded into their visible item, numbered runs collapsed
-    (⌘1…⌘8), so it cannot drift from the real bindings. Only items
-    `MainMenu` created are listed (it gives each an `armadale.menu.*`
-    identifier); what AppKit adds later, the Services menu's contents and
-    the Window menu's tiling commands (🌐⌃C Center, …), is not Armadale's
-    and is left out. The Globe modifier is shown as 🌐.
+  - **Help › Keyboard Shortcuts** (`Help/ShortcutsWindowController.swift`,
+    one window, kept by the app delegate like Settings; until October 29,
+    2026 a Settings tab) shows the table generated from the menu bar
+    `MainMenu` builds (`Help/ShortcutTable.swift`): every item with a key
+    equivalent, hidden alternates folded into their visible item, numbered
+    runs collapsed (⌘1…⌘8), so it cannot drift from the real bindings.
+    Only items `MainMenu` created are listed (it gives each an
+    `armadale.menu.*` identifier); what AppKit adds later, the Services
+    menu's contents and the Window menu's tiling commands (🌐⌃C Center,
+    …), is not Armadale's and is left out. The Globe modifier is shown as
+    🌐. The Help item itself has no key equivalent, so it is not a row. The
+    window is resizable, centred, titled "Keyboard Shortcuts"; ⌘W closes
+    it as it does Settings; in menu bar mode it is ordered out with
+    Settings and closing it hides the app the same way. A `settingsTab`
+    preference still reading `shortcuts` opens General.
   - The window is titled "Settings" whatever the tab, and ⌘W (File ›
     Close Pane, which only workspace windows otherwise handle) closes it.
   - A profile's environment variables must have a non-empty name without
@@ -2285,13 +2294,17 @@ bindings are marked ✱.
 | ⌃⌘A ✱ | Next pane needing attention (step 7) |
 | ⌘, | Settings |
 
-Rebinding is out of scope for v1; the table is exposed read‑only in Settings.
+Rebinding is out of scope for v1; the table is shown read‑only under
+Help › Keyboard Shortcuts (in Settings until October 29, 2026). Every
+binding is a menu item key equivalent, so System Settings › Keyboard ›
+Keyboard Shortcuts › App Shortcuts can rebind any of them by menu title
+without Armadale's help.
 
 *Step 4 notes.* Every row is an `NSMenuItem` key equivalent (built in
-`App/MainMenu.swift`, which is the shortcut table until Settings shows it),
+`App/MainMenu.swift`, which is the shortcut table's source),
 so the shortcuts appear in the menus and work whatever has focus, and keys
-not bound there reach the terminal (since step 5, Settings › Shortcuts
-is generated from these menu items). ⌃Tab / ⌃⇧Tab and ⌘+ are hidden
+not bound there reach the terminal (since step 5 the table shown in the
+app, Help › Keyboard Shortcuts, is generated from these menu items). ⌃Tab / ⌃⇧Tab and ⌘+ are hidden
 alternates (`allowsKeyEquivalentWhenHidden`) of ⇧⌘] / ⇧⌘[ and ⌘=. ⌘9 goes
 to the last tab, ⇧⌘9 to the ninth tab group. ⌃⌘ arrows move the nearest
 divider by 5 % of its split (`moveDivider`). ⌘= / ⌘- / ⌘0 change the font
@@ -2558,8 +2571,9 @@ armadale/
 │   ├── Sessions/                    SessionRegistry (controllers per session, a backend per host,
 │   │                                RemoteSessionSupport), SessionStatus / CloseRisk,
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
-│   ├── Settings/                    SettingsWindowController, Preferences, ShortcutTable, SwiftUI tabs
-│   │                                (General, Appearance, Profiles, Hosts, Shortcuts)
+│   ├── Settings/                    SettingsWindowController, Preferences, SwiftUI tabs
+│   │                                (General, Appearance, Profiles, Hosts, Favorites)
+│   ├── Help/                        ShortcutTable, ShortcutsWindowController (Help › Keyboard Shortcuts)
 │   ├── Resources/                   AppIcon.icon (Icon Composer document), Assets.xcassets
 │   │                                (AppIcon rasters, StatusItem template glyph), Info.plist,
 │   │                                Armadale.entitlements,

@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Preferences, themes and renderers.
     let settings: AppSettings
     private var settingsWindowController: SettingsWindowController?
+    private var shortcutsWindowController: ShortcutsWindowController?
     /// Session controllers for every pane shown so far.
     private let registry: SessionRegistry
     /// Which sessions need attention; the Dock badge and notifications.
@@ -530,16 +531,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 model: model, settings: settings,
                 hostTools: HostTools(
                     testConnection: { try await registry.testConnection(to: $0) },
-                    deploy: { try await registry.deployHelper(to: $0) })
-            ) {
-                NSApp.mainMenu ?? MainMenu.make(installsSpecialMenus: false)
-            }
+                    deploy: { try await registry.deployHelper(to: $0) }))
             settingsWindowController?.onClose = { [weak self] in
-                self?.settingsWindowDidClose()
+                self?.auxiliaryWindowDidClose()
             }
         }
         NSApp.unhide(nil) // hidden after Settings closed in menu bar mode
         settingsWindowController?.show(tab)
+        NSApp.activate()
+    }
+
+    /// Help › Keyboard Shortcuts: the one window with the shortcut table,
+    /// generated from the main menu (``ShortcutTable``).
+    @objc func showKeyboardShortcuts(_ sender: Any?) {
+        if shortcutsWindowController == nil {
+            let menu = NSApp.mainMenu ?? MainMenu.make(installsSpecialMenus: false)
+            shortcutsWindowController = ShortcutsWindowController(rows: ShortcutTable.rows(from: menu))
+            shortcutsWindowController?.onClose = { [weak self] in
+                self?.auxiliaryWindowDidClose()
+            }
+        }
+        NSApp.unhide(nil) // hidden after a window closed in menu bar mode
+        shortcutsWindowController?.show()
         NSApp.activate()
     }
 
@@ -760,6 +773,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             controller.hideForMenuBarMode()
         }
         settingsWindowController?.window?.orderOut(nil)
+        shortcutsWindowController?.window?.orderOut(nil)
         NSApp.setActivationPolicy(.accessory)
         let registry = registry
         menuBarItem = MenuBarStatusItem(
@@ -791,17 +805,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Closing Settings (⌘W) in menu bar mode would leave an active
-    /// accessory app with no window, taking keystrokes nowhere: once the
-    /// close is done the app hides, which activates the app that was
-    /// active before (`NSApp.deactivate()` does not, for an accessory app:
-    /// it stayed the frontmost application). The status item stays; every
-    /// way back unhides (``leaveMenuBarMode()``, ``showSettings(tab:)``).
-    private func settingsWindowDidClose() {
+    /// Closing Settings or Keyboard Shortcuts (⌘W) in menu bar mode would
+    /// leave an active accessory app with no window, taking keystrokes
+    /// nowhere: once the close is done, and no such window is left on
+    /// screen, the app hides, which activates the app that was active
+    /// before (`NSApp.deactivate()` does not, for an accessory app: it
+    /// stayed the frontmost application). The status item stays; every
+    /// way back unhides (``leaveMenuBarMode()``, ``showSettings(tab:)``,
+    /// ``showKeyboardShortcuts(_:)``).
+    private func auxiliaryWindowDidClose() {
         guard menuBarItem != nil else { return }
         Task { @MainActor [weak self] in
             guard let self, self.menuBarItem != nil,
-                  self.settingsWindowController?.window?.isVisible != true
+                  self.settingsWindowController?.window?.isVisible != true,
+                  self.shortcutsWindowController?.window?.isVisible != true
             else { return }
             NSApp.hide(nil)
         }

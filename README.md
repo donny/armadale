@@ -34,8 +34,8 @@ What works today:
   sidebar tab group moves there. Closing a window keeps its workspace in
   the sidebar, with its sessions running; closing a workspace's last tab
   (or tab group) deletes the workspace, since nothing is left in it. The
-  full shortcut table is in docs/DESIGN.md section 9 and
-  in Settings.
+  full shortcut table is in docs/DESIGN.md section 9 and under **Help ›
+  Keyboard Shortcuts**.
 - **Persistence.** Sessions outlive Armadale (see [Quitting and the menu
   bar](#quitting-and-the-menu-bar)); a relaunch
   restores windows, layouts and selections and reattaches every visible
@@ -71,8 +71,9 @@ What works today:
   directory are gone.
 - **Settings** (⌘,): General (close confirmation, quitting with running
   sessions, notifications), Appearance (font, size, light and dark themes,
-  Ghostty theme import, cursor, renderer), Profiles, Hosts, Favorites,
-  and a read-only Shortcuts table generated from the menus.
+  Ghostty theme import, cursor, renderer), Profiles, Hosts and Favorites.
+  **Help › Keyboard Shortcuts** shows the read-only shortcut table,
+  generated from the menus.
 - **Remote hosts.** **Settings › Hosts** adds SSH hosts (destination, port,
   identity file, SSH config file, remote folder) with Test Connection and
   Deploy Now; a session is started on a host from the New Session

@@ -1,7 +1,7 @@
 import AppKit
 
 /// The keyboard shortcut table (DESIGN §9), read from the menu bar that
-/// ``MainMenu`` builds, so Settings › Shortcuts always shows the bindings
+/// ``MainMenu`` builds, so Help › Keyboard Shortcuts always shows the bindings
 /// that are actually in effect.
 @MainActor
 enum ShortcutTable {

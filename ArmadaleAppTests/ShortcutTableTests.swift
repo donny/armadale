@@ -83,6 +83,28 @@ struct ShortcutTableTests {
         #expect(MainMenu.isOwnItem(try #require(window.items.first)))
     }
 
+    /// The table is Help › Keyboard Shortcuts since October 29, 2026 (it
+    /// was a Settings tab): the Help item opens it, has no key equivalent
+    /// of its own, and the window shows the same rows.
+    @Test func helpOpensTheTableInItsOwnWindow() throws {
+        _ = NSApplication.shared
+        let menu = MainMenu.make(installsSpecialMenus: false)
+        let help = try #require(menu.items.last?.submenu)
+        #expect(help.title == "Help")
+        let item = try #require(help.items.first { $0.title == "Keyboard Shortcuts" })
+        #expect(item.action == #selector(AppDelegate.showKeyboardShortcuts(_:)))
+        #expect(item.keyEquivalent.isEmpty)
+        #expect(!rows().contains { $0.command == "Keyboard Shortcuts" })
+
+        let controller = ShortcutsWindowController(rows: rows())
+        #expect(controller.window?.title == "Keyboard Shortcuts")
+        #expect(controller.window?.styleMask.contains(.resizable) == true)
+        let close = NSMenuItem(title: "Close Pane", action: #selector(ShortcutsWindowController.closePane(_:)), keyEquivalent: "w")
+        #expect(controller.validateMenuItem(close))
+        #expect(close.title == "Close Keyboard Shortcuts")
+        controller.window?.close()
+    }
+
     @Test func theGlobeKeyIsShown() {
         #expect(ShortcutTable.display(key: "c", modifiers: [.function, .control]) == "🌐⌃C")
         #expect(ShortcutTable.display(key: "f", modifiers: [.function]) == "🌐F")

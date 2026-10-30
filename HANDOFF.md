@@ -5,7 +5,7 @@ whenever work pauses. The durable rules for working in this repository are
 in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
 instructions are in `README.md`.
 
-## Status (October 24, 2026)
+## Status (October 29, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`:
@@ -128,6 +128,20 @@ never pressed the placeholder's Respawn / Reconnect / Retry button,
 since step 2, because the ended terminal view kept keyboard focus; the
 pane itself is first responder while a placeholder is shown
 (`PlaceholderKeyboardTests`). `docs/DESIGN.md` sections 4 and 8; README.
+
+October 29, 2026 (owner's decision, done by the coordinating session
+through the gate, no agents): **the Shortcuts tab moved from Settings to
+Help › Keyboard Shortcuts** (`Armadale/Help/ShortcutsWindowController.swift`
+and `ShortcutTable.swift`, the Help menu item without a key equivalent,
+`AppDelegate.showKeyboardShortcuts`; the window is ordered out in menu
+bar mode with Settings and closing it there hides the app the same way;
+a saved `settingsTab` of `shortcuts` opens General; `docs/DESIGN.md`
+sections 8, 9 and 11; README). Reason: Settings is for what can be
+changed, and every binding is a menu item key equivalent that System
+Settings › Keyboard › App Shortcuts can already rebind by title. **Not
+checked live** (the Mac was not free): the window itself (Help ›
+Keyboard Shortcuts, its size, ⌘W closing it, menu bar mode). Tests: 623
+(171 app + 226 core + 206 sessions + 13 + 7), zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

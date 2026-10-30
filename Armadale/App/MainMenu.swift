@@ -7,8 +7,8 @@ import ArmadaleCore
 /// terminal. Workspace commands are nil-targeted and land on the key
 /// window's ``WorkspaceWindowController``; app-wide ones on ``AppDelegate``.
 ///
-/// This is also the shortcut table: Settings › Shortcuts is generated from
-/// the menu this builds (``ShortcutTable``), so the two cannot disagree.
+/// This is also the shortcut table: Help › Keyboard Shortcuts is generated
+/// from the menu this builds (``ShortcutTable``), so the two cannot disagree.
 @MainActor
 enum MainMenu {
     /// Prefix of the identifier given to every item this builds. AppKit adds
@@ -193,6 +193,9 @@ enum MainMenu {
         // Help
         let help = submenu("Help", in: main)
         help.addItem(withTitle: "\(appName) Help", action: #selector(NSApplication.showHelp(_:)), keyEquivalent: "?")
+        // No key equivalent, so the table it shows is not changed by it.
+        help.addItem(withTitle: "Keyboard Shortcuts",
+                     action: #selector(AppDelegate.showKeyboardShortcuts(_:)), keyEquivalent: "")
         if installsSpecialMenus { NSApp.helpMenu = help }
 
         markOwnItems(in: main, path: "")

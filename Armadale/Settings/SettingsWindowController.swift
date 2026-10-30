@@ -3,14 +3,15 @@ import ArmadaleCore
 import SwiftUI
 
 /// Armadale › Settings… (⌘,): one window, with the standard toolbar of
-/// settings tabs (General, Appearance, Profiles, Hosts, Favorites,
-/// Shortcuts), each a
+/// settings tabs (General, Appearance, Profiles, Hosts, Favorites), each a
 /// SwiftUI view. The app keeps a single instance; the window remembers
-/// where it was and which tab was shown (in ``Preferences``).
+/// where it was and which tab was shown (in ``Preferences``; a saved
+/// "shortcuts", the read-only tab that moved to Help › Keyboard Shortcuts
+/// on October 29, 2026, opens General).
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     enum Tab: String, CaseIterable {
-        case general, appearance, profiles, hosts, favorites, shortcuts
+        case general, appearance, profiles, hosts, favorites
 
         var title: String {
             switch self {
@@ -19,7 +20,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .profiles: "Profiles"
             case .hosts: "Hosts"
             case .favorites: "Favorites"
-            case .shortcuts: "Shortcuts"
             }
         }
 
@@ -30,7 +30,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .profiles: "terminal"
             case .hosts: "network"
             case .favorites: "star"
-            case .shortcuts: "keyboard"
             }
         }
 
@@ -42,7 +41,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .profiles: NSSize(width: 780, height: 560)
             case .hosts: NSSize(width: 780, height: 600)
             case .favorites: NSSize(width: 780, height: 600)
-            case .shortcuts: NSSize(width: 620, height: 560)
             }
         }
     }
@@ -53,10 +51,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
     /// then gives up being the active app).
     var onClose: (() -> Void)?
 
-    init(
-        model: AppModel, settings: AppSettings, hostTools: HostTools = .unavailable,
-        mainMenu: @escaping @MainActor () -> NSMenu
-    ) {
+    init(model: AppModel, settings: AppSettings, hostTools: HostTools = .unavailable) {
         self.settings = settings
         // Read first: adding the tabs selects the first one, which is recorded.
         let saved = settings.preferences.settingsTab.flatMap(Tab.init(rawValue:)) ?? .general
@@ -74,7 +69,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
             case .favorites: AnyView(FavoritesSettingsView(model: model) { [weak tabs] in
                 tabs?.selectedTabViewItemIndex = Tab.allCases.firstIndex(of: .hosts) ?? 0
             })
-            case .shortcuts: AnyView(ShortcutsSettingsView(rows: ShortcutTable.rows(from: mainMenu())))
             }
             let hosting = NSHostingController(rootView: root.frame(width: tab.contentSize.width, height: tab.contentSize.height))
             hosting.sizingOptions = []

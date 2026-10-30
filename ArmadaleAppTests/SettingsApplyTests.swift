@@ -224,14 +224,25 @@ struct SettingsApplyTests {
         defer { settings.removeTestDefaults() }
         settings.preferences.settingsTab = "profiles"
         let model = AppModel(defaultWorkingDirectory: "/")
-        let controller = SettingsWindowController(model: model, settings: settings) {
-            MainMenu.make(installsSpecialMenus: false)
-        }
+        let controller = SettingsWindowController(model: model, settings: settings)
         #expect(controller.selectedTab == .profiles)
         #expect(controller.window?.toolbarStyle == .preference)
         controller.show(.appearance)
         #expect(settings.preferences.settingsTab == "appearance")
         #expect(abs((controller.window?.contentLayoutRect.height ?? 0) - SettingsWindowController.Tab.appearance.contentSize.height) < 1)
+        controller.window?.close()
+    }
+
+    /// The Shortcuts tab moved to Help › Keyboard Shortcuts (October 29,
+    /// 2026); a tab saved under its old name opens General.
+    @Test func aSavedShortcutsTabOpensGeneral() throws {
+        _ = NSApplication.shared
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        settings.preferences.settingsTab = "shortcuts"
+        let controller = SettingsWindowController(model: AppModel(defaultWorkingDirectory: "/"), settings: settings)
+        #expect(controller.selectedTab == .general)
+        #expect(!SettingsWindowController.Tab.allCases.contains { $0.rawValue == "shortcuts" })
         controller.window?.close()
     }
 }
