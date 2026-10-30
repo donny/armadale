@@ -262,7 +262,37 @@ track can stay scrolled about 30 pt past its start after the window is
 narrowed and widened again, until relaunch; a new tab beyond the visible
 ones is selected but not scrolled into view; and, from code reading, a
 hidden overflow tab's stored frame could catch a middle click near "+".
-Tests: 632, zero warnings.
+Tests: 632, zero warnings. Committed as 60e107d; the owner installed it
+(build 15).
+
+October 30, 2026, later (owner's request, implementer → reviewer loop,
+three review rounds): **tabs fill the track and the three tab bar bugs
+above are fixed.** The 220 pt maximum is gone: tabs share the track's
+whole inside equally (one tab fills it, two are halves, as native), down
+to 110 pt, below which the track scrolls. Scrolling is decided by the
+pure `TrackScroll` from the tab count, the selected index, the bar width
+and the current or pending offset, never from measured frames: a
+selection change reveals the selected tab with the least scroll (start
+for the first, end for the last); a tab-count change only clamps the
+user's offset (start when everything fits, new end when past it); a
+width change clamps and keeps a selected tab that was wholly visible
+visible. A programmatic scroll the scroll view drops (seen live with
+quick ⌘9 ⌘2 bursts) is retried once by the pure `PendingScroll` state
+machine in `TabFrameStore`: a target counts as reached only when the
+track rests on it, a user scroll phase clears it. Middle click resolves
+only inside the track's visible frame. `docs/DESIGN.md` section 8 ("Tab
+bar look", "Scrolling the track"). **Checked live** (light; dark for the
+widths and the first scroll round): 1, 2, 5 and 11 tabs; "+", ⌘1/⌘9 and
+sidebar clicks revealing hidden tabs; two- and three-key ⌘ bursts (74/74
+after the last fix); closing tabs with the track scrolled (offset only
+clamps); narrow to 520 pt and widen to 1100 pt; a trackpad scroll during
+a reveal animation wins with no later jump; middle click on "+", the
+margins and a partly hidden tab; drag reorder with overflow. **Known and
+not fixed:** dragging a tab does not auto-scroll the track, so only
+visible tabs are drop targets. **Not checked live:** the attention
+reveal's scroll (same selection-change path), a sidebar toggle at the
+same moment as a selection change, a tab closed during a live resize,
+and the last fix in dark mode. Tests: 644, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

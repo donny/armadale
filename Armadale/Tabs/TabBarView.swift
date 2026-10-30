@@ -3,13 +3,111 @@ import ArmadaleCore
 import SwiftUI
 
 /// Where each tab of a tab bar is, in the bar's own coordinates (origin
-/// top left), so the hosting view can map a middle click to a tab.
+/// top left), so the hosting view can map a middle click to a tab, and
+/// where the track is scrolled to. A plain class: writing to it never
+/// redraws the bar (the scroll offset changes on every frame of a scroll).
 @MainActor
 final class TabFrameStore {
     var frames: [TabID: CGRect] = [:]
+    /// The part of the track that shows tabs (the scroll view's frame).
+    /// A tab scrolled out of it keeps a frame beside the track, under the
+    /// "+" or the bar's ends, so only points inside it can hit a tab.
+    var visibleTrack: CGRect = .null
+    /// The bar's width, which the tab width and the track's metrics
+    /// follow (``TrackScroll``).
+    var barWidth: CGFloat = 0
+    /// The track's reported offset and the scroll the bar is waiting for.
+    var scroll = PendingScroll()
+    /// The bar's width and tab count the last scroll decision was made
+    /// for (`nil` before the first).
+    var decidedBarWidth: CGFloat?
+    var decidedCount: Int?
+
+    /// The offset scroll decisions start from.
+    var effectiveOffset: CGFloat { scroll.effectiveOffset }
 
     func tab(at point: CGPoint) -> TabID? {
-        frames.first { $0.value.contains(point) }?.key
+        guard visibleTrack.contains(point) else { return nil }
+        return frames.first { $0.value.contains(point) }?.key
+    }
+}
+
+/// The bookkeeping of the track's scrolling (DESIGN §8, "Scrolling the
+/// track"), pure so that it can be tested event by event: the offset the
+/// scroll view last reported, and the target the bar last asked for until
+/// the track comes to rest there.
+///
+/// While an animated scroll is under way the reported offset is out of
+/// date, so decisions start from the pending target (``effectiveOffset``).
+/// The target counts as reached only when the track comes to rest at it,
+/// or is reported at it while no animation runs (a scroll without
+/// animation); an offset reported at it while an animation runs is only
+/// passing through (⌘9 then ⌘1: the animation towards the end starts at
+/// the start). The scroll view can drop a scroll asked for just after an
+/// animated one began and come to rest at the earlier target; an
+/// animation coming to rest away from the pending target therefore asks
+/// for it once more, at most once per requested scroll. The user's own
+/// scrolling (any phase but idle and animating) drops the target, so a
+/// retry never follows it.
+struct PendingScroll: Equatable {
+    /// The scroll view's phases as far as this bookkeeping is concerned.
+    enum Phase: Equatable {
+        case idle
+        /// A programmatic scroll is moving the track.
+        case animating
+        /// The user is scrolling (tracking, interacting, decelerating).
+        case user
+    }
+
+    /// The offset the scroll view last reported.
+    private(set) var offset: CGFloat = 0
+    /// The target the bar last asked for, until the track rests there.
+    private(set) var target: CGFloat?
+    private(set) var phase: Phase = .idle
+    /// Whether ``target`` was already asked for a second time.
+    private(set) var retried = false
+
+    /// The offset scroll decisions start from.
+    var effectiveOffset: CGFloat { target ?? offset }
+
+    /// The bar asks the track to scroll to `x`.
+    mutating func requested(_ x: CGFloat) {
+        target = x
+        retried = false
+    }
+
+    /// The scroll view reports the offset `x`.
+    mutating func reported(_ x: CGFloat) {
+        offset = x
+        if phase == .idle, let target, abs(target - x) < 0.5 { done() }
+    }
+
+    /// The scroll phase changed to `new`. Returns the target to ask for
+    /// once more, if any.
+    mutating func phaseChanged(to new: Phase) -> CGFloat? {
+        let old = phase
+        phase = new
+        switch new {
+        case .animating:
+            return nil
+        case .user:
+            done()
+            return nil
+        case .idle:
+            guard let target else { return nil }
+            if abs(target - offset) < 0.5 { done(); return nil }
+            if old == .animating, !retried {
+                retried = true
+                return target
+            }
+            done()
+            return nil
+        }
+    }
+
+    private mutating func done() {
+        target = nil
+        retried = false
     }
 }
 
@@ -60,6 +158,9 @@ struct TabBarView: View {
     /// The tab under the pointer, which is drawn as a pill and so hides the
     /// dividers next to it.
     @State private var hoveredTabID: TabID?
+    /// Drives the track's scroll offset; read back through
+    /// `onScrollGeometryChange` into ``TabFrameStore/scroll``.
+    @State private var scrollPosition = ScrollPosition(edge: .leading)
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
@@ -104,8 +205,8 @@ struct TabBarView: View {
                                         TabBarDivider()
                                     }
                                 }
-                                .onGeometryChange(for: CGRect.self) { proxy in
-                                    proxy.frame(in: .named(tabBarCoordinateSpace))
+                                .onGeometryChange(for: CGRect.self) { tabGeometry in
+                                    tabGeometry.frame(in: .named(tabBarCoordinateSpace))
                                 } action: { frame in
                                     frames.frames[tab.id] = frame
                                 }
@@ -114,7 +215,37 @@ struct TabBarView: View {
                         .padding(TabBarStyle.pillInset)
                     }
                     .scrollIndicators(.never)
+                    .scrollPosition($scrollPosition)
                     .clipShape(Capsule())
+                    .onGeometryChange(for: CGRect.self) { track in
+                        track.frame(in: .named(tabBarCoordinateSpace))
+                    } action: { frame in
+                        frames.visibleTrack = frame
+                    }
+                    .onScrollGeometryChange(for: CGFloat.self) { scroll in
+                        scroll.contentOffset.x
+                    } action: { _, offset in
+                        frames.scroll.reported(offset)
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        scrollPhaseChanged(to: phase)
+                    }
+                    .onAppear { adjustScroll(revealingSelection: true, animated: false) }
+                    // The selection changed (a new tab, ⌘1…⌘9, the sidebar,
+                    // the attention reveal, a close that selects a
+                    // neighbour): show the selected tab.
+                    .onChange(of: group?.selectedTabID) {
+                        adjustScroll(revealingSelection: true, animated: true)
+                    }
+                    // Tabs added or closed, or a resize, with the same
+                    // selection: leave the user's scroll alone, only clamp
+                    // it (the start when every tab fits; the new end when
+                    // the content shrank under the offset, which the scroll
+                    // view itself does not always do); a resize also keeps
+                    // a selected tab that was wholly in view in view.
+                    .onChange(of: TrackLayout(barWidth: geometry.size.width, count: tabs.count)) {
+                        adjustScroll(revealingSelection: false, animated: false)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(height: TabBarStyle.trackHeight)
                     .background {
@@ -138,6 +269,11 @@ struct TabBarView: View {
             }
             .padding(.horizontal, TabBarStyle.margin)
             .frame(width: geometry.size.width, height: geometry.size.height)
+            .onGeometryChange(for: CGFloat.self) { bar in
+                bar.size.width
+            } action: { width in
+                frames.barWidth = width
+            }
             .contentShape(Rectangle())
             .dropDestination(for: HierarchyDragItem.self) { items, _ in
                 guard let group else { return false }
@@ -150,6 +286,72 @@ struct TabBarView: View {
             let live = Set(ids)
             frames.frames = frames.frames.filter { live.contains($0.key) }
             if let hoveredTabID, !live.contains(hoveredTabID) { self.hoveredTabID = nil }
+        }
+    }
+
+    /// What the track's scroll position depends on besides the selection.
+    private struct TrackLayout: Equatable {
+        var barWidth: CGFloat
+        var count: Int
+    }
+
+    /// Asks for a scroll on the main actor's next turn (by then a tab
+    /// added with the selection is normally part of the scroll view's
+    /// content). The tabs, the selection, the bar's width and the offset
+    /// are read when it runs, not when it was asked for, so of several
+    /// quick changes the last state wins whatever order the turns run in;
+    /// the offset is ``TabFrameStore/effectiveOffset``, so a decision made
+    /// while an animated scroll is under way starts from where that scroll
+    /// is going, and the target is computed from the tab's index and the
+    /// uniform tab width (``TrackScroll``), never from measured frames.
+    private func adjustScroll(revealingSelection: Bool, animated: Bool) {
+        Task { @MainActor in
+            guard let group = model.workspace(workspaceID)?.selectedTabGroup else { return }
+            let tabs = group.tabs
+            let barWidth = frames.barWidth
+            guard barWidth > 0 else { return }
+            let offset = frames.effectiveOffset
+            let index = group.selectedTabID.flatMap { id in tabs.firstIndex { $0.id == id } }
+            // The layout the previous decision was made for, so a resize
+            // is told apart from tabs added or closed.
+            let previousWidth = frames.decidedBarWidth ?? barWidth
+            let previousCount = frames.decidedCount ?? tabs.count
+            frames.decidedBarWidth = barWidth
+            frames.decidedCount = tabs.count
+            let target: CGFloat? = if revealingSelection {
+                TrackScroll.revealOffset(index: index, count: tabs.count, barWidth: barWidth, offset: offset)
+            } else if tabs.count != previousCount {
+                TrackScroll.clampedOffset(count: tabs.count, barWidth: barWidth, offset: offset)
+            } else {
+                TrackScroll.resizedOffset(
+                    index: index, count: tabs.count, from: previousWidth, to: barWidth, offset: offset)
+            }
+            scroll(to: target, animated: animated)
+        }
+    }
+
+    /// The track's scroll phase changed: tell ``PendingScroll``, and ask
+    /// once more for a target it says was dropped.
+    private func scrollPhaseChanged(to phase: ScrollPhase) {
+        let mapped: PendingScroll.Phase = switch phase {
+        case .idle: .idle
+        case .animating: .animating
+        default: .user
+        }
+        if let retry = frames.scroll.phaseChanged(to: mapped) {
+            withAnimation(.easeInOut(duration: 0.2)) { scrollPosition.scrollTo(x: retry) }
+        }
+    }
+
+    /// Scrolls the track to `offset` (nothing when `nil`), remembering it
+    /// as pending until the scroll view reports it.
+    private func scroll(to offset: CGFloat?, animated: Bool) {
+        guard let offset else { return }
+        frames.scroll.requested(offset)
+        if animated {
+            withAnimation(.easeInOut(duration: 0.2)) { scrollPosition.scrollTo(x: offset) }
+        } else {
+            scrollPosition.scrollTo(x: offset)
         }
     }
 
@@ -184,16 +386,20 @@ enum TabBarStyle {
     static let dividerHeight: CGFloat = 16
     static let hairline: CGFloat = 0.5
     static let minTabWidth: CGFloat = 110
-    static let maxTabWidth: CGFloat = 220
 
-    /// The width every tab gets: the track's inside shared out, between
-    /// ``minTabWidth`` and ``maxTabWidth`` (the track scrolls when the
-    /// tabs do not fit at the minimum).
+    /// The width every tab gets: the track's whole inside shared out
+    /// equally, as native (one tab fills the track), but never less than
+    /// ``minTabWidth``; below that the track scrolls.
     static func tabWidth(barWidth: CGFloat, count: Int) -> CGFloat {
         guard count > 0 else { return 0 }
+        return max(share(barWidth: barWidth, count: count), minTabWidth)
+    }
+
+    /// The track's inside (less the insets and the gaps between tabs) over
+    /// `count` tabs.
+    private static func share(barWidth: CGFloat, count: Int) -> CGFloat {
         let inside = barWidth - 2 * margin - plusGap - plusDiameter - 2 * pillInset
-        let available = inside - tabSpacing * CGFloat(count - 1)
-        return min(max(available / CGFloat(count), minTabWidth), maxTabWidth)
+        return (inside - tabSpacing * CGFloat(count - 1)) / CGFloat(count)
     }
 
     /// Whether a divider follows the tab at `index`: only between two plain
@@ -257,6 +463,90 @@ enum TabBarStyle {
         Color(nsColor: NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
         })
+    }
+}
+
+/// Where the tab track scrolls (DESIGN §8, "Scrolling the track"): pure
+/// offsets computed from the tab count, the tab's index and the bar's
+/// width (every tab has the same width), so a decision never depends on
+/// frames measured before an earlier scroll landed.
+enum TrackScroll {
+    /// The visible width of the track.
+    static func viewportWidth(barWidth: CGFloat) -> CGFloat {
+        barWidth - 2 * TabBarStyle.margin - TabBarStyle.plusGap - TabBarStyle.plusDiameter
+    }
+
+    /// The width of the track's content: the tabs, the gaps between them
+    /// and the inset at either end.
+    static func contentWidth(count: Int, barWidth: CGFloat) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let width = TabBarStyle.tabWidth(barWidth: barWidth, count: count)
+        return 2 * TabBarStyle.pillInset + CGFloat(count) * width + CGFloat(count - 1) * TabBarStyle.tabSpacing
+    }
+
+    /// The largest offset: the track scrolled to its end.
+    static func maxOffset(count: Int, barWidth: CGFloat) -> CGFloat {
+        max(0, contentWidth(count: count, barWidth: barWidth) - viewportWidth(barWidth: barWidth))
+    }
+
+    /// After the selection changed to the tab at `index`: the least scroll
+    /// from `offset` that shows it wholly with the inset beside it (the
+    /// start for the first tab, the end for the last), or `nil` when it
+    /// already shows that way and the offset is in range. With every tab
+    /// fitting, the start.
+    static func revealOffset(index: Int?, count: Int, barWidth: CGFloat, offset: CGFloat) -> CGFloat? {
+        guard count > 0 else { return nil }
+        let maximum = maxOffset(count: count, barWidth: barWidth)
+        var target = min(max(offset, 0), maximum)
+        if let index, index >= 0, index < count {
+            let width = TabBarStyle.tabWidth(barWidth: barWidth, count: count)
+            let start = CGFloat(index) * (width + TabBarStyle.tabSpacing)
+            let end = start + width + 2 * TabBarStyle.pillInset
+            let viewport = viewportWidth(barWidth: barWidth)
+            if start < target {
+                target = start
+            } else if end > target + viewport {
+                target = end - viewport
+            }
+            target = min(max(target, 0), maximum)
+        }
+        return abs(target - offset) < 0.5 ? nil : target
+    }
+
+    /// After a resize (the bar's width changed from `oldWidth` to
+    /// `newWidth`, the tabs and the selection did not): the offset clamped
+    /// as ``clampedOffset(count:barWidth:offset:)`` does, and then, if the
+    /// selected tab at `index` showed wholly before the resize and no longer
+    /// does, the least scroll that shows it again; a selected tab that was
+    /// already out of view stays out of view. `nil` when nothing moves.
+    static func resizedOffset(
+        index: Int?, count: Int, from oldWidth: CGFloat, to newWidth: CGFloat, offset: CGFloat
+    ) -> CGFloat? {
+        let clamped = clampedOffset(count: count, barWidth: newWidth, offset: offset) ?? offset
+        if let index, isWhollyVisible(index: index, count: count, barWidth: oldWidth, offset: offset),
+           !isWhollyVisible(index: index, count: count, barWidth: newWidth, offset: clamped),
+           let revealed = revealOffset(index: index, count: count, barWidth: newWidth, offset: clamped) {
+            return abs(revealed - offset) < 0.5 ? nil : revealed
+        }
+        return abs(clamped - offset) < 0.5 ? nil : clamped
+    }
+
+    /// Whether the pill of the tab at `index` lies wholly inside the track
+    /// scrolled to `offset`.
+    static func isWhollyVisible(index: Int, count: Int, barWidth: CGFloat, offset: CGFloat) -> Bool {
+        guard index >= 0, index < count else { return false }
+        let width = TabBarStyle.tabWidth(barWidth: barWidth, count: count)
+        let minX = TabBarStyle.pillInset + CGFloat(index) * (width + TabBarStyle.tabSpacing)
+        return minX >= offset - 0.5 && minX + width <= offset + viewportWidth(barWidth: barWidth) + 0.5
+    }
+
+    /// After tabs were added or closed without a selection change:
+    /// the user's offset clamped to the content (the start when every tab
+    /// fits, the new end when the content shrank under it), or `nil` to
+    /// leave it where it is.
+    static func clampedOffset(count: Int, barWidth: CGFloat, offset: CGFloat) -> CGFloat? {
+        let target = min(max(offset, 0), maxOffset(count: count, barWidth: barWidth))
+        return abs(target - offset) < 0.5 ? nil : target
     }
 }
 

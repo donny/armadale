@@ -1423,8 +1423,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   steps 2 to 9 was dropped on October 23, 2026 at the owner's request.
 - The tab bar is custom SwiftUI (not `NSTabView`): it needs shortcut badges,
   status glyphs, drag reordering, and dragging a tab onto a sidebar tab group
-  to move it. Tabs share the width (110–220 pt) and scroll when they do not
-  fit; each shows its status glyph, title (custom, else session title, else
+  to move it. Tabs share the track's whole width equally (at least 110 pt;
+  October 30, 2026) and scroll when they do not fit; each shows its status
+  glyph, title (custom, else session title, else
   profile name), a split/zoom hint, and ⌘1…⌘8 badges (⌘9 on the last tab),
   which turn into a close button on hover. Click selects; dropping a tab on
   another takes its position (from any group or window); middle click
@@ -1436,10 +1437,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   like the native macOS 27 window tab bar (Terminal's Window › Show Tab
   Bar), in light and dark, and takes its height: **36 pt** (a native
   window grows by 36 pt when it shows its tab bar; ours was 32). The
-  content of a tab, its alignment, the 110–220 pt range of the shared
-  width and every behaviour above are as before; what changed is the look,
-  the place of the "+" (now at the bar's right end, where native puts it,
-  also when there are no tabs) and the width sharing below. Measured from
+  content of a tab, its alignment and every behaviour above are as
+  before; what changed is the look, the place of the "+" (now at the
+  bar's right end, where native puts it, also when there are no tabs) and
+  the width sharing below. Measured from
   screenshots of the native bar (Terminal in light; an AppKit window with
   native tabs forced to each appearance for dark and for the inactive
   look): one capsule **track** 28 pt high, centred in the bar with 8 pt
@@ -1458,10 +1459,58 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   flat (lighter than the track in light, darker in dark, as native) and
   every title, badge and the "+" glyph turn tertiary. The drop indicator
   is a 2 × 16 pt accent bar just inside the target tab's leading edge, so
-  the track's rounded end does not clip it. When the tabs do not fit at
-  110 pt the track scrolls, clipped to its capsule. New: the shared width
-  subtracts the 2 pt gaps between tabs (they were ignored before, so the
-  track could scroll a few points early; `TabBarStyle.tabWidth`, tested).
+  the track's rounded end does not clip it. **Tabs fill the track** (the
+  owner's second round, same day), as native: the track's whole inside,
+  less the 2 pt insets and the 2 pt gaps between tabs, is shared equally
+  (one tab fills it, two take half each); the 220 pt maximum is gone. When
+  the tabs would go below 110 pt the track scrolls, clipped to its
+  capsule (`TabBarStyle.tabWidth`, tested).
+  *Scrolling the track* (second and third rounds, October 30, 2026).
+  The track's offset is driven through a `ScrollPosition` and read back
+  with `onScrollGeometryChange`; every target is computed by
+  `TrackScroll` (tested) from the tab count, the selected tab's index and
+  the bar's width (all tabs share one width), never from measured frames.
+  Two kinds of change are told apart. When the *selection* changes (a new
+  tab, ⌘1…⌘9, a click in the sidebar, the attention reveal, a close that
+  selects a neighbour) the track scrolls the least amount that shows the
+  selected tab wholly with the 2 pt inset beside it, so the track's
+  rounded end never clips the pill (for the first tab that is the start,
+  for the last the end), and not at all when it already shows; animated,
+  0.2 s. When only the bar's *width* or the *number of tabs* changes (a
+  resize, a tab closed or added with the same selection) the user's offset
+  is left alone and only clamped: the start when every tab fits, the new
+  end when the content shrank under the offset (the scroll view does not
+  always clamp by itself: before, a window narrowed and widened again kept
+  about 30 pt past the start with no way back), otherwise unchanged; so
+  closing a tab never jumps the track to the selected tab or to the
+  start. A resize (the width changed, the number of tabs did not) also
+  keeps the selected tab in view if it showed wholly before: when the
+  clamped offset would cut it off, the least scroll shows it again; a
+  selected tab already out of view stays out of view
+  (`TrackScroll.resizedOffset`, tested; fourth round, same day). Quick
+  selection changes (⌘9 then ⌘2, or ⌘5 ⌘9 ⌘1, within the animation) are
+  safe. The offset a decision starts from is the target of a scroll still
+  under way, and each scroll is asked for on the main actor's next turn,
+  reading the tabs, the selection and the width when it runs, so the last
+  state wins whatever order those turns run in (usually a tab added with the
+  selection is laid out by then; nothing depends on it, since targets are
+  computed rather than measured). The bookkeeping is `PendingScroll` (pure,
+  tested event by event, kept in `TabFrameStore`): the target counts as
+  reached only when the track comes to rest at it, or is reported at it
+  while no animation runs; an offset reported at it during an animation is
+  only passing through (the animation towards the end for ⌘9 passes the
+  start and tab 2 on its way). The scroll view was seen to drop a target
+  asked for just after an animated scroll began and come to rest at the
+  earlier one; an animation coming to rest away from the pending target
+  therefore asks for it once more, at most once per requested scroll. The
+  user's own scrolling (tracking, interacting, decelerating) drops the
+  target, so no retry ever follows it. Known and not fixed (older than this
+  change): dragging a tab does not scroll the track, so only visible tabs
+  can be drop targets. *Middle click* (second round): the hosting
+  view's `TabFrameStore` also records the track's visible frame and only
+  resolves a point inside it, so a tab scrolled out of view, whose stored
+  frame lies under the "+" or the bar's ends, can no longer be closed by a
+  middle click there (`TabFrameStore.tab(at:)`, tested).
   Colours (`TabBarStyle`) are black tints in light and white tints in
   dark, chosen per appearance through a dynamic `NSColor`, so the bar
   follows the window's appearance; their strengths were tuned until the
@@ -1475,15 +1524,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   purpose: our tab content (status glyph, host badge, title at 12 pt,
   left-aligned and truncated in the middle, split/zoom hint, ⌘N badge and
   hover close button) instead of the native centred title and left-hand
-  close button; tabs share at most 220 pt instead of always filling the
-  track; the bar sits under the title bar's title and subtitle rather than
-  inside the title bar. Known and not fixed in this change (older than
-  it): after the window is narrowed and widened again the track can stay
-  scrolled about 30 pt past its start with no way to scroll back until
-  relaunch; a new tab beyond the visible ones is selected but not
-  scrolled into view (there is no scroll-to-selection); and, from reading
-  the code, with overflow a hidden tab's stored frame could catch a middle
-  click near the "+".
+  close button; the bar sits under the title bar's title and subtitle
+  rather than inside the title bar.
 - *Inline rename.* The editing state is `InlineRename`
   (`Windows/InlineRename.swift`, `@Observable`), one per window, owned by
   its `WorkspaceActions` (`actions.rename`): that is already the one object
