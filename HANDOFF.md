@@ -143,6 +143,22 @@ checked live** (the Mac was not free): the window itself (Help ›
 Keyboard Shortcuts, its size, ⌘W closing it, menu bar mode). Tests: 623
 (171 app + 226 core + 206 sessions + 13 + 7), zero warnings.
 
+Later on October 29, 2026 (owner's rule, coordinating session, through
+the gate, no agents, code-only): **sidebar icon colours**. Icons are
+accent-coloured only in a window that looks active and only on its shown
+path (its workspace, the tab group it shows, that group's selected tab);
+every other icon is gray, and all of them are in an inactive window
+(`SidebarIconTint` in `Sidebar/SidebarView.swift`, `SidebarIconTintTests`,
+`docs/DESIGN.md` section 1). Removing the selection highlight on the
+shown tab group's row was discussed and **deferred by the owner** ("I'll
+test it later"): there is no supported way to hide a List's selection
+highlight on macOS, so it would mean dropping the selection binding that
+the double-click rename and the context menus are built on. **Not
+checked live** (the Mac was not free): the exact gray of `Color.secondary`
+next to the List's own inactive tint, and that `appearsActive` flips the
+icons on every activation path (another window, another app, a sheet,
+menu bar mode's return). Tests: 624, zero warnings.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the

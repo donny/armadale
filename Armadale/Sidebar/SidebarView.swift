@@ -12,7 +12,9 @@ enum SidebarItem: Hashable {
 /// their tabs, the same in every window. Workspace and tab group rows count
 /// their panes needing attention; a tab needing attention shows ◐. The current window's workspace
 /// starts expanded and is shown in bold; its selected tab group is the
-/// highlighted row. Clicking another workspace brings its window to front
+/// highlighted row. Icons are accent-coloured only on the shown path of an
+/// active window (``SidebarIconTint``) and gray everywhere else.
+/// Clicking another workspace brings its window to front
 /// (or opens it); clicking a tab group or tab selects it. Double-click (or
 /// the context menu's Rename) turns the row's title into a text field
 /// (``InlineRenameField``, driven by the window's ``InlineRename``); the
@@ -26,6 +28,9 @@ struct SidebarView: View {
     let actions: WorkspaceActions
     @State private var expandedWorkspaces: Set<WorkspaceID>
     @State private var collapsedGroups: Set<TabGroupID> = []
+    /// Whether the window looks active (key, or main under a panel); an
+    /// inactive window's sidebar shows every icon gray.
+    @Environment(\.appearsActive) private var appearsActive
 
     init(model: AppModel, registry: SessionRegistry, currentWorkspaceID: WorkspaceID, actions: WorkspaceActions) {
         self.model = model
@@ -44,6 +49,7 @@ struct SidebarView: View {
                             ForEach(group.tabs) { tab in
                                 TabRow(model: model, registry: registry, tab: tab,
                                        isSelected: tab.id == group.selectedTabID,
+                                       isAccented: isAccented(.tab(tab.id)),
                                        rename: rename, edit: rename.edit(of: .tab(tab.id), on: .sidebar))
                                     .tag(SidebarItem.tab(tab.id))
                                     .draggable(
@@ -54,6 +60,7 @@ struct SidebarView: View {
                             TabGroupRow(
                                 group: group,
                                 attentionCount: registry.attention?.count(in: model.sessionIDs(ofTabGroup: group.id)) ?? 0,
+                                isAccented: isAccented(.tabGroup(group.id)),
                                 actions: actions,
                                 edit: rename.edit(of: .tabGroup(group.id), on: .sidebar))
                                 .tag(SidebarItem.tabGroup(group.id))
@@ -63,6 +70,7 @@ struct SidebarView: View {
                     WorkspaceRow(
                         workspace: workspace,
                         isCurrent: workspace.id == currentWorkspaceID,
+                        isAccented: isAccented(.workspace(workspace.id)),
                         attentionCount: registry.attention?.count(in: model.sessionIDs(in: workspace.id)) ?? 0,
                         rename: rename,
                         edit: rename.edit(of: .workspace(workspace.id), on: .sidebar))
@@ -82,6 +90,11 @@ struct SidebarView: View {
     }
 
     private var rename: InlineRename { actions.rename }
+
+    private func isAccented(_ item: SidebarItem) -> Bool {
+        SidebarIconTint.isAccented(
+            item, in: model, currentWorkspaceID: currentWorkspaceID, isWindowActive: appearsActive)
+    }
 
     // MARK: Selection
 
@@ -175,9 +188,43 @@ struct SidebarView: View {
     }
 }
 
+/// Which sidebar icons are accent-coloured (owner's rule, October 29,
+/// 2026): only in a window that looks active, and only on its shown path,
+/// which is its own workspace, the tab group it shows and that group's
+/// selected tab. Every other icon, the other workspaces' included, and
+/// every icon of an inactive window, is gray. The highlight on the shown
+/// tab group's row is the List's and is unchanged.
+enum SidebarIconTint {
+    @MainActor
+    static func isAccented(
+        _ item: SidebarItem, in model: AppModel, currentWorkspaceID: WorkspaceID, isWindowActive: Bool
+    ) -> Bool {
+        guard isWindowActive, let workspace = model.workspace(currentWorkspaceID) else { return false }
+        switch item {
+        case .workspace(let id):
+            return id == workspace.id
+        case .tabGroup(let id):
+            return id == workspace.selectedTabGroupID && workspace.tabGroups.contains { $0.id == id }
+        case .tab(let id):
+            guard let groupID = workspace.selectedTabGroupID,
+                  let group = workspace.tabGroups.first(where: { $0.id == groupID })
+            else { return false }
+            return id == group.selectedTabID && group.tabs.contains { $0.id == id }
+        }
+    }
+
+    /// The icon colour for a row: `Color` values, not the hierarchical
+    /// `.secondary`, which inside a sidebar label is a level of the list's
+    /// own tint and so still reads blue in an active window.
+    static func color(isAccented: Bool) -> Color {
+        isAccented ? Color.accentColor : Color.secondary
+    }
+}
+
 private struct WorkspaceRow: View {
     let workspace: Workspace
     let isCurrent: Bool
+    let isAccented: Bool
     /// Panes of the workspace needing attention.
     let attentionCount: Int
     let rename: InlineRename
@@ -199,7 +246,7 @@ private struct WorkspaceRow: View {
                 }
             } icon: {
                 Image(systemName: isOpen ? "macwindow" : "macwindow.badge.plus")
-                    .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
+                    .foregroundStyle(SidebarIconTint.color(isAccented: isAccented))
             }
             .help(isCurrent ? "This window" : (isOpen ? "Show this workspace’s window" : "Open this workspace"))
             Spacer(minLength: 4)
@@ -212,6 +259,7 @@ private struct TabGroupRow: View {
     let group: TabGroup
     /// Panes of the group needing attention.
     let attentionCount: Int
+    let isAccented: Bool
     let actions: WorkspaceActions
     /// The rename under way of this row, if any.
     let edit: InlineRename.Edit?
@@ -228,6 +276,7 @@ private struct TabGroupRow: View {
                 }
             } icon: {
                 Image(systemName: "folder")
+                    .foregroundStyle(SidebarIconTint.color(isAccented: isAccented))
             }
             Spacer(minLength: 4)
             AttentionCount(count: attentionCount)
@@ -253,6 +302,7 @@ private struct TabRow: View {
     let registry: SessionRegistry
     let tab: ArmadaleCore.Tab
     let isSelected: Bool
+    let isAccented: Bool
     let rename: InlineRename
     /// The rename under way of this row, if any.
     let edit: InlineRename.Edit?
@@ -272,6 +322,7 @@ private struct TabRow: View {
                 }
             } icon: {
                 Image(systemName: icon)
+                    .foregroundStyle(SidebarIconTint.color(isAccented: isAccented))
             }
             .lineLimit(1)
             .truncationMode(.middle)

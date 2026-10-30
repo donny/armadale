@@ -110,9 +110,23 @@ attention also get a purple tint in the tab bar and a semibold title in the
 sidebar, and workspace and tab group rows show how many of their panes need
 attention.
 
-The current workspace's row is emphasised (accent icon, semibold), the
+The current workspace's row is emphasised (semibold), the
 window's selected tab group is the selected row, and a closed workspace is
-dimmed with a "reopen" icon. Rows: a click on another workspace shows or
+dimmed with a "reopen" icon. **Icon colours** (owner's rule, October 29,
+2026; `SidebarIconTint`, unit-tested): in a window that looks active
+(SwiftUI's `appearsActive`: key, or main under a panel) the icons of its
+*shown path*, its own workspace, the tab group it shows and that group's
+selected tab, are accent-coloured; every other icon, the window's other
+groups and tabs and the other workspaces included, is gray, and in an
+inactive window every icon is gray. Until then the sidebar List tinted
+every icon blue in the key window and gray otherwise, and the current
+workspace's icon was blue in every window. The colours are `Color`
+values: the hierarchical `.secondary` inside a sidebar label is a level
+of the list's tint and still reads blue in an active window. The gray
+selection highlight on the shown tab group's row is unchanged (removing
+it was considered and deferred by the owner the same day: it would mean
+leaving the List's selection, on which the double-click rename and the
+context menus are built). Rows: a click on another workspace shows or
 opens its window; on a tab group or tab, selects it (bringing its window to
 front if it belongs to another workspace). Double-click, or the row's
 Rename item in its context menu, edits the title in place, Finder-style
