@@ -161,13 +161,21 @@ while collapsed, the workspace while collapsed), and a click on a row of
 the window that changes nothing now moves the highlight back and gives
 the pane the keyboard (seen live by the owner: clicking the current
 workspace row left it bright blue, the List holding keyboard focus).
-**Not checked live:** that the nudge really moves the List's highlight
-back after such a click, that the keyboard returns to the pane (type
-after clicking the current workspace, the selected group and the
-selected tab), that a double-click rename is not disturbed by it, the
-collapsed-group and collapsed-workspace highlight, and that
-`appearsActive` flips the icons on every activation path. Tests: 625,
-zero warnings.
+The owner's live check of that commit (204627f): renaming the tab and
+the workspace by double-click looked right (highlight on the tab, bright
+blue while the rename field holds focus inside the list), but
+double-clicking the shown group's row left **no row highlighted**: the
+click still wrote `select(tabGroup:)` to the model, which changed no
+value but re-rendered the sidebar inside the click. Fixed the same
+evening: a click on a row that is already shown writes nothing
+(`SidebarHighlight.isShown`, tested). Also seen in that screenshot and
+unexplained: "Main" and the second tab under it drawn semibold while the
+tab rename field was up; not reproduced from code, watch for it.
+**Not checked live:** the group double-click after this fix, that the
+keyboard returns to the pane after a single click on the current
+workspace, the selected group and the selected tab, the collapsed-group
+and collapsed-workspace highlight, and that `appearsActive` flips the
+icons on every activation path. Tests: 626, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

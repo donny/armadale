@@ -138,10 +138,17 @@ struct SidebarView: View {
         }
     }
 
+    /// Acts on a chosen row. A row that is already what this window shows
+    /// (the current workspace, its shown tab group, that group's selected
+    /// tab) changes nothing in the model: a model write during the click,
+    /// even one that changes no value, re-renders the sidebar mid-click and
+    /// the List then ended with no row selected (seen live, October 29,
+    /// 2026, on a double-click of the shown group).
     private func activate(_ item: SidebarItem) {
+        guard !SidebarHighlight.isShown(item, in: model, currentWorkspaceID: currentWorkspaceID) else { return }
         switch item {
         case .workspace(let id):
-            if id != currentWorkspaceID { actions.showWorkspace(id) }
+            actions.showWorkspace(id)
         case .tabGroup(let id):
             actions.select(tabGroup: id)
         case .tab(let id):
@@ -237,6 +244,25 @@ enum SidebarHighlight {
               let tabID = group.selectedTabID, group.tabs.contains(where: { $0.id == tabID })
         else { return .tabGroup(group.id) }
         return .tab(tabID)
+    }
+
+    /// Whether `item` is already what the window shows: the current
+    /// workspace, its shown tab group, or that group's selected tab (the
+    /// shown path, whatever is expanded). Choosing such a row is a no-op.
+    @MainActor
+    static func isShown(_ item: SidebarItem, in model: AppModel, currentWorkspaceID: WorkspaceID) -> Bool {
+        guard let workspace = model.workspace(currentWorkspaceID) else { return false }
+        switch item {
+        case .workspace(let id):
+            return id == workspace.id
+        case .tabGroup(let id):
+            return id == workspace.selectedTabGroupID
+        case .tab(let id):
+            guard let groupID = workspace.selectedTabGroupID,
+                  let group = workspace.tabGroups.first(where: { $0.id == groupID })
+            else { return false }
+            return id == group.selectedTabID
+        }
     }
 }
 

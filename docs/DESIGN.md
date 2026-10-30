@@ -125,7 +125,11 @@ follows to move the highlight or re-focus the pane (seen live, October
 29, 2026: a bright blue workspace row, and keys going to the sidebar);
 so after any click on a row of this window the sidebar re-reads its
 selection on the next turn and gives the focused pane the keyboard
-(`WorkspaceActions.focusFocusedPane`), unless a rename has started. **Icon colours** (owner's rule, October 29,
+(`WorkspaceActions.focusFocusedPane`), unless a rename has started. Such
+a click also writes nothing to the model (`SidebarHighlight.isShown`):
+a write that changed no value still re-rendered the sidebar inside the
+click, and the List then ended with no row selected (seen live the same
+evening on a double-click of the shown group's row). **Icon colours** (owner's rule, October 29,
 2026; `SidebarIconTint`, unit-tested): in a window that looks active
 (SwiftUI's `appearsActive`: key, or main under a panel) the icons of its
 *shown path*, its own workspace, the tab group it shows and that group's
