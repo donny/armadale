@@ -177,6 +177,51 @@ workspace, the selected group and the selected tab, the collapsed-group
 and collapsed-workspace highlight, and that `appearsActive` flips the
 icons on every activation path. Tests: 626, zero warnings.
 
+Then (October 29, 2026, owner's decision after trying those commits,
+implementer agent, not committed by it): **the sidebar has no selection
+and no highlight at all.** The owner still saw highlight and focus
+problems, so the `List` lost its selection binding, and with it
+`SidebarHighlight` (and its two tests), the selection nudge, the shown-row
+guard and `WorkspaceActions.focusFocusedPane`. Rows act through tap
+gestures over the whole row width, as the tab bar's tabs do
+(`SidebarRowActions`: a click acts, a simultaneous double tap renames, both
+off while the row's rename field is up), and each row has its own
+`.contextMenu`. Without a selection the outline view behind the List still
+took keyboard focus on every click (seen live; `.focusable(false)` on the
+List did not stop it), so `WorkspaceWindow.makeFirstResponder(_:)` refuses
+any table or outline view in the sidebar; and since the list then never
+takes focus from an open rename field, `WorkspaceWindow.sendEvent(_:)`
+commits the window's open rename on a mouse down in the sidebar outside
+the field (a first try that committed on the refused focus request also
+ended a fresh double-click edit at once, since the outline view asks again
+after the double tap). Icon colours and the semibold current workspace are
+unchanged. `docs/DESIGN.md` sections 1 and 8. **Checked live** (test build,
+isolated state, screenshots of the window only): single clicks on the
+current workspace row, the shown group row, the selected tab row, another
+tab, another group and another workspace's row (its window came forward)
+each acted and left typed `echo` commands reaching the focused terminal;
+no row was ever drawn selected (only AppKit's blue context-menu target
+outline while a menu is open); double-click renames of a tab, a group and
+the workspace opened the field with the text selected, Return committed,
+Escape cancelled, a click in the field kept the edit, a click on another
+row or on the current workspace row committed it; the three context menus
+(and the other workspace's, with Show Window); a tab dragged onto another
+group moved there; a group's chevron collapsed and expanded without
+selecting it. **Found and not fixed:** a double-click on another
+workspace's row whose window, once brought forward, covers the clicked
+spot starts no rename (the second click lands in that window); the
+context menu's Rename works. **Not checked live:** the keyboard reaching
+an empty pane's chooser after a sidebar click, and a tab bar rename being
+committed by a click in the sidebar (both were then seen by the
+reviewer's live pass). After review (code only, no live run): a click on a
+row of the shown path writes nothing to the model; the sidebar mouse down
+is hit-tested from the window's frame view, so title-bar clicks above the
+sidebar do not commit a rename; `SidebarFocusTests` covers the refusal;
+each row is an accessibility button with a default action and a Rename
+action. Arrow keys and Full Keyboard Access no longer reach sidebar rows
+(owner's decision); **VoiceOver was not checked live.** Tests: 625, zero
+warnings.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the

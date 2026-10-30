@@ -67,7 +67,7 @@ App
 ### Sidebar semantics
 
 The sidebar is app-global and identical in every window. It lists every
-workspace, with the current window's workspace expanded and highlighted.
+workspace, with the current window's workspace expanded and in semibold.
 Clicking another workspace brings that window to front, or opens it if its
 window is closed. Under a workspace: tab groups, and under each tab group its
 tabs. Panes are not listed; a tab row shows a status summary of its panes.
@@ -111,25 +111,32 @@ sidebar, and workspace and tab group rows show how many of their panes need
 attention.
 
 The current workspace's row is emphasised (semibold), and a closed
-workspace is dimmed with a "reopen" icon. **The highlighted row** (the
-List's selection; owner's rule, October 29, 2026; `SidebarHighlight`,
-unit-tested) is the deepest row of the window's shown path that is on
-screen: the shown tab group's selected tab, that group's row while the
-group is collapsed, and the workspace's row while the workspace is
-collapsed, so something always marks where the window is; it is never a
-row of another workspace. (From step 4 until then it was the shown tab
-group's row.) A click on a row of this window that changes nothing (the
-current workspace, the selected group or tab) would leave the List
-showing the clicked row and holding keyboard focus, since no model change
-follows to move the highlight or re-focus the pane (seen live, October
-29, 2026: a bright blue workspace row, and keys going to the sidebar);
-so after any click on a row of this window the sidebar re-reads its
-selection on the next turn and gives the focused pane the keyboard
-(`WorkspaceActions.focusFocusedPane`), unless a rename has started. Such
-a click also writes nothing to the model (`SidebarHighlight.isShown`):
-a write that changed no value still re-rendered the sidebar inside the
-click, and the List then ended with no row selected (seen live the same
-evening on a double-click of the shown group's row). **Icon colours** (owner's rule, October 29,
+workspace is dimmed with a "reopen" icon. **The sidebar has no selection
+and no highlight** (owner's decision, October 29, 2026): the `List` has
+no selection binding, so no row is ever drawn selected, gray or blue.
+The step 4 highlight on the shown tab group's row, and then the
+shown-path highlight of the same day, both kept leaving the List with
+the keyboard or the wrong row highlighted. Where the window is shows in
+the icon colours below and the semibold current workspace. Rows are
+acted on by tap gestures, as the tab bar's tabs are: a click anywhere
+across a row acts on it, a double-click (a double-tap gesture) renames
+it, and each row has its own context menu. A click on a row of the
+window's shown path (its workspace, the tab group it shows, that group's
+selected tab) writes nothing to the model (no select, no save). The List never takes
+keyboard focus from a click: SwiftUI's `.focusable(false)` on it does
+not stop the outline view behind it from becoming first responder, so
+`WorkspaceWindow.makeFirstResponder(_:)` refuses any table or outline
+view inside the sidebar (seen live: the outline view took the keyboard
+on every row click without it; `SidebarFocusTests`). Since the list then
+never takes focus away from an open rename field, a mouse down in the
+sidebar outside a rename field commits the window's open rename
+(`WorkspaceWindow.sendEvent(_:)`, as `TabBarHostingView.mouseDown` does
+for the tab bar), hit-tested from the window's frame view so the title
+bar's controls and a window drag above the sidebar do not count. With
+no selection and the outline view refused, arrow keys and Full Keyboard
+Access no longer reach sidebar rows (owner's decision); each row is an
+accessibility button whose default action acts on it, with a Rename
+action, for VoiceOver (not checked live). **Icon colours** (owner's rule, October 29,
 2026; `SidebarIconTint`, unit-tested): in a window that looks active
 (SwiftUI's `appearsActive`: key, or main under a panel) the icons of its
 *shown path*, its own workspace, the tab group it shows and that group's
@@ -139,13 +146,10 @@ inactive window every icon is gray. Until then the sidebar List tinted
 every icon blue in the key window and gray otherwise, and the current
 workspace's icon was blue in every window. The colours are `Color`
 values: the hierarchical `.secondary` inside a sidebar label is a level
-of the list's tint and still reads blue in an active window. The gray
-selection highlight on the shown tab group's row is unchanged (removing
-it was considered and deferred by the owner the same day: it would mean
-leaving the List's selection, on which the double-click rename and the
-context menus are built). Rows: a click on another workspace shows or
-opens its window; on a tab group or tab, selects it (bringing its window to
-front if it belongs to another workspace). Double-click, or the row's
+of the list's tint and still reads blue in an active window. Rows: a
+click on another workspace shows or opens its window (on the current
+workspace's row it does nothing); on a tab group or tab, selects it
+(bringing its window to front if it belongs to another workspace). Double-click, or the row's
 Rename item in its context menu, edits the title in place, Finder-style
 (the tab bar does the same for its tabs; section 8 has the mechanics).
 These are the only ways to start one: clicking a sidebar row does not give
@@ -180,7 +184,10 @@ state and ⌘W closing it without asking remain only as defensive code,
 should one appear.) The first click of a double click on a row of another
 workspace brings that workspace's window forward, so the edit happens in that
 window's sidebar, where the keyboard now is; Rename chosen from a context
-menu edits in the window it was chosen in. (Renaming used to be a sheet;
+menu edits in the window it was chosen in. When the window brought forward
+covers the spot clicked, the second click lands in that window instead and
+no edit starts (seen live, October 29, 2026, with two overlapping windows;
+the context menu's Rename works there). (Renaming used to be a sheet;
 inline editing replaced it, and the Workspace menu's three Rename items
 went with it.)
 
@@ -1387,7 +1394,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   builds; `ArmadaleAppTests` checks it).
 - Hierarchy commands are nil-targeted menu items handled by
   `WorkspaceWindowController`, which is in the responder chain whether a
-  terminal or the sidebar has focus; the tab bar, the sidebar and the menu
+  terminal, a pane's chooser or a sidebar rename field has focus (the
+  sidebar's list itself never takes focus, section 1); the tab bar, the sidebar and the menu
   all go through one `WorkspaceActions` per window, so closing asks the same
   question everywhere (running or disconnected sessions, honouring the
   "don't ask again" default; unreachable ones always). App-wide commands
@@ -1463,7 +1471,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   from `controlTextDidEndEditing` runs on the next turn, and only if the
   field is still in its window. After Return, Escape or resign-key,
   keyboard focus goes back (see `returnFocus` above; the terminal, or the
-  sidebar's list); after a click elsewhere it stays where the click put
+  pane's chooser); after a click elsewhere it stays where the click put
   it. Names are taken literally: the field has its own field editor
   (`RenameTextFieldCell.fieldEditor(for:)`) with text replacement,
   spelling correction, completion, quote and dash substitution and all
@@ -1483,10 +1491,14 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   in its environment (`Font.resolve(in:)`, `ctFont`): body, semibold where
   the title is, and 12 pt in the tab bar. While a row or tab is being
   edited it is not `draggable` (dragging in the field selects text). In
-  the sidebar the double click is the `List`'s `primaryAction`, so a single
-  click selects exactly as before; in the tab bar it is a
-  `TapGesture(count: 2)` added as a `simultaneousGesture`, so the single
-  click's select is not delayed waiting for a second click.
+  the sidebar and the tab bar alike the double click is a
+  `TapGesture(count: 2)` added as a `simultaneousGesture` beside the single
+  click's tap, so the single click's action is not delayed waiting for a
+  second click (the sidebar's `SidebarRowActions`, over the whole row
+  width; the sidebar's List has no selection since October 29, 2026). In
+  the sidebar both taps are off while the row's field is up, so a click in
+  the field neither starts another edit nor takes its focus; a mouse down
+  in the sidebar outside the field commits the edit (`WorkspaceWindow`).
 - *Attention (step 7).* An app-level `AttentionCenter`
   (`Sessions/AttentionCenter.swift`, `@Observable`) owns the pure
   `AttentionTracker` (section 10). The registry forwards every bell and

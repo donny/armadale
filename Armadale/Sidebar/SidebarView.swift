@@ -11,16 +11,16 @@ enum SidebarItem: Hashable {
 /// The app-global sidebar (DESIGN §1): every workspace, its tab groups, and
 /// their tabs, the same in every window. Workspace and tab group rows count
 /// their panes needing attention; a tab needing attention shows ◐. The current window's workspace
-/// starts expanded and is shown in bold; the highlighted row is the deepest
-/// visible row of the window's shown path (``SidebarHighlight``: the shown
-/// group's selected tab, the group while it is collapsed, the workspace
-/// while that is). Icons are accent-coloured only on the shown path of an
-/// active window (``SidebarIconTint``) and gray everywhere else.
-/// Clicking another workspace brings its window to front
-/// (or opens it); clicking a tab group or tab selects it. Double-click (or
-/// the context menu's Rename) turns the row's title into a text field
-/// (``InlineRenameField``, driven by the window's ``InlineRename``); the
-/// context menu also creates and closes. Tab groups can be
+/// starts expanded and is shown in bold. The List has no selection, so no
+/// row is ever highlighted and a click never gives the List the keyboard;
+/// icons are accent-coloured only on the shown path of an active window
+/// (``SidebarIconTint``) and gray everywhere else. A click on a row
+/// (a tap gesture over the whole row) acts on it: another workspace brings
+/// its window to front (or opens it); a tab group or tab is selected.
+/// Double-click (a simultaneous double-tap gesture, as in the tab bar, or
+/// the row's context menu's Rename) turns the row's title into a text field
+/// (``InlineRenameField``, driven by the window's ``InlineRename``); each
+/// row's context menu also creates and closes. Tab groups can be
 /// dragged to reorder them, and a tab (from here or the tab bar) dropped on
 /// a tab group moves it there.
 struct SidebarView: View {
@@ -33,9 +33,6 @@ struct SidebarView: View {
     /// Whether the window looks active (key, or main under a panel); an
     /// inactive window's sidebar shows every icon gray.
     @Environment(\.appearsActive) private var appearsActive
-    /// Bumped after a click that changed nothing in the model, so the List
-    /// re-reads ``selection`` and the highlight returns to the shown path.
-    @State private var selectionNudge = 0
 
     init(model: AppModel, registry: SessionRegistry, currentWorkspaceID: WorkspaceID, actions: WorkspaceActions) {
         self.model = model
@@ -46,50 +43,48 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        _ = selectionNudge
-        return List(selection: selection) {
+        List {
             ForEach(model.workspaces) { workspace in
                 DisclosureGroup(isExpanded: workspaceExpansion(workspace.id)) {
                     ForEach(workspace.tabGroups) { group in
                         DisclosureGroup(isExpanded: groupExpansion(group.id)) {
                             ForEach(group.tabs) { tab in
+                                let item = SidebarItem.tab(tab.id)
+                                let edit = rename.edit(of: item, on: .sidebar)
                                 TabRow(model: model, registry: registry, tab: tab,
                                        isSelected: tab.id == group.selectedTabID,
-                                       isAccented: isAccented(.tab(tab.id)),
-                                       rename: rename, edit: rename.edit(of: .tab(tab.id), on: .sidebar))
-                                    .tag(SidebarItem.tab(tab.id))
-                                    .draggable(
-                                        HierarchyDragItem.tab(tab.id),
-                                        unlessEditing: rename.edit(of: .tab(tab.id), on: .sidebar) != nil)
+                                       isAccented: isAccented(item),
+                                       rename: rename, edit: edit)
+                                    .modifier(rowActions(for: item, isEditing: edit != nil))
+                                    .draggable(HierarchyDragItem.tab(tab.id), unlessEditing: edit != nil)
                             }
                         } label: {
+                            let item = SidebarItem.tabGroup(group.id)
+                            let edit = rename.edit(of: item, on: .sidebar)
                             TabGroupRow(
                                 group: group,
                                 attentionCount: registry.attention?.count(in: model.sessionIDs(ofTabGroup: group.id)) ?? 0,
-                                isAccented: isAccented(.tabGroup(group.id)),
+                                isAccented: isAccented(item),
                                 actions: actions,
-                                edit: rename.edit(of: .tabGroup(group.id), on: .sidebar))
-                                .tag(SidebarItem.tabGroup(group.id))
+                                edit: edit,
+                                rowActions: rowActions(for: item, isEditing: edit != nil))
                         }
                     }
                 } label: {
+                    let item = SidebarItem.workspace(workspace.id)
+                    let edit = rename.edit(of: item, on: .sidebar)
                     WorkspaceRow(
                         workspace: workspace,
                         isCurrent: workspace.id == currentWorkspaceID,
-                        isAccented: isAccented(.workspace(workspace.id)),
+                        isAccented: isAccented(item),
                         attentionCount: registry.attention?.count(in: model.sessionIDs(in: workspace.id)) ?? 0,
                         rename: rename,
-                        edit: rename.edit(of: .workspace(workspace.id), on: .sidebar))
-                        .tag(SidebarItem.workspace(workspace.id))
+                        edit: edit)
+                        .modifier(rowActions(for: item, isEditing: edit != nil))
                 }
             }
         }
         .listStyle(.sidebar)
-        .contextMenu(forSelectionType: SidebarItem.self) { items in
-            if let item = items.first { menu(for: item) }
-        } primaryAction: { items in
-            if let item = items.first { beginRename(item) }
-        }
         .onChange(of: rename.edit?.id) {
             if let edit = rename.edit, edit.surface == .sidebar { reveal(edit.item) }
         }
@@ -102,50 +97,27 @@ struct SidebarView: View {
             item, in: model, currentWorkspaceID: currentWorkspaceID, isWindowActive: appearsActive)
     }
 
-    // MARK: Selection
+    // MARK: Row actions
 
-    /// The highlighted row is the deepest visible row of this window's
-    /// shown path (``SidebarHighlight``); choosing a row acts on it. A row
-    /// of this window is also given back the keyboard: the List takes it
-    /// on a click, and when the click changed nothing (the current
-    /// workspace, the selected group or tab) no model change would hand it
-    /// back to the pane, nor move the highlight off the clicked row.
-    private var selection: Binding<SidebarItem?> {
-        Binding(
-            get: {
-                SidebarHighlight.row(
-                    in: model, currentWorkspaceID: currentWorkspaceID,
-                    isWorkspaceExpanded: expandedWorkspaces.contains(currentWorkspaceID),
-                    isGroupExpanded: { !collapsedGroups.contains($0) })
-            },
-            set: { item in
-                guard let item else { return }
-                activate(item)
-                guard isInThisWindow(item) else { return }
-                Task { @MainActor in
-                    selectionNudge += 1
-                    // A double click's rename field takes focus on this turn too.
-                    if rename.edit == nil { actions.focusFocusedPane() }
-                }
-            })
+    private func rowActions(for item: SidebarItem, isEditing: Bool) -> SidebarRowActions<some View> {
+        SidebarRowActions(
+            isEditing: isEditing,
+            activate: { activate(item) },
+            beginRename: { beginRename(item) },
+            menu: menu(for: item))
     }
 
-    private func isInThisWindow(_ item: SidebarItem) -> Bool {
-        switch item {
-        case .workspace(let id): id == currentWorkspaceID
-        case .tabGroup(let id): model.workspaceID(containing: id) == currentWorkspaceID
-        case .tab(let id): model.location(of: id)?.workspace == currentWorkspaceID
-        }
-    }
-
-    /// Acts on a chosen row. A row that is already what this window shows
-    /// (the current workspace, its shown tab group, that group's selected
-    /// tab) changes nothing in the model: a model write during the click,
-    /// even one that changes no value, re-renders the sidebar mid-click and
-    /// the List then ended with no row selected (seen live, October 29,
-    /// 2026, on a double-click of the shown group).
+    /// Acts on a clicked row: another workspace is shown (its window brought
+    /// to front, or opened); a tab group or tab is selected. A row on the
+    /// window's shown path (its workspace, the tab group it shows, that
+    /// group's selected tab) writes nothing to the model: a select there
+    /// would change no value but still schedule a save, twice for a double
+    /// click. The shown path is the one ``SidebarIconTint`` accents in an
+    /// active window.
     private func activate(_ item: SidebarItem) {
-        guard !SidebarHighlight.isShown(item, in: model, currentWorkspaceID: currentWorkspaceID) else { return }
+        guard !SidebarIconTint.isAccented(
+            item, in: model, currentWorkspaceID: currentWorkspaceID, isWindowActive: true)
+        else { return }
         switch item {
         case .workspace(let id):
             actions.showWorkspace(id)
@@ -224,54 +196,11 @@ struct SidebarView: View {
     }
 }
 
-/// Which row the sidebar highlights (owner's rule, October 29, 2026): the
-/// deepest row of the window's shown path that is on screen. The shown
-/// group's selected tab; the group's row while the group is collapsed; the
-/// workspace's row while the workspace is collapsed. Never a row of
-/// another workspace. (Until then it was the shown tab group's row.)
-enum SidebarHighlight {
-    @MainActor
-    static func row(
-        in model: AppModel, currentWorkspaceID: WorkspaceID,
-        isWorkspaceExpanded: Bool, isGroupExpanded: (TabGroupID) -> Bool
-    ) -> SidebarItem? {
-        guard let workspace = model.workspace(currentWorkspaceID) else { return nil }
-        guard isWorkspaceExpanded else { return .workspace(workspace.id) }
-        guard let groupID = workspace.selectedTabGroupID,
-              let group = workspace.tabGroups.first(where: { $0.id == groupID })
-        else { return .workspace(workspace.id) }
-        guard isGroupExpanded(group.id),
-              let tabID = group.selectedTabID, group.tabs.contains(where: { $0.id == tabID })
-        else { return .tabGroup(group.id) }
-        return .tab(tabID)
-    }
-
-    /// Whether `item` is already what the window shows: the current
-    /// workspace, its shown tab group, or that group's selected tab (the
-    /// shown path, whatever is expanded). Choosing such a row is a no-op.
-    @MainActor
-    static func isShown(_ item: SidebarItem, in model: AppModel, currentWorkspaceID: WorkspaceID) -> Bool {
-        guard let workspace = model.workspace(currentWorkspaceID) else { return false }
-        switch item {
-        case .workspace(let id):
-            return id == workspace.id
-        case .tabGroup(let id):
-            return id == workspace.selectedTabGroupID
-        case .tab(let id):
-            guard let groupID = workspace.selectedTabGroupID,
-                  let group = workspace.tabGroups.first(where: { $0.id == groupID })
-            else { return false }
-            return id == group.selectedTabID
-        }
-    }
-}
-
 /// Which sidebar icons are accent-coloured (owner's rule, October 29,
 /// 2026): only in a window that looks active, and only on its shown path,
 /// which is its own workspace, the tab group it shows and that group's
 /// selected tab. Every other icon, the other workspaces' included, and
-/// every icon of an inactive window, is gray. The highlight on the shown
-/// tab group's row is the List's and is unchanged.
+/// every icon of an inactive window, is gray.
 enum SidebarIconTint {
     @MainActor
     static func isAccented(
@@ -296,6 +225,39 @@ enum SidebarIconTint {
     /// own tint and so still reads blue in an active window.
     static func color(isAccented: Bool) -> Color {
         isAccented ? Color.accentColor : Color.secondary
+    }
+}
+
+/// A sidebar row's mouse actions (owner's decision, October 29, 2026: the
+/// List has no selection): a click anywhere across the row acts on it, a
+/// double click renames it, and a right click shows its own context menu.
+/// The double click is a `TapGesture(count: 2)` added as a
+/// `simultaneousGesture`, as in the tab bar, so the single click acts at
+/// once instead of waiting to see whether a second click follows. While
+/// the row's rename field is up both taps are off, so a click in the field
+/// neither starts another edit nor takes the field's focus away. For
+/// accessibility the row is one button (its children combined, except
+/// while the rename field is up) whose default action acts on it, with a
+/// Rename action, since arrow keys and Full Keyboard Access no longer
+/// reach rows of a List without a selection.
+struct SidebarRowActions<Menu: View>: ViewModifier {
+    let isEditing: Bool
+    let activate: () -> Void
+    let beginRename: () -> Void
+    let menu: Menu
+
+    func body(content: Content) -> some View {
+        let mask: GestureMask = isEditing ? .subviews : .all
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(TapGesture().onEnded { activate() }, including: mask)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename() }, including: mask)
+            .contextMenu { menu }
+            .accessibilityElement(children: isEditing ? .contain : .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { activate() }
+            .accessibilityAction(named: "Rename") { beginRename() }
     }
 }
 
@@ -333,7 +295,7 @@ private struct WorkspaceRow: View {
     }
 }
 
-private struct TabGroupRow: View {
+private struct TabGroupRow<Menu: View>: View {
     let group: TabGroup
     /// Panes of the group needing attention.
     let attentionCount: Int
@@ -341,6 +303,8 @@ private struct TabGroupRow: View {
     let actions: WorkspaceActions
     /// The rename under way of this row, if any.
     let edit: InlineRename.Edit?
+    /// The row's click, double click and context menu.
+    let rowActions: SidebarRowActions<Menu>
     @State private var isTargeted = false
 
     var body: some View {
@@ -362,12 +326,12 @@ private struct TabGroupRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
-        .contentShape(Rectangle())
         .background {
             if isTargeted {
                 RoundedRectangle(cornerRadius: 5).stroke(Color.accentColor, lineWidth: 2).padding(-3)
             }
         }
+        .modifier(rowActions)
         .draggable(HierarchyDragItem.tabGroup(group.id), unlessEditing: edit != nil)
         .dropDestination(for: HierarchyDragItem.self) { items, _ in
             actions.drop(items, onTabGroup: group.id)

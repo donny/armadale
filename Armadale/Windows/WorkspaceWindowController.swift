@@ -4,14 +4,54 @@ import SwiftUI
 
 /// The window of a workspace. Reports every first-responder change, which
 /// is how a click into a pane focuses that pane in the model.
+///
+/// The sidebar's list never becomes first responder (owner's decision,
+/// October 29, 2026; DESIGN §1): the outline view behind its SwiftUI
+/// `List` takes the keyboard on a click even with no selection, and
+/// `.focusable(false)` on the List does not stop it, so the window refuses
+/// any table or outline view inside ``sidebarView``. A rename field in a
+/// sidebar row is not one and still takes focus. Since the list no longer
+/// takes focus from an open rename field, that field would not notice a
+/// click elsewhere in the sidebar; so a mouse down that lands in the sidebar
+/// outside a rename field calls ``onSidebarMouseDown``, which commits the
+/// window's open rename, as a mouse down in the tab bar does. The click is
+/// hit-tested from the window's frame view, so the title bar's controls and
+/// a window drag above the sidebar (which the sidebar extends behind under
+/// a full-size content view) do not count.
 @MainActor
 final class WorkspaceWindow: NSWindow {
     var onFirstResponderChange: ((NSResponder?) -> Void)?
+    /// The sidebar's view, whose list may not take keyboard focus.
+    weak var sidebarView: NSView?
+    /// Called on a mouse down in the sidebar outside a rename field.
+    var onSidebarMouseDown: (() -> Void)?
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown || event.type == .rightMouseDown,
+           let sidebarView, let hit = contentView?.superview?.hitTest(event.locationInWindow),
+           hit.isDescendant(of: sidebarView), !Self.isInRenameField(hit) {
+            onSidebarMouseDown?()
+        }
+        super.sendEvent(event)
+    }
 
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        if let table = responder as? NSTableView, let sidebarView, table.isDescendant(of: sidebarView) {
+            return false
+        }
         let accepted = super.makeFirstResponder(responder)
         if accepted { onFirstResponderChange?(firstResponder) }
         return accepted
+    }
+
+    /// Whether `view` is a rename field or inside one (its field editor).
+    private static func isInRenameField(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let candidate = current {
+            if candidate is RenameTextField { return true }
+            current = candidate.superview
+        }
+        return false
     }
 }
 
@@ -23,7 +63,7 @@ final class WorkspaceWindow: NSWindow {
 ///
 /// It is also where the workspace's menu commands land (DESIGN §9): the
 /// window controller is always in the responder chain, whether a terminal
-/// or the sidebar has keyboard focus, and keys that are not bound to a menu
+/// or a sidebar rename field has keyboard focus, and keys not bound to a menu
 /// item still reach the terminal.
 @MainActor
 final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
@@ -101,13 +141,14 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         super.init(window: window)
 
         actions.window = window
+        window.sidebarView = sidebar.view
+        window.onSidebarMouseDown = { [weak actions] in actions?.rename.commit() }
         // Where focus goes after a rename when what had it before is gone.
         actions.rename.focusFallback = { [weak content = self.content] in content?.focusFocusedPane() }
         window.onFirstResponderChange = { [weak content] responder in
             content?.firstResponderDidChange(responder)
         }
         actions.focusPaneWhenShown = { [weak content] pane in content?.focusWhenShown(pane) }
-        actions.focusFocusedPane = { [weak content] in content?.focusFocusedPane() }
         actions.canPresentSheet = { [weak self] in
             guard let self else { return false }
             return Self.canPresentSheet(

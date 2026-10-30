@@ -16,8 +16,8 @@ private let renameLog = Logger(subsystem: "com.tinylittleapps.armadale", categor
 /// `controlTextDidEndEditing`; its window resigning key (another window or
 /// app, a sheet) commits as well, since the field keeps first responder
 /// then. After Return, Escape or the window resigning key, keyboard focus
-/// goes back to ``InlineRename/returnFocus`` (the terminal, or the
-/// sidebar's list), else to the window's focused terminal; after a click
+/// goes back to ``InlineRename/returnFocus`` (the terminal, or an empty
+/// pane's chooser), else to the window's focused terminal; after a click
 /// elsewhere it stays where the click put it.
 ///
 /// Whenever SwiftUI tears the field down, the edit is committed on the next
