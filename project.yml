@@ -121,7 +121,7 @@ targets:
         # for dependency analysis.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 13
+        CURRENT_PROJECT_VERSION: 14
         # Signing (docs/DESIGN.md section 11, "Release pipeline"). Manual
         # style throughout, so Xcode never reaches for an account or a
         # provisioning profile. Debug is "Sign to Run Locally" (ad hoc), so
