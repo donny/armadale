@@ -110,9 +110,22 @@ attention also get a purple tint in the tab bar and a semibold title in the
 sidebar, and workspace and tab group rows show how many of their panes need
 attention.
 
-The current workspace's row is emphasised (semibold), the
-window's selected tab group is the selected row, and a closed workspace is
-dimmed with a "reopen" icon. **Icon colours** (owner's rule, October 29,
+The current workspace's row is emphasised (semibold), and a closed
+workspace is dimmed with a "reopen" icon. **The highlighted row** (the
+List's selection; owner's rule, October 29, 2026; `SidebarHighlight`,
+unit-tested) is the deepest row of the window's shown path that is on
+screen: the shown tab group's selected tab, that group's row while the
+group is collapsed, and the workspace's row while the workspace is
+collapsed, so something always marks where the window is; it is never a
+row of another workspace. (From step 4 until then it was the shown tab
+group's row.) A click on a row of this window that changes nothing (the
+current workspace, the selected group or tab) would leave the List
+showing the clicked row and holding keyboard focus, since no model change
+follows to move the highlight or re-focus the pane (seen live, October
+29, 2026: a bright blue workspace row, and keys going to the sidebar);
+so after any click on a row of this window the sidebar re-reads its
+selection on the next turn and gives the focused pane the keyboard
+(`WorkspaceActions.focusFocusedPane`), unless a rename has started. **Icon colours** (owner's rule, October 29,
 2026; `SidebarIconTint`, unit-tested): in a window that looks active
 (SwiftUI's `appearsActive`: key, or main under a panel) the icons of its
 *shown path*, its own workspace, the tab group it shows and that group's

@@ -38,4 +38,28 @@ struct SidebarIconTintTests {
         #expect(!SidebarIconTint.isAccented(
             .workspace(workspace), in: model, currentWorkspaceID: WorkspaceID(raw: "gone"), isWindowActive: true))
     }
+
+    /// The highlight is the deepest visible row of the shown path.
+    @Test func theHighlightFollowsTheDeepestVisibleRowOfTheShownPath() throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let workspace = model.newWorkspace()
+        _ = model.newWorkspace()
+        let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
+        let tab = try #require(model.tabGroup(group)?.selectedTabID)
+        _ = try #require(model.newTab(in: group))
+        model.select(tab: tab)
+
+        func row(workspaceExpanded: Bool = true, groupExpanded: Bool = true) -> SidebarItem? {
+            SidebarHighlight.row(
+                in: model, currentWorkspaceID: workspace,
+                isWorkspaceExpanded: workspaceExpanded, isGroupExpanded: { _ in groupExpanded })
+        }
+        #expect(row() == .tab(tab))
+        #expect(row(groupExpanded: false) == .tabGroup(group))
+        #expect(row(workspaceExpanded: false) == .workspace(workspace))
+        #expect(row(workspaceExpanded: false, groupExpanded: false) == .workspace(workspace))
+        #expect(SidebarHighlight.row(
+            in: model, currentWorkspaceID: WorkspaceID(raw: "gone"),
+            isWorkspaceExpanded: true, isGroupExpanded: { _ in true }) == nil)
+    }
 }

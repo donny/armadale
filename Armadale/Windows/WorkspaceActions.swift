@@ -98,6 +98,11 @@ final class WorkspaceActions {
     var showSettings: (SettingsWindowController.Tab) -> Void = { _ in }
     /// Gives keyboard focus to a pane's terminal once it is on screen.
     var focusPaneWhenShown: (PaneID) -> Void = { _ in }
+    /// Gives the window's focused pane keyboard focus (its terminal, the
+    /// pane under a placeholder, or an empty pane's chooser). The sidebar
+    /// calls it after a click on one of its rows, so the list never keeps
+    /// the keyboard (October 29, 2026).
+    var focusFocusedPane: () -> Void = {}
     /// Whether the window can take a sheet now, besides having none: the
     /// window controller refuses while the window is closing or entering
     /// or leaving full screen (``WorkspaceWindowController/canPresentSheet(isClosed:isClosePending:fullScreenTarget:)``).

@@ -149,15 +149,25 @@ accent-coloured only in a window that looks active and only on its shown
 path (its workspace, the tab group it shows, that group's selected tab);
 every other icon is gray, and all of them are in an inactive window
 (`SidebarIconTint` in `Sidebar/SidebarView.swift`, `SidebarIconTintTests`,
-`docs/DESIGN.md` section 1). Removing the selection highlight on the
-shown tab group's row was discussed and **deferred by the owner** ("I'll
-test it later"): there is no supported way to hide a List's selection
-highlight on macOS, so it would mean dropping the selection binding that
-the double-click rename and the context menus are built on. **Not
-checked live** (the Mac was not free): the exact gray of `Color.secondary`
-next to the List's own inactive tint, and that `appearsActive` flips the
-icons on every activation path (another window, another app, a sheet,
-menu bar mode's return). Tests: 624, zero warnings.
+`docs/DESIGN.md` section 1). Removing the selection highlight was
+discussed and **deferred by the owner** ("I'll test it later"): there is
+no supported way to hide a List's selection highlight on macOS, so it
+would mean dropping the selection binding that the double-click rename
+and the context menus are built on. The owner ran the build and the
+icon colours looked right. Then (same evening, owner's rule) **the
+highlight moved** from the shown tab group's row to the deepest visible
+row of the shown path (`SidebarHighlight`: the selected tab, the group
+while collapsed, the workspace while collapsed), and a click on a row of
+the window that changes nothing now moves the highlight back and gives
+the pane the keyboard (seen live by the owner: clicking the current
+workspace row left it bright blue, the List holding keyboard focus).
+**Not checked live:** that the nudge really moves the List's highlight
+back after such a click, that the keyboard returns to the pane (type
+after clicking the current workspace, the selected group and the
+selected tab), that a double-click rename is not disturbed by it, the
+collapsed-group and collapsed-workspace highlight, and that
+`appearsActive` flips the icons on every activation path. Tests: 625,
+zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

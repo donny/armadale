@@ -107,6 +107,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
             content?.firstResponderDidChange(responder)
         }
         actions.focusPaneWhenShown = { [weak content] pane in content?.focusWhenShown(pane) }
+        actions.focusFocusedPane = { [weak content] in content?.focusFocusedPane() }
         actions.canPresentSheet = { [weak self] in
             guard let self else { return false }
             return Self.canPresentSheet(

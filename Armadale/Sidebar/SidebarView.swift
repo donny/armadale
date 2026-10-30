@@ -11,8 +11,10 @@ enum SidebarItem: Hashable {
 /// The app-global sidebar (DESIGN §1): every workspace, its tab groups, and
 /// their tabs, the same in every window. Workspace and tab group rows count
 /// their panes needing attention; a tab needing attention shows ◐. The current window's workspace
-/// starts expanded and is shown in bold; its selected tab group is the
-/// highlighted row. Icons are accent-coloured only on the shown path of an
+/// starts expanded and is shown in bold; the highlighted row is the deepest
+/// visible row of the window's shown path (``SidebarHighlight``: the shown
+/// group's selected tab, the group while it is collapsed, the workspace
+/// while that is). Icons are accent-coloured only on the shown path of an
 /// active window (``SidebarIconTint``) and gray everywhere else.
 /// Clicking another workspace brings its window to front
 /// (or opens it); clicking a tab group or tab selects it. Double-click (or
@@ -31,6 +33,9 @@ struct SidebarView: View {
     /// Whether the window looks active (key, or main under a panel); an
     /// inactive window's sidebar shows every icon gray.
     @Environment(\.appearsActive) private var appearsActive
+    /// Bumped after a click that changed nothing in the model, so the List
+    /// re-reads ``selection`` and the highlight returns to the shown path.
+    @State private var selectionNudge = 0
 
     init(model: AppModel, registry: SessionRegistry, currentWorkspaceID: WorkspaceID, actions: WorkspaceActions) {
         self.model = model
@@ -41,7 +46,8 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        List(selection: selection) {
+        _ = selectionNudge
+        return List(selection: selection) {
             ForEach(model.workspaces) { workspace in
                 DisclosureGroup(isExpanded: workspaceExpansion(workspace.id)) {
                     ForEach(workspace.tabGroups) { group in
@@ -98,15 +104,38 @@ struct SidebarView: View {
 
     // MARK: Selection
 
-    /// The highlighted row is this window's selected tab group; choosing a
-    /// row acts on it.
+    /// The highlighted row is the deepest visible row of this window's
+    /// shown path (``SidebarHighlight``); choosing a row acts on it. A row
+    /// of this window is also given back the keyboard: the List takes it
+    /// on a click, and when the click changed nothing (the current
+    /// workspace, the selected group or tab) no model change would hand it
+    /// back to the pane, nor move the highlight off the clicked row.
     private var selection: Binding<SidebarItem?> {
         Binding(
-            get: { model.workspace(currentWorkspaceID)?.selectedTabGroupID.map(SidebarItem.tabGroup) },
+            get: {
+                SidebarHighlight.row(
+                    in: model, currentWorkspaceID: currentWorkspaceID,
+                    isWorkspaceExpanded: expandedWorkspaces.contains(currentWorkspaceID),
+                    isGroupExpanded: { !collapsedGroups.contains($0) })
+            },
             set: { item in
                 guard let item else { return }
                 activate(item)
+                guard isInThisWindow(item) else { return }
+                Task { @MainActor in
+                    selectionNudge += 1
+                    // A double click's rename field takes focus on this turn too.
+                    if rename.edit == nil { actions.focusFocusedPane() }
+                }
             })
+    }
+
+    private func isInThisWindow(_ item: SidebarItem) -> Bool {
+        switch item {
+        case .workspace(let id): id == currentWorkspaceID
+        case .tabGroup(let id): model.workspaceID(containing: id) == currentWorkspaceID
+        case .tab(let id): model.location(of: id)?.workspace == currentWorkspaceID
+        }
     }
 
     private func activate(_ item: SidebarItem) {
@@ -185,6 +214,29 @@ struct SidebarView: View {
             set: { isExpanded in
                 if isExpanded { collapsedGroups.remove(id) } else { collapsedGroups.insert(id) }
             })
+    }
+}
+
+/// Which row the sidebar highlights (owner's rule, October 29, 2026): the
+/// deepest row of the window's shown path that is on screen. The shown
+/// group's selected tab; the group's row while the group is collapsed; the
+/// workspace's row while the workspace is collapsed. Never a row of
+/// another workspace. (Until then it was the shown tab group's row.)
+enum SidebarHighlight {
+    @MainActor
+    static func row(
+        in model: AppModel, currentWorkspaceID: WorkspaceID,
+        isWorkspaceExpanded: Bool, isGroupExpanded: (TabGroupID) -> Bool
+    ) -> SidebarItem? {
+        guard let workspace = model.workspace(currentWorkspaceID) else { return nil }
+        guard isWorkspaceExpanded else { return .workspace(workspace.id) }
+        guard let groupID = workspace.selectedTabGroupID,
+              let group = workspace.tabGroups.first(where: { $0.id == groupID })
+        else { return .workspace(workspace.id) }
+        guard isGroupExpanded(group.id),
+              let tabID = group.selectedTabID, group.tabs.contains(where: { $0.id == tabID })
+        else { return .tabGroup(group.id) }
+        return .tab(tabID)
     }
 }
 
