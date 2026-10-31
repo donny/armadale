@@ -5,8 +5,9 @@ import SwiftUI
 import TerminalSurface
 
 /// One pane: the session's terminal view filling it, and the *Session
-/// Ended* placeholder over it once the session is over. A right-click in it
-/// opens the pane's context menu (``PaneMenu``).
+/// Ended* placeholder over it once the session is over. ``paneMenu()`` is
+/// its context menu (``PaneMenu``), which nothing opens yet (DESIGN §8,
+/// "Pane context menu").
 ///
 /// A `PaneView` belongs to its ``SessionController`` for the session's whole
 /// life (the registry keeps both) and is only ever reparented, so a
@@ -179,32 +180,19 @@ final class PaneView: NSView {
         return responder.isDescendant(of: self)
     }
 
-    /// A click on the padding around the terminal focuses it too; a
-    /// Control-click there is a right-click.
+    /// A click on the padding around the terminal focuses it too.
     override func mouseDown(with event: NSEvent) {
-        if ContextClick.isSecondaryClick(event) { return showMenu(for: event) }
         focusTerminal()
     }
 
     // MARK: Context menu
 
-    /// A right-click on the padding, on the placeholder, or on the terminal
-    /// when the program did not take it (the terminal view passes it up the
-    /// responder chain, Shift + right-click always; ``TerminalSurface``):
-    /// the pane takes keyboard focus, as a click would, and shows its menu.
-    override func rightMouseDown(with event: NSEvent) {
-        showMenu(for: event)
-    }
-
-    private func showMenu(for event: NSEvent) {
-        focusTerminal()
-        guard let menu = menu(for: event) else { return }
-        NSMenu.popUpContextMenu(menu, with: event, for: self)
-    }
-
     /// The pane's context menu, built fresh each time from the pane's
-    /// theme and the theme catalog.
-    override func menu(for event: NSEvent) -> NSMenu? {
+    /// theme and the theme catalog. Not an override of `menu(for:)`, and
+    /// no mouse event opens it: the pane's mouse events are all the
+    /// program's (DESIGN §8, "Pane context menu"); an entry point is to be
+    /// chosen.
+    func paneMenu() -> NSMenu {
         let theme = theme
         return PaneMenu.make(
             PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes),

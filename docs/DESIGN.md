@@ -1359,7 +1359,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
         ├── TabBarHostingView<TabBarView>              SwiftUI, ⌘N badges, "+"
         └── PaneContainerView (NSView)                 or an empty-group state
             └── SplitTreeView (nested PaneSplitViews mirroring PaneLayout)
-                └── PaneView per leaf with a session   right-click: PaneMenu
+                └── PaneView per leaf with a session   paneMenu(): PaneMenu, no entry point yet
                 │   ├── surface.view                   terminal
                 │   ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
                 │   └── focus overlay                  focus border, no hit testing
@@ -1634,57 +1634,41 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   key status from its window; the key workspace is resolved through `sheetParent`
   (`AppDelegate.sheetOwner(of:)`), so the focused pane under a sheet is
   still looked at.
-- **Pane context menu** (owner's decision, October 30, 2026). A
-  right-click anywhere in a pane, over the terminal, its padding, the
-  *Session Ended* placeholder or an empty pane's New Session chooser,
-  opens an AppKit `NSMenu` for that pane. Today it holds one item,
-  **Theme**, a submenu: "Default" first, a separator, the built-in themes
-  in catalog order, then, if any, a separator and the imported themes; the
-  pane's current choice is checked ("Default" when it has none, or when
-  its ID is unknown). Choosing an item calls `AppModel.setTheme(_:forPane:)`.
-  The menu comes from one pure builder, `PaneMenu.make(_:actions:)`
-  (`Panes/PaneMenu.swift`, tested): `PaneMenu.Inputs` holds what the
-  items show (the pane's theme ID, the built-in and imported themes) and
-  `PaneMenu.Actions` what they do, so a later pane item adds a field to
-  each and a few lines to the builder. It is built fresh on every
-  right-click by `PaneView.menu(for:)` and `EmptyPaneView.menu(for:)`; its
-  items are `ActionMenuItem`s (their own target, running a closure).
-  *Who gets the click.* SwiftTerm's view reports a right-click to the
-  program when it asked for the mouse (vim with `mouse=a`, tmux with
-  `mouse on`) and otherwise calls `super`, and NSView passes a right-click
-  it has no menu for up the responder chain to the pane (read in
-  SwiftTerm 1.99.0's `MacTerminalView.rightMouseDown`, seen live). Our
-  subclass `HostTerminalView` (in `SwiftTermSurface`, the SwiftTerm
-  checkout is not modified) adds two rules, which `TerminalSurface`'s
-  documentation now asks of every renderer: **Shift + right-click always
-  goes up the chain**, never to the program, even one that asked to see
-  Shift with the mouse (XTSHIFTESCAPE, which SwiftTerm's own Shift bypass
-  honours); and **Control-click (without Command) is a right-click**: the
-  left-button press, drags and release are handed on as right-button
-  events (copies of their `CGEvent` with button number 1 and without
-  Control), so a program that asked for the mouse gets a right button and
-  otherwise the pane opens its menu (Control-click in a plain shell and in
-  vim seen live). A click with Command held is never a right-click, so
-  ⌘-click (with or without Control) still opens a link. The rules are
-  `ContextClick` in `TerminalSurface` (pure, tested), used by the surface
-  and the panes alike. A Control-click on a pane's padding, and anywhere
-  on an empty pane (its hit test takes the press from the chooser while
-  it is a Control-click, so a button under it is not pressed), opens the
-  menu too; the empty pane's routing is unit-tested only as far as its
-  rule and the ordinary hit test (`NSApp.currentEvent` cannot be set in a
-  test) and was not checked live. *Pending the owner's decision:* since
-  Control-click reaches a program that asked for the mouse as a right
-  button, such a program never sees Control + left-click (Emacs's buffer
-  menu, for instance). The alternative, Control-click always opening
-  Armadale's menu, is a one-line change: `HostTerminalView.mouseDown`
-  would send the translated press up the responder chain
-  (`nextResponder?.rightMouseDown`) instead of through its own
-  `rightMouseDown`.
-  *Focus.* A right-click on an unfocused pane focuses it first, as a click
-  does (the pane takes keyboard focus, which focuses it in the model); the
-  menu then neither takes keyboard focus nor changes the focused pane, and
-  after a choice typing goes on in the pane (seen live). A right-click the
-  program takes does not focus the pane (it never reaches the pane).
+- **Pane context menu** (owner's decisions, October 30, 2026). Each
+  pane has a context menu, an AppKit `NSMenu` built by one pure builder,
+  `PaneMenu.make(_:actions:)` (`Panes/PaneMenu.swift`, tested):
+  `PaneMenu.Inputs` holds what the items show and `PaneMenu.Actions` what
+  they do, so a later pane item adds a field to each and a few lines to
+  the builder. Today it holds one item, **Theme**, a submenu: "Default"
+  first, a separator, the built-in themes in catalog order, then, if any,
+  a separator and the imported themes; the pane's current choice is
+  checked ("Default" when it has none, or when its ID is unknown).
+  Choosing an item calls `AppModel.setTheme(_:forPane:)`. `PaneView.paneMenu()`
+  and `EmptyPaneView.paneMenu()` build it fresh from the pane's theme and
+  the theme catalog; its items are `ActionMenuItem`s (their own target,
+  running a closure).
+  *No mouse event opens it yet.* The first version (ebec034) opened it on
+  a right-click when the program had not asked for the mouse, on Shift +
+  right-click always, and treated Control-click as a right-click, which
+  meant a program that asked for the mouse never saw Control + left-click
+  (Emacs's buffer menu) and could not see Shift with a right button. The
+  owner decided the same evening that programs such as vim and Emacs
+  must get every mouse event exactly as the renderer reports it, and
+  that the menu's entry point is to be chosen later (a UI entry point,
+  not a mouse rule). So the subclass that applied those rules
+  (`HostTerminalView`) and the rules themselves (`ContextClick`) were
+  removed in the following commit; `SwiftTermSurface` uses SwiftTerm's
+  `TerminalView` unchanged (a right-click goes to a program that asked
+  for the mouse, as before; otherwise SwiftTerm calls `super`, and NSView
+  passes it up the responder chain where no view has a menu for it, so
+  nothing happens), the pane views override neither `menu(for:)` nor any
+  mouse method for it (`menu(for:)` would make AppKit show it on a
+  right-click), and a Control-click is a left click with Control, as the
+  program sees it. The builder, the per-pane theme (below) and their tests
+  stay, so the Theme submenu is one entry point away. When one is added,
+  the menu should focus the pane first, as a click would, and neither take
+  keyboard focus nor change the focused pane (the first version did, seen
+  live).
   *The pane's theme* is `Pane.themeID` in the model (section 2): one
   explicit theme shown in light and dark system appearance alike, not a
   light/dark pair (owner's decision); `nil` ("Default") follows the
@@ -1708,9 +1692,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   the placeholder card and the New Session chooser stay legible (seen
   live: an empty pane on Armadale Light in dark mode showed a dark card
   with faded text before this); on Default the pane follows the window.
-  The pane's context menu is drawn in that appearance too, so a
-  light-themed pane in dark mode shows a lighter menu than the rest of
-  the app (accepted as cosmetic).
+  A context menu popped up for the pane would be drawn in that appearance
+  too, so a light-themed pane in dark mode shows a lighter menu than the
+  rest of the app (accepted as cosmetic in the first version).
   The surface a pane's session is created with starts with the pane's
   theme, so nothing flashes in the Settings theme first.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
@@ -2830,10 +2814,8 @@ armadale/
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
 │   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
 │   │                                SessionController, LaunchResolver, HelperLocator; Sources/ctty-exec
-│   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser,
-│   │                                ContextClick (the pane menu's click rules)
-│   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm); HostTerminalView
-│                                    (applies ContextClick: Shift-right-click, Control-click)
+│   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
+│   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
 │                                    render-app-icon.swift, release.sh, install-release.sh

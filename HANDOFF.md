@@ -346,7 +346,27 @@ reviewer:** ⌘Q through the quit alert then relaunch, respawn, theme
 import/remove, forced light, the Session Ended placeholder, Control-click
 and Control-drag in a plain shell, Control-click on an empty pane
 (`NSApp.currentEvent` path, not unit-testable), attention colours on a
-themed pane. Tests: 674, zero warnings.
+themed pane. Tests: 674, zero warnings. Committed as ebec034.
+
+October 30, 2026, late evening (owner's decision; a deletion done by the
+coordinating session, through the gate): **no mouse event opens the pane
+menu any more.** Asked to choose between Control-click reaching a
+mouse-aware program as a right button and Control-click always opening
+Armadale's menu, the owner chose neither: vim and Emacs must get every
+mouse event untouched, and a better UI entry point for the pane menu will
+be chosen later. `HostTerminalView` and `ContextClick` (and its tests) are
+gone; `SwiftTermSurface` uses SwiftTerm's `TerminalView` as before the
+menu; `PaneView` and `EmptyPaneView` no longer override `menu(for:)`,
+`rightMouseDown`, `mouseDown` (for Control) or `hitTest`, and instead
+offer `paneMenu()`, which nothing calls yet besides the tests. The
+builder (`PaneMenu.make`), `Pane.themeID`, `PaneThemeBinding`, the themed
+pane appearance and all their tests stay, so the Theme submenu is one
+entry point away (it is unreachable in the app until then). Mouse
+behaviour is exactly that of 2b64971. `docs/DESIGN.md` section 8 ("Pane
+context menu", rewritten) and 11. Nothing was run live: the change only
+removes code paths, and the remaining paths are the ones live-tested
+before the menu existed. **Open:** the owner's entry point for the pane
+menu (a toolbar or menu-bar item, a keyboard shortcut, a pane header…).
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

@@ -42,9 +42,10 @@ struct PaneThemeBinding: Sendable {
     }
 }
 
-/// The context menu of a pane: a right-click (or Control-click) anywhere in
-/// it, or a Shift-right-click even while the program inside asked for the
-/// mouse (DESIGN §8, "Pane context menu").
+/// The context menu of a pane (``PaneView/paneMenu()``,
+/// ``EmptyPaneView/paneMenu()``). No mouse event opens it yet: right-click
+/// and Control-click stay the program's, and the owner is choosing an
+/// entry point (DESIGN §8, "Pane context menu").
 ///
 /// ``make(_:actions:)`` is a pure function of its inputs, so the menu can be
 /// tested without a window. Items added later take their state from new

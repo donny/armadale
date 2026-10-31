@@ -5,14 +5,10 @@ import AppKit
 /// swapped without touching sessions or layout.
 ///
 /// Surfaces are main-actor confined. Their `view` is reparented (never
-/// recreated) when tabs switch or panes move.
-///
-/// The host shows a context menu for the pane around the view, so a
-/// surface's view follows these mouse rules: a right-click goes to the
-/// program when it asked for the mouse and otherwise up the responder chain
-/// (to the view's superview); Shift + right-click always goes up the
-/// responder chain, never to the program; Control-click without Command is
-/// a right-click (``ContextClick`` has the rules).
+/// recreated) when tabs switch or panes move. Mouse events are the
+/// renderer's own: the host adds no click rules of its own, so a program
+/// that asked for the mouse sees every button and modifier (DESIGN §8,
+/// "Pane context menu").
 @MainActor
 public protocol TerminalSurface: AnyObject {
     /// The view to embed in a pane.
