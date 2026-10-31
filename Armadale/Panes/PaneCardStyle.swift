@@ -57,67 +57,35 @@ enum PaneCardStyle {
     /// The status glyph's width (``StatusGlyph``'s own constant).
     static let glyphWidth: CGFloat = StatusGlyph.width
 
-    /// The header's buttons, left to right, at its trailing end: Split
-    /// Right, Split Down, then "…" (the pane menu) last.
-    enum HeaderButton: CaseIterable {
-        case splitRight, splitDown, menu
-    }
-
-    /// Each header button's clickable size.
+    /// The header's one button, "…" (the pane menu): its clickable size.
     static let headerButtonSize = NSSize(width: 24, height: 20)
-    /// Between neighbouring header buttons; their symbols are narrower than
-    /// the buttons, which leaves room enough between them.
-    static let headerButtonSpacing: CGFloat = 0
     /// Strengths of the theme foreground in the header.
     static let titleOpacity: Double = 0.7
     static let directoryOpacity: Double = 0.55
-    /// Every header button, at rest and under the pointer.
+    /// The "…" button, at rest and under the pointer.
     static let headerButtonOpacity: Double = 0.55
     static let headerButtonHoverOpacity: Double = 1
 
-    /// The width the header's buttons take: all three, or "…" alone.
-    static func headerButtonsWidth(showsSplitButtons: Bool) -> CGFloat {
-        let count: CGFloat = showsSplitButtons ? CGFloat(HeaderButton.allCases.count) : 1
-        return count * headerButtonSize.width + (count - 1) * headerButtonSpacing
-    }
-
-    /// A button's frame in a header of `size` showing all three buttons,
-    /// in flipped coordinates (y grows downwards, as an `NSHostingView`'s):
-    /// vertically centred, "…" ending ``headerTrailing`` from the header's
-    /// trailing edge and the split buttons left of it.
-    static func headerButtonFrame(_ button: HeaderButton, inHeaderOf size: NSSize) -> NSRect {
-        let fromTrailing: CGFloat = switch button {
-        case .menu: 0
-        case .splitDown: 1
-        case .splitRight: 2
-        }
-        let trailing = size.width - headerTrailing - fromTrailing * (headerButtonSize.width + headerButtonSpacing)
+    /// The "…" button's frame in a header of `size`, in flipped coordinates
+    /// (y grows downwards, as an `NSHostingView`'s): vertically centred,
+    /// ending ``headerTrailing`` from the header's trailing edge.
+    static func menuButtonFrame(inHeaderOf size: NSSize) -> NSRect {
         let top = (min(size.height, headerHeight) - headerButtonSize.height) / 2
         return NSRect(
-            x: trailing - headerButtonSize.width, y: top,
+            x: size.width - headerTrailing - headerButtonSize.width, y: top,
             width: headerButtonSize.width, height: headerButtonSize.height)
     }
 
     /// The width the title and the working directory share in a header
     /// `headerWidth` wide (what ``PaneHeaderView``'s row leaves them):
-    /// everything but the padding, the glyph if any, the buttons shown and
-    /// the spacing between them (``textSpacing`` on each side of the
-    /// flexible space before the buttons). ``headerTextWidths(available:title:directory:)``
-    /// divides it.
-    static func headerTextSpace(headerWidth: CGFloat, hasGlyph: Bool, showsSplitButtons: Bool) -> CGFloat {
+    /// everything but the padding, the glyph if any, the "…" button and the
+    /// spacing (``textSpacing`` on each side of the flexible space before
+    /// the button): the header less 68 pt with a glyph, 50 pt without.
+    /// ``headerTextWidths(available:title:directory:)`` divides it.
+    static func headerTextSpace(headerWidth: CGFloat, hasGlyph: Bool) -> CGFloat {
         let glyph = hasGlyph ? glyphWidth + textSpacing : 0
-        let fixed = headerLeading + glyph + 2 * textSpacing
-            + headerButtonsWidth(showsSplitButtons: showsSplitButtons) + headerTrailing
+        let fixed = headerLeading + glyph + 2 * textSpacing + headerButtonSize.width + headerTrailing
         return max(headerWidth - fixed, 0)
-    }
-
-    /// Whether a header `headerWidth` wide shows the split buttons: only
-    /// while a pane's title (with its glyph) keeps at least
-    /// ``minimumTextWidth`` beside all three buttons. A narrower header
-    /// shows "…" alone, whose menu splits too, so the title is not
-    /// squeezed out (DESIGN §8, "Pane cards").
-    static func showsSplitButtons(headerWidth: CGFloat) -> Bool {
-        headerTextSpace(headerWidth: headerWidth, hasGlyph: true, showsSplitButtons: true) >= minimumTextWidth
     }
 
     /// Where the "…" button's pull-down menu opens, in a header of `size`
@@ -129,7 +97,7 @@ enum PaneCardStyle {
     /// button's trailing edge.
     static func menuOrigin(inHeaderOf size: NSSize, menuWidth: CGFloat = 0, roomRightOfHeader: CGFloat = .infinity)
         -> NSPoint {
-        let button = headerButtonFrame(.menu, inHeaderOf: size)
+        let button = menuButtonFrame(inHeaderOf: size)
         let roomFromLeading = size.width - button.minX + roomRightOfHeader
         let x = menuWidth > roomFromLeading ? button.maxX - menuWidth : button.minX
         return NSPoint(x: x, y: button.maxY + 2)

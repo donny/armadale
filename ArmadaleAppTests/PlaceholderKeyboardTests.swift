@@ -80,4 +80,42 @@ struct PlaceholderKeyboardTests {
         #expect(model.session(session) == nil)
         #expect(model.session(pane.controller.session.id) != nil)
     }
+
+    /// The dead terminal's cursor is hidden while a placeholder is up, also
+    /// after an appearance change (SwiftTerm resets the modes when its font
+    /// is set), and shown again once the terminal is live (DESIGN §8,
+    /// "Session Ended"). The terminal is asked for mode 25 (DECRQM), since
+    /// SwiftTerm keeps the state internal.
+    @Test func theCursorIsHiddenUnderAPlaceholderAndShownWhenLive() async throws {
+        _ = NSApplication.shared
+        let (pane, surface) = makeCountingPane()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = pane
+
+        func cursorShown() async throws -> Bool {
+            surface.inputs = []
+            surface.feed(Array("\u{1b}[?25$p".utf8)[...])
+            for _ in 0..<50 where surface.inputs.isEmpty {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let reply = String(decoding: surface.inputs, as: UTF8.self)
+            try #require(reply == "\u{1b}[?25;1$y" || reply == "\u{1b}[?25;2$y", "a DECRQM reply")
+            return reply == "\u{1b}[?25;1$y"
+        }
+        #expect(try await cursorShown(), "a live terminal shows its cursor")
+
+        pane.controller.markUnavailable(reason: "test")
+        #expect(await eventually { pane.acceptsFirstResponder }, "the placeholder is up")
+        #expect(try await !cursorShown(), "hidden under the placeholder")
+        pane.viewDidChangeEffectiveAppearance()
+        #expect(try await !cursorShown(), "still hidden after the appearance is applied again")
+
+        pane.controller.useBackend(InertBackend(), makeOutputFilter: { IdentityOutputFilter() })
+        #expect(await eventually { !pane.acceptsFirstResponder }, "the placeholder is gone")
+        #expect(try await cursorShown(), "shown again: the terminal is live")
+    }
 }

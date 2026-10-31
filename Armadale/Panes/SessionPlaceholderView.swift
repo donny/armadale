@@ -33,7 +33,7 @@ struct SessionPlaceholderView: View {
     /// Respawn, Reconnect or Retry.
     let primary: () -> Void
     let closePane: () -> Void
-    /// A click on the dimmed pane around the card focuses the pane, as a
+    /// A click on the pane around the card focuses the pane, as a
     /// click on a live terminal does (and so gives Return to the button).
     var focusPane: () -> Void = {}
 
@@ -87,8 +87,11 @@ struct SessionPlaceholderView: View {
         GeometryReader { proxy in
             let compact = PaneCard.isCompact(width: proxy.size.width)
             ZStack {
-                Rectangle()
-                    .fill(.black.opacity(0.18))
+                // No dimming: the pane's theme background and the session's
+                // last output show around the card, as an empty pane's
+                // background does (owner's decision, October 31, 2026). The
+                // clear area still takes a click, which focuses the pane.
+                Color.clear
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture(perform: focusPane)

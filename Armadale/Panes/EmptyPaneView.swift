@@ -56,7 +56,6 @@ final class EmptyPaneView: NSView {
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusPane() }
         header.makeMenu = { [weak self] in self?.paneMenu() }
-        header.splitPane = { [theme] in theme.split($0) }
         addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]

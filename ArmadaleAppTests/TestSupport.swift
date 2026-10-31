@@ -11,6 +11,8 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
     let inner = SwiftTermSurface()
     weak var delegate: (any TerminalSurfaceDelegate)?
     private(set) var sizes: [GridSize] = []
+    /// Everything the terminal sent towards the program (typing, replies to queries).
+    var inputs: [UInt8] = []
 
     init() {
         inner.delegate = self
@@ -28,6 +30,7 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
     var selectedText: String? { inner.selectedText }
 
     func surface(_ surface: any TerminalSurface, didInput bytes: [UInt8]) {
+        inputs += bytes
         delegate?.surface(self, didInput: bytes)
     }
 

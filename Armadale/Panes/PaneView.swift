@@ -86,7 +86,6 @@ final class PaneView: NSView {
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusTerminal() }
         header.makeMenu = { [weak self] in self?.paneMenu() }
-        header.splitPane = { [theme] in theme.split($0) }
         addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
@@ -238,6 +237,10 @@ final class PaneView: NSView {
         matchAppearance(toPaneTheme: settings.paneTheme(paneThemeID))
         let appearance = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID)
         controller.surface.apply(appearance)
+        // SwiftTerm resets the terminal's modes when its font is set, which
+        // shows the cursor again: keep it hidden under a placeholder (seen
+        // live, choosing a pane theme on an ended pane).
+        if placeholder != nil { controller.surface.setCursorVisible(false) }
         PaneCardStyle.apply(to: self, overlay: focusOverlay, style: focusStyle, theme: appearance.theme)
         updateHeader(foreground: appearance.theme.foreground)
     }
@@ -317,7 +320,9 @@ final class PaneView: NSView {
             shown.removeFromSuperview()
             placeholder = nil
             primaryAction = nil
-            // The terminal is live again: keyboard focus goes back to it.
+            // The terminal is live again: its cursor shows (hidden under the
+            // placeholder, below) and keyboard focus goes back to it.
+            controller.surface.setCursorVisible(true)
             if let window, window.firstResponder === self { window.makeFirstResponder(controller.surface.view) }
             return
         }
@@ -344,6 +349,9 @@ final class PaneView: NSView {
             primary: primary,
             closePane: { [weak self] in self?.onClosePane?() },
             focusPane: { [weak self] in self?.focusTerminal() })
+        // The dead terminal's idle cursor would show as a hollow box beside
+        // the placeholder's card (DESIGN §8, "Session Ended").
+        controller.surface.setCursorVisible(false)
         if let placeholder {
             placeholder.rootView = view
         } else {

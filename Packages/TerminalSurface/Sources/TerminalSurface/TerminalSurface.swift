@@ -31,6 +31,27 @@ public protocol TerminalSurface: AnyObject {
     var selectedText: String? { get }
 }
 
+/// The text cursor's visibility, set the way a program sets it: DECTCEM
+/// (`ESC [ ? 25 l` hides, `ESC [ ? 25 h` shows), fed to the screen like
+/// output, so every renderer understands it. The host hides a dead
+/// terminal's cursor under a placeholder and shows it again once the
+/// terminal is live (DESIGN §8, "Session Ended").
+public enum TerminalCursorVisibility {
+    /// `ESC [ ? 2 5 l`.
+    public static let hideSequence: [UInt8] = [0x1B, 0x5B, 0x3F, 0x32, 0x35, 0x6C]
+    /// `ESC [ ? 2 5 h`.
+    public static let showSequence: [UInt8] = [0x1B, 0x5B, 0x3F, 0x32, 0x35, 0x68]
+}
+
+extension TerminalSurface {
+    /// Shows or hides the text cursor by feeding the DECTCEM sequence
+    /// (``TerminalCursorVisibility``); a program's later output may change
+    /// it again, as it would on any terminal.
+    public func setCursorVisible(_ visible: Bool) {
+        feed((visible ? TerminalCursorVisibility.showSequence : TerminalCursorVisibility.hideSequence)[...])
+    }
+}
+
 /// Events emitted by a ``TerminalSurface``. All calls arrive on the main actor.
 @MainActor
 public protocol TerminalSurfaceDelegate: AnyObject {

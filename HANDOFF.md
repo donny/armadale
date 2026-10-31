@@ -432,6 +432,42 @@ a split (unit-tested), a pane moved to another window. Review's three
 low findings fixed by the coordinator: DESIGN wording on the shortcuts,
 `StatusGlyph.width` shared with `PaneCardStyle.glyphWidth`, the release
 test now exercises the split closures. Tests: 682, zero warnings.
+Committed as 2695c1b.
+
+October 31, 2026, later morning (owner's decisions, implementer →
+reviewer loop): **header split buttons dropped; Session Ended no longer
+dimmed.** The owner found three header buttons busy, so the header is
+back to glyph, title, directory and "…" (text space = header − 68 pt
+with a glyph, − 50 without; no hide threshold); Split Right ⌘D and Split
+Down ⇧⌘D stay in the pane menu. The placeholder's 18 % black layer is
+gone (an ended pane looked grey beside a white empty pane): the pane's
+theme background shows and the last output stays readable under the
+card; the dead terminal's cursor is hidden under any placeholder kind
+(DECTCEM through `TerminalSurface.setCursorVisible`, re-hidden after
+each appearance change while the placeholder is up because SwiftTerm's
+font setter soft-resets the terminal) and shown again when the terminal
+is live. DESIGN §8 (pane cards, Session Ended). **Checked live** (light):
+"…" only; the menu's split items and a split from them; an ended pane
+white beside an empty pane with no cursor box and its last output
+readable; a click beside the card focusing the pane; Dracula on the
+ended pane keeping the cursor hidden; Return respawning with the cursor
+back and typing working. **Not checked live:** dark system appearance;
+the disconnected, reconnecting, unavailable and host-removed
+placeholders; the reconnect ordering of the show sequence. Tests: 683,
+zero warnings.
+
+**Found in review, older than this step, not fixed (owner's decision
+pending):** `SwiftTermSurface.apply` sets `terminalView.font` on every
+call without comparing, and SwiftTerm 1.99.0's font setter ends in
+`terminal.softReset()` (application cursor keys and keypad mode off,
+cursor shown, scroll region, origin mode, wraparound, charset,
+attributes and colours reset; mouse reporting, the alternate screen and
+bracketed paste survive). `PaneView.viewDidMoveToWindow` applies the
+appearance whenever the pane enters a window, so a split, a tab switch
+or a zoom resets those modes for the program in the pane (seen live
+with DECRQM: `?1` and `?25` reset after ⌘D; a window resize alone left
+them). Proposed fix: set the font only when its name or size changed,
+and skip the re-apply when nothing changed.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

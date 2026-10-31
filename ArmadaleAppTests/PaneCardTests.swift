@@ -65,35 +65,23 @@ struct PaneCardTests {
         #expect(PaneCardStyle.menuOrigin(inHeaderOf: size, menuWidth: room + 9, roomRightOfHeader: 8).x < buttonLeading)
     }
 
-    @Test func theSplitButtonsSitLeftOfTheEllipsisButton() {
+    /// The header's one button: "…" (the split buttons were dropped; the
+    /// pane menu splits).
+    @Test func theEllipsisIsTheHeadersOnlyButton() {
         let size = NSSize(width: 300, height: PaneCardStyle.headerHeight)
         #expect(PaneCardStyle.headerButtonSize == NSSize(width: 24, height: 20))
-        let menu = PaneCardStyle.headerButtonFrame(.menu, inHeaderOf: size)
-        let down = PaneCardStyle.headerButtonFrame(.splitDown, inHeaderOf: size)
-        let right = PaneCardStyle.headerButtonFrame(.splitRight, inHeaderOf: size)
+        let menu = PaneCardStyle.menuButtonFrame(inHeaderOf: size)
         #expect(menu == NSRect(x: 272, y: 4, width: 24, height: 20), "4 pt from the trailing edge, centred")
-        #expect(down == NSRect(x: 248, y: 4, width: 24, height: 20), "immediately left of …")
-        #expect(right == NSRect(x: 224, y: 4, width: 24, height: 20), "Split Right first")
-        #expect(PaneCardStyle.headerButtonsWidth(showsSplitButtons: true) == 72)
-        #expect(PaneCardStyle.headerButtonsWidth(showsSplitButtons: false) == 24)
-        #expect(PaneCardStyle.headerButtonsWidth(showsSplitButtons: true) == menu.maxX - right.minX)
-        // The menu still opens under "…".
         #expect(PaneCardStyle.menuOrigin(inHeaderOf: size).x == menu.minX)
         #expect(PaneCardStyle.menuOrigin(inHeaderOf: size).y == menu.maxY + 2)
     }
 
-    @Test func theTextGetsWhatTheButtonsLeaveAndANarrowHeaderShowsEllipsisAlone() {
-        // 10 leading, a 12 pt glyph and 6, 6 + 6 around the flexible space, the buttons, 4 trailing.
-        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: true, showsSplitButtons: true) == 284)
-        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: false, showsSplitButtons: true) == 302)
-        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: true, showsSplitButtons: false) == 332)
-        #expect(PaneCardStyle.headerTextSpace(headerWidth: 20, hasGlyph: true, showsSplitButtons: true) == 0)
-        // The split buttons show while the title keeps 40 pt beside them.
-        #expect(PaneCardStyle.showsSplitButtons(headerWidth: 400))
-        #expect(PaneCardStyle.showsSplitButtons(headerWidth: 156))
-        #expect(!PaneCardStyle.showsSplitButtons(headerWidth: 155.5))
-        #expect(!PaneCardStyle.showsSplitButtons(headerWidth: 90), "a 90 pt pane: the title and … only")
-        #expect(PaneCardStyle.showsSplitButtons(headerWidth: 165))
+    @Test func theTextGetsWhatTheEllipsisButtonLeaves() {
+        // 10 leading, a 12 pt glyph and 6, 6 + 6 around the flexible space, 24 for "…", 4 trailing.
+        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: true) == 332)
+        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: false) == 350)
+        #expect(PaneCardStyle.headerTextSpace(headerWidth: 90, hasGlyph: true) == 22)
+        #expect(PaneCardStyle.headerTextSpace(headerWidth: 20, hasGlyph: true) == 0, "never negative")
     }
 
     @Test func theTitleAndTheDirectoryShareTheHeader() {
@@ -329,9 +317,10 @@ struct PaneCardTests {
         #expect(holder.hitTest(gridPoint)?.isDescendant(of: pane.controller.surface.view) == true)
     }
 
-    /// A split button focuses its pane first, then splits that pane, not
-    /// the one focused before; through the window's actions, as ⌘D.
-    @Test func theSplitButtonsSplitTheirOwnPane() throws {
+    /// The "…" menu's split items split their own pane, not the one
+    /// focused before (the menu focuses it first); through the window's
+    /// actions, as ⌘D.
+    @Test func theMenusSplitItemsSplitTheirOwnPane() throws {
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let (model, registry, workspace) = makeRegistry(settings: settings)
@@ -349,19 +338,15 @@ struct PaneCardTests {
         holder.addSubview(pane)
         let window = window(showing: holder)
         defer { window.close() }
-        #expect(pane.header.showsSplitButtons)
         #expect(model.selectedTab(in: workspace)?.focusedPaneID == second)
 
-        var focusedFirst = false
-        let focus = pane.header.focusPane
-        pane.header.focusPane = {
-            focus()
-            focusedFirst = model.selectedTab(in: workspace)?.layout.leaves().count == 2
-        }
+        var presented: [NSMenu] = []
+        pane.header.presentMenu = { menu, _, _ in presented.append(menu) }
         window.makeFirstResponder(other)
-        pane.header.splitFromButton(.horizontal)
-        #expect(focusedFirst, "the pane is focused before it is split")
-        #expect(window.firstResponder === pane.controller.surface.view)
+        pane.header.openMenuFromButton()
+        #expect(window.firstResponder === pane.controller.surface.view, "the pane is focused first")
+        let menu = try #require(presented.first)
+        try #require(menu.items.first { $0.identifier == PaneMenu.splitRightItemIdentifier } as? ActionMenuItem).handler()
         let tab = try #require(model.selectedTab(in: workspace))
         let right = try #require(tab.layout.neighbor(of: first, direction: .right), "Split Right: right of this pane")
         #expect(right != second)
@@ -369,28 +354,10 @@ struct PaneCardTests {
         #expect(model.pane(right)?.isEmpty == true, "and empty: it shows the chooser")
         #expect(actions.lastFocusedSessionID == firstSession, "the dialog's directory comes from the split pane")
 
-        pane.header.splitFromButton(.vertical)
+        try #require(pane.paneMenu().items.first { $0.identifier == PaneMenu.splitDownItemIdentifier } as? ActionMenuItem)
+            .handler()
         let below = try #require(model.selectedTab(in: workspace)?.layout.neighbor(of: first, direction: .down))
         #expect(below != second && below != right, "Split Down: below this pane")
-    }
-
-    @Test func aNarrowHeaderShowsTheEllipsisButtonAlone() throws {
-        let header = PaneHeaderHostingView.make(model: .newSession)
-        header.frame = NSRect(x: 0, y: 0, width: 400, height: PaneCardStyle.headerHeight)
-        #expect(header.showsSplitButtons)
-        header.setFrameSize(NSSize(width: 120, height: PaneCardStyle.headerHeight))
-        #expect(!header.showsSplitButtons)
-        header.setFrameSize(NSSize(width: 200, height: PaneCardStyle.headerHeight))
-        #expect(header.showsSplitButtons)
-        // A new model keeps the buttons' state and closures.
-        var split: [ArmadaleCore.Axis] = []
-        header.splitPane = { split.append($0) }
-        header.model = PaneHeaderModel(status: .running, title: "build", directory: nil)
-        header.setFrameSize(NSSize(width: 100, height: PaneCardStyle.headerHeight))
-        header.model = .newSession
-        #expect(!header.showsSplitButtons)
-        header.rootView.split(.vertical)
-        #expect(split == [.vertical], "the view's split button reaches the pane's split")
     }
 
     @Test func anEmptyPanesHeaderSaysNewSessionAndOpensItsMenu() throws {
@@ -425,10 +392,9 @@ struct PaneCardTests {
         #expect(presented.first?.items.contains { $0.identifier == PaneMenu.themeItemIdentifier } == true)
         #expect(window.firstResponder === view, "the empty pane is focused first")
 
-        // Its split buttons split it.
-        window.makeFirstResponder(other)
-        view.header.splitFromButton(.vertical)
-        #expect(window.firstResponder === view, "the empty pane is focused first")
+        // Its menu's Split Down splits it.
+        let splitDown = presented.first?.items.first { $0.identifier == PaneMenu.splitDownItemIdentifier }
+        try #require(splitDown as? ActionMenuItem).handler()
         let below = try #require(model.selectedTab(in: workspace)?.layout.neighbor(of: paneID, direction: .down))
         #expect(model.selectedTab(in: workspace)?.focusedPaneID == below)
     }
@@ -469,8 +435,10 @@ extension PaneCardTests {
             pane.header.openMenuFromButton()
             empty.header.presentMenu = { _, _, _ in }
             empty.header.openMenuFromButton()
-            pane.header.splitFromButton(.horizontal)
-            empty.header.splitFromButton(.vertical)
+            (pane.paneMenu().items.first { $0.identifier == PaneMenu.splitRightItemIdentifier } as? ActionMenuItem)?
+                .handler()
+            (empty.paneMenu().items.first { $0.identifier == PaneMenu.splitDownItemIdentifier } as? ActionMenuItem)?
+                .handler()
             model.setTitle("busy", for: sessionID)
             #expect(await eventually { pane.header.model.title == "busy" })
             empty.removeFromSuperview()

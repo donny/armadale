@@ -9,7 +9,8 @@ private final class RecordingDelegate: TerminalSurfaceDelegate {
     var bells = 0
     var directories: [URL] = []
 
-    func surface(_ surface: any TerminalSurface, didInput bytes: [UInt8]) {}
+    var input: [UInt8] = []
+    func surface(_ surface: any TerminalSurface, didInput bytes: [UInt8]) { input += bytes }
     func surface(_ surface: any TerminalSurface, didResize size: GridSize) {}
     func surface(_ surface: any TerminalSurface, didSetTitle title: String) { titles.append(title) }
     func surface(_ surface: any TerminalSurface, didChangeDirectory url: URL) { directories.append(url) }
@@ -57,6 +58,33 @@ struct SwiftTermSurfaceTests {
         #expect(delegate.bells == 1)
         #expect(surface.gridSize.columns > 0)
         #expect(surface.gridSize.cellWidth > 0)
+    }
+
+    /// The cursor helper's DECTCEM bytes hide and show SwiftTerm's cursor.
+    /// SwiftTerm keeps that state internal, so the terminal is asked the
+    /// standard way: DECRQM for mode 25 (`ESC [ ? 25 $ p`), answered
+    /// `ESC [ ? 25 ; 1 $ y` while shown and `; 2 $ y` while hidden.
+    @Test func theCursorVisibilitySequencesHideAndShowTheCursor() async throws {
+        #expect(TerminalCursorVisibility.hideSequence == Array("\u{1b}[?25l".utf8))
+        #expect(TerminalCursorVisibility.showSequence == Array("\u{1b}[?25h".utf8))
+        let surface = SwiftTermSurface()
+        let delegate = RecordingDelegate()
+        surface.delegate = delegate
+        surface.apply(TerminalAppearance(fontName: "Menlo", fontSize: 12))
+
+        func reported() async throws -> String {
+            delegate.input = []
+            surface.feed(Array("\u{1b}[?25$p".utf8)[...])
+            for _ in 0..<50 where delegate.input.isEmpty {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            return String(decoding: delegate.input, as: UTF8.self)
+        }
+        #expect(try await reported() == "\u{1b}[?25;1$y", "shown at first")
+        surface.setCursorVisible(false)
+        #expect(try await reported() == "\u{1b}[?25;2$y", "hidden")
+        surface.setCursorVisible(true)
+        #expect(try await reported() == "\u{1b}[?25;1$y", "shown again")
     }
 
     @Test func cellSizeIsSwiftTermsUnroundedCellAndFitsTheView() throws {
