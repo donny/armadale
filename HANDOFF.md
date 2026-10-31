@@ -467,7 +467,33 @@ appearance whenever the pane enters a window, so a split, a tab switch
 or a zoom resets those modes for the program in the pane (seen live
 with DECRQM: `?1` and `?25` reset after ⌘D; a window resize alone left
 them). Proposed fix: set the font only when its name or size changed,
-and skip the re-apply when nothing changed.
+and skip the re-apply when nothing changed. Committed as 6e0e0ca.
+
+October 31, 2026, late morning (owner's go, implementer → reviewer
+loop): **a split, a tab switch or a zoom no longer soft-resets the
+program in a pane.** `SwiftTermSurface.apply` sets the font only when
+its name or size changed (`appliedFont`); `PaneView` skips the surface
+when the appearance it computes equals the one last applied to the same
+surface (record cleared when the surface is replaced), still updating
+its card and header; the placeholder's cursor re-hide runs after the
+font apply. A font or size change (⌘= / ⌘- / ⌘0, Settings) still
+soft-resets the program's modes, and a theme change still replaces an
+OSC 4 palette: SwiftTerm properties, accepted and recorded in DESIGN §8
+with the lines consulted. Tests: same appearance, a theme change and a
+cursor-style change keep modes 1 and 25, a size change resets them; a
+pane re-entering a window applies nothing; ⌘= on an ended pane keeps the
+cursor hidden. **Checked live** (implementer and reviewer, light): `?1h`
+and `?25l` surviving ⌘D, ⌘2/⌘1 and zoom (DECRQM `?1;1`, `?25;2`, where
+before the fix they read `?1;2`, `?25;1`); vim with mouse=a keeping the
+mouse and arrows after a theme change and a tab switch; ⌘= enlarging
+text with the accepted reset; an ended pane keeping the cursor hidden
+through ⌘= and a theme change, Return respawning with the cursor back.
+**Incident:** the implementer's keystroke helper sent ⌘ and ⇧ as flags
+without pressing and releasing the modifier keys, leaving both held
+system-wide for a few minutes (the test build went full screen and
+zoomed from its typing); it released them, rewrote the helper, and the
+reviewer and the coordinator confirmed no modifier held afterwards
+(`CGEventSource.flagsState`). Tests: 686, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

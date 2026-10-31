@@ -23,7 +23,12 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
     var view: NSView { inner.view }
     var gridSize: GridSize { inner.gridSize }
     func feed(_ bytes: ArraySlice<UInt8>) { inner.feed(bytes) }
-    func apply(_ appearance: TerminalAppearance) { inner.apply(appearance) }
+    /// The appearances applied, in order.
+    private(set) var applied: [TerminalAppearance] = []
+    func apply(_ appearance: TerminalAppearance) {
+        applied.append(appearance)
+        inner.apply(appearance)
+    }
     func clearScrollback() { inner.clearScrollback() }
     func scrollToBottom() { inner.scrollToBottom() }
     func find(_ query: String, direction: FindDirection) { inner.find(query, direction: direction) }
@@ -68,7 +73,7 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
 /// Its settings are only read, so their defaults suite never touches the
 /// disk (see ``TestDefaults``) and needs no cleanup.
 @MainActor
-func makeCountingPane() -> (PaneView, CountingSurface) {
+func makeCountingPane(settings: AppSettings = .forTesting()) -> (PaneView, CountingSurface) {
     let session = Session(profileID: Profile.shell.id, launch: LaunchSpec(), workingDirectory: "/")
     var surface: CountingSurface?
     let controller = SessionController(session: session, backend: EphemeralBackend(), makeSurface: {
@@ -77,7 +82,7 @@ func makeCountingPane() -> (PaneView, CountingSurface) {
         return made
     })
     // `makeSurface` runs synchronously in the initializer.
-    return (PaneView(controller: controller, settings: .forTesting(), rendererID: "counting"), surface ?? CountingSurface())
+    return (PaneView(controller: controller, settings: settings, rendererID: "counting"), surface ?? CountingSurface())
 }
 
 extension AppSettings {

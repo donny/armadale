@@ -118,4 +118,75 @@ struct PlaceholderKeyboardTests {
         #expect(await eventually { !pane.acceptsFirstResponder }, "the placeholder is gone")
         #expect(try await cursorShown(), "shown again: the terminal is live")
     }
+
+    /// Asks the terminal for DEC private mode `number` (DECRQM): `true` when
+    /// set, `false` when reset.
+    private func mode(_ number: Int, of surface: CountingSurface) async throws -> Bool {
+        surface.inputs = []
+        surface.feed(Array("\u{1b}[?\(number)$p".utf8)[...])
+        for _ in 0..<50 where surface.inputs.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let reply = String(decoding: surface.inputs, as: UTF8.self)
+        try #require(reply == "\u{1b}[?\(number);1$y" || reply == "\u{1b}[?\(number);2$y", "a DECRQM reply")
+        return reply == "\u{1b}[?\(number);1$y"
+    }
+
+    /// A pane entering a window again (a split, a tab switch, a zoom)
+    /// leaves its surface alone when the appearance is the same, so the
+    /// program's modes survive; a theme change applies, still without a
+    /// reset (DESIGN §8, "Pane context menu").
+    @Test func reenteringAWindowKeepsTheProgramsModes() async throws {
+        _ = NSApplication.shared
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        settings.preferences.followsSystemAppearance = false
+        settings.preferences.themeID = "builtin.nord"
+        let (pane, surface) = makeCountingPane(settings: settings)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        window.contentView = holder
+        holder.addSubview(pane)
+        surface.feed(Array("\u{1b}[?1h\u{1b}[?25l".utf8)[...])
+        #expect(try await mode(1, of: surface))
+        let applied = surface.applied.count
+
+        pane.removeFromSuperview()
+        holder.addSubview(pane)
+        #expect(surface.applied.count == applied, "the same appearance is not applied again")
+        #expect(try await mode(1, of: surface), "application cursor keys survive")
+        #expect(try await !mode(25, of: surface), "the hidden cursor stays hidden")
+
+        settings.preferences.themeID = "builtin.dracula"
+        #expect(await eventually { surface.applied.last?.theme.name == "Dracula" })
+        #expect(try await mode(1, of: surface), "a theme change keeps them")
+    }
+
+    /// A font size change (⌘=) soft-resets SwiftTerm, which shows the
+    /// cursor: under a placeholder the pane hides it again after the font
+    /// is applied.
+    @Test func aFontSizeChangeKeepsTheCursorHiddenUnderAPlaceholder() async throws {
+        _ = NSApplication.shared
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        let (pane, surface) = makeCountingPane(settings: settings)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = pane
+        pane.controller.markEnded(exitCode: .signaled(9))
+        #expect(await eventually { pane.acceptsFirstResponder }, "the placeholder is up")
+        #expect(try await !mode(25, of: surface))
+
+        let size = settings.preferences.fontSize
+        settings.preferences.fontSize = size + 2
+        #expect(await eventually { surface.applied.last?.fontSize == size + 2 }, "the new size is applied")
+        #expect(try await !mode(25, of: surface), "still hidden")
+    }
 }

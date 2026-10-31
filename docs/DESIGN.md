@@ -802,10 +802,11 @@ replay and is accepted.
   card: `PaneView` feeds the surface DECTCEM, `ESC [ ? 25 l`
   (`TerminalSurface.setCursorVisible(false)`, the bytes in
   `TerminalCursorVisibility`), again after every appearance it applies
-  while the placeholder is up (SwiftTerm resets the terminal's modes,
-  cursor visibility included, whenever its font is set, which `apply`
-  does; seen live: choosing Dracula for an ended pane brought the box
-  back), and feeds `ESC [ ? 25 h` when the placeholder goes because the
+  while the placeholder is up (SwiftTerm soft-resets the terminal,
+  cursor visibility included, whenever its font is set; seen live:
+  choosing Dracula for an ended pane brought the box back, before the
+  surface stopped setting an unchanged font, section 8 "Re-applying no
+  longer soft-resets"; a size change, ⌘=, still sets it), and feeds `ESC [ ? 25 h` when the placeholder goes because the
   terminal is live again, before keyboard focus returns to it (a respawn
   also resets the terminal, which shows it). A program's own later
   output may change it again, as on any terminal. Tested by asking the
@@ -2071,6 +2072,35 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     does not reset the cursor: the surface only pushes the cursor style
     when the preference changed, so a program's own DECSCUSR choice
     (vim's insert-mode bar) stays.
+  - *Re-applying no longer soft-resets the program* (October 31, 2026,
+    found in review). SwiftTerm 1.99.0's `font` setter calls `resetFont()`,
+    which calls `resize(cols:rows:)` (`AppleTerminalView.swift`, about
+    line 4470), which ends in `terminal.softReset()` (`cmdSoftReset`,
+    `Terminal.swift`, about line 5739): application cursor keys and keypad
+    mode off, the cursor shown, scroll region, origin mode, wraparound,
+    charset and attributes reset, and `resetAllColors()` (mouse reporting,
+    the alternate screen and bracketed paste survive). `SwiftTermSurface.apply` set the font on
+    every call, and a pane applies its appearance whenever it enters a
+    window, so a split, a tab switch or a zoom soft-reset the program in
+    that pane (seen: `?1h` and `?25l` reported reset by DECRQM after ⌘D;
+    a window resize, which resizes without the reset, kept them). Now the
+    surface sets the font only when its name or size changed
+    (`appliedFont`, as `appliedCursor`); the colours and the cursor style
+    soft-reset nothing and still apply every time, though installing the
+    theme's palette replaces one the program set with OSC 4
+    (`installPalette`, `Terminal.swift` about line 1174), accepted for a
+    theme change. `PaneView` also skips the
+    surface entirely when the appearance it computes is the one it last
+    applied to the same surface (it still updates its own card and
+    header), so re-entering a window does not even reinstall the palette.
+    A font or size change (⌘= / ⌘- / ⌘0, Settings) still soft-resets the
+    program's modes: a SwiftTerm property, accepted; under a placeholder
+    the pane hides the cursor again after the font is applied ("Session
+    Ended"). Tested with DECRQM in `SwiftTermSurfaceTests` (same
+    appearance, theme and cursor-style changes keep mode 1; a size change
+    resets it) and `PlaceholderKeyboardTests` (a pane re-entering a window
+    applies nothing and keeps modes 1 and 25; ⌘= on an ended pane keeps
+    the cursor hidden).
   - Ghostty import also accepts the basic X11 colour names (black … white,
     bright/light variants, grey), meaning the default palette's entries;
     the default palette is the light one when the background is light

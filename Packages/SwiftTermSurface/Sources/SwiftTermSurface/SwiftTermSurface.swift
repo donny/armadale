@@ -22,6 +22,15 @@ public final class SwiftTermSurface: TerminalSurface {
     /// appearance (a tab switch, a theme change) must not override the
     /// style the program chose with DECSCUSR, e.g. vim's insert-mode bar.
     private var appliedCursor: TerminalCursorStyle?
+    /// The font name and size last set on the view. SwiftTerm's `font`
+    /// setter recomputes the grid and resizes the terminal, and its
+    /// `resize(cols:rows:)` ends in `terminal.softReset()` (SwiftTerm 1.99.0,
+    /// `AppleTerminalView.resize(cols:rows:)` → `Terminal.cmdSoftReset`):
+    /// the program's application cursor keys, keypad mode, hidden cursor,
+    /// scroll region, origin mode and attributes are reset. So the font is
+    /// set only when it changes, never when the same appearance is applied
+    /// again (a tab switch, a split, a zoom) or only the theme changes.
+    private var appliedFont: (name: String, size: Double)?
 
     /// Creates a surface with `appearance` applied.
     public init(appearance: TerminalAppearance = .default) {
@@ -78,9 +87,18 @@ public final class SwiftTermSurface: TerminalSurface {
 
     public func apply(_ appearance: TerminalAppearance) {
         self.appearance = appearance
-        let size = CGFloat(appearance.fontSize)
-        terminalView.font = NSFont(name: appearance.fontName, size: size)
-            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        if appliedFont?.name != appearance.fontName || appliedFont?.size != appearance.fontSize {
+            appliedFont = (appearance.fontName, appearance.fontSize)
+            let size = CGFloat(appearance.fontSize)
+            terminalView.font = NSFont(name: appearance.fontName, size: size)
+                ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        }
+
+        // The colours and the cursor style soft-reset nothing (SwiftTerm
+        // 1.99.0: `installColors` installs the palette, which does replace a
+        // palette the program set with OSC 4 (`installPalette` sets
+        // `ansiColors = defaultAnsiColors`); the native colours and
+        // `caretColor` only redraw; `setCursorStyle` sets the renderer's style).
 
         let theme = appearance.theme
         terminalView.installColors(theme.ansi.map(Self.swiftTermColor))

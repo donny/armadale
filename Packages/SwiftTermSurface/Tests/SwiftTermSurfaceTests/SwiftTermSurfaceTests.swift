@@ -87,6 +87,55 @@ struct SwiftTermSurfaceTests {
         #expect(try await reported() == "\u{1b}[?25;1$y", "shown again")
     }
 
+    /// Re-applying an appearance leaves the program's modes alone unless the
+    /// font changes: SwiftTerm's font setter resizes the terminal, which
+    /// soft-resets it (SwiftTerm 1.99.0, `resize(cols:rows:)` →
+    /// `softReset()`), so a font or size change still resets them; the same
+    /// appearance again (a tab switch, a split, a zoom) or a theme change
+    /// does not. Asked with DECRQM, answered `ESC [ ? n ; 1 $ y` when set
+    /// and `; 2 $ y` when reset.
+    @Test func reapplyingWithoutAFontChangeKeepsTheProgramsModes() async throws {
+        let surface = SwiftTermSurface()
+        let delegate = RecordingDelegate()
+        surface.delegate = delegate
+        let appearance = TerminalAppearance(fontName: "Menlo", fontSize: 12)
+        surface.apply(appearance)
+
+        func mode(_ number: Int) async throws -> String {
+            delegate.input = []
+            surface.feed(Array("\u{1b}[?\(number)$p".utf8)[...])
+            for _ in 0..<50 where delegate.input.isEmpty {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            return String(decoding: delegate.input, as: UTF8.self)
+        }
+        let set = "\u{1b}[?1;1$y", reset = "\u{1b}[?1;2$y"
+        #expect(try await mode(1) == reset, "application cursor keys off at first")
+        surface.feed(Array("\u{1b}[?1h\u{1b}[?25l".utf8)[...])
+        #expect(try await mode(1) == set)
+
+        surface.apply(appearance)
+        #expect(try await mode(1) == set, "the same appearance again")
+        #expect(try await mode(25) == "\u{1b}[?25;2$y", "the cursor stays hidden")
+        var themed = appearance
+        themed.theme = TerminalTheme(
+            name: "Other", ansi: TerminalTheme.defaultANSI, foreground: TerminalColor(hex: 0x101010),
+            background: TerminalColor(hex: 0xfafafa), cursor: TerminalColor(hex: 0x101010),
+            selection: TerminalColor(hex: 0xcccccc))
+        surface.apply(themed)
+        #expect(try await mode(1) == set, "a theme change")
+        var cursor = themed
+        cursor.cursor = TerminalCursorStyle(shape: .bar, blinks: false)
+        surface.apply(cursor)
+        #expect(try await mode(1) == set, "a cursor style change")
+
+        var bigger = cursor
+        bigger.fontSize = 14
+        surface.apply(bigger)
+        #expect(try await mode(1) == reset, "a size change soft-resets (SwiftTerm)")
+        #expect(try await mode(25) == "\u{1b}[?25;1$y", "and shows the cursor")
+    }
+
     @Test func cellSizeIsSwiftTermsUnroundedCellAndFitsTheView() throws {
         let surface = SwiftTermSurface(appearance: TerminalAppearance(fontName: "Menlo", fontSize: 12))
         surface.view.setFrameSize(NSSize(width: 800, height: 500))

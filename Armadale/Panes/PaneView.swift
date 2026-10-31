@@ -73,6 +73,11 @@ final class PaneView: NSView {
     private var stateObservation: Task<Void, Never>?
     private var appearanceObservation: Task<Void, Never>?
     private var headerObservation: Task<Void, Never>?
+    /// The appearance last applied to the surface, and to which surface.
+    /// The identifier is an address, which a later surface could reuse
+    /// once the old one is freed, so every path that swaps the surface
+    /// (``surfaceWasReplaced(_:)``) clears the record first.
+    private var appliedAppearance: (surface: ObjectIdentifier, appearance: TerminalAppearance)?
 
     init(controller: SessionController, settings: AppSettings, rendererID: String, theme: PaneThemeBinding = .detached) {
         self.controller = controller
@@ -137,6 +142,7 @@ final class PaneView: NSView {
             rendererID = pendingRendererID
             self.pendingRendererID = nil
         }
+        appliedAppearance = nil
         applyAppearance()
         if hadFocus { focusTerminal() }
     }
@@ -236,11 +242,19 @@ final class PaneView: NSView {
         let paneThemeID = theme.current()
         matchAppearance(toPaneTheme: settings.paneTheme(paneThemeID))
         let appearance = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID)
-        controller.surface.apply(appearance)
-        // SwiftTerm resets the terminal's modes when its font is set, which
-        // shows the cursor again: keep it hidden under a placeholder (seen
-        // live, choosing a pane theme on an ended pane).
-        if placeholder != nil { controller.surface.setCursorVisible(false) }
+        // Entering a window (a split, a tab switch, a zoom) applies the same
+        // appearance again: the surface is left alone then, so nothing the
+        // program set (its palette, its modes) is touched.
+        let surface = controller.surface
+        if appliedAppearance?.surface != ObjectIdentifier(surface) || appliedAppearance?.appearance != appearance {
+            surface.apply(appearance)
+            appliedAppearance = (ObjectIdentifier(surface), appearance)
+        }
+        // SwiftTerm soft-resets the terminal when its font or size changes,
+        // which shows the cursor again: keep it hidden under a placeholder,
+        // after the font is applied (seen live: a pane theme chosen on an
+        // ended pane, before the surface skipped unchanged fonts).
+        if placeholder != nil { surface.setCursorVisible(false) }
         PaneCardStyle.apply(to: self, overlay: focusOverlay, style: focusStyle, theme: appearance.theme)
         updateHeader(foreground: appearance.theme.foreground)
     }
