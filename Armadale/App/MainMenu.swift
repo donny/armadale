@@ -164,21 +164,25 @@ enum MainMenu {
         previousControl.keyEquivalentModifierMask = [.control, .shift]
         hideAlternate(previousControl)
         window.addItem(.separator())
+        // ⌘1…⌘9 and ⇧⌘1…⇧⌘9 are hidden commands (owner's decision, October
+        // 30, 2026): eighteen "Show Tab N" rows crowded the menu. The tab
+        // bar shows ⌘N on each tab and the sidebar ⇧⌘N on each tab group;
+        // the shortcuts still work and Help › Keyboard Shortcuts lists them.
         for number in 1...9 {
             let item = window.addItem(
                 withTitle: number == 9 ? "Show Last Tab" : "Show Tab \(number)",
                 action: #selector(WorkspaceWindowController.selectTabByNumber(_:)), keyEquivalent: "\(number)")
             item.tag = number
+            hideCommand(item)
         }
-        window.addItem(.separator())
         for number in 1...9 {
             let item = window.addItem(
                 withTitle: "Show Tab Group \(number)",
                 action: #selector(WorkspaceWindowController.selectTabGroupByNumber(_:)), keyEquivalent: "\(number)")
             item.keyEquivalentModifierMask = [.command, .shift]
             item.tag = number
+            hideCommand(item)
         }
-        window.addItem(.separator())
         // ⌃⌘A: free in DESIGN §9, in Ghostty's macOS defaults and in macOS.
         window.addItem(withTitle: "Next Pane Needing Attention",
                        action: #selector(AppDelegate.showNextPaneNeedingAttention(_:)), keyEquivalent: "a")
@@ -249,6 +253,13 @@ enum MainMenu {
     /// A second shortcut for a command shown once: hidden, but its key
     /// equivalent still works.
     private static func hideAlternate(_ item: NSMenuItem) {
+        item.isHidden = true
+        item.allowsKeyEquivalentWhenHidden = true
+    }
+
+    /// A command kept out of the menus: hidden, its key equivalent still
+    /// works, and the shortcut table lists it by its own title.
+    private static func hideCommand(_ item: NSMenuItem) {
         item.isHidden = true
         item.allowsKeyEquivalentWhenHidden = true
     }

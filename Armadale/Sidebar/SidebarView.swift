@@ -10,7 +10,9 @@ enum SidebarItem: Hashable {
 
 /// The app-global sidebar (DESIGN §1): every workspace, its tab groups, and
 /// their tabs, the same in every window. Workspace and tab group rows count
-/// their panes needing attention; a tab needing attention shows ◐. The current window's workspace
+/// their panes needing attention; a tab needing attention shows ◐; the
+/// current workspace's tab group rows end in their ⇧⌘N shortcut
+/// (``SidebarShortcut``). The current window's workspace
 /// starts expanded. The List has no selection, so no row is ever
 /// highlighted and a click never gives the List the keyboard. The window's
 /// shown path (``SidebarShownPath``: its workspace, the tab group it shows,
@@ -48,7 +50,7 @@ struct SidebarView: View {
         List {
             ForEach(model.workspaces) { workspace in
                 DisclosureGroup(isExpanded: workspaceExpansion(workspace.id)) {
-                    ForEach(workspace.tabGroups) { group in
+                    ForEach(Array(workspace.tabGroups.enumerated()), id: \.element.id) { groupIndex, group in
                         DisclosureGroup(isExpanded: groupExpansion(group.id)) {
                             ForEach(group.tabs) { tab in
                                 let item = SidebarItem.tab(tab.id)
@@ -66,6 +68,8 @@ struct SidebarView: View {
                             let edit = rename.edit(of: item, on: .sidebar)
                             TabGroupRow(
                                 group: group,
+                                shortcut: workspace.id == currentWorkspaceID
+                                    ? SidebarShortcut.tabGroup(number: groupIndex + 1) : nil,
                                 attentionCount: registry.attention?.count(in: model.sessionIDs(ofTabGroup: group.id)) ?? 0,
                                 isShown: isShown(item),
                                 isAccented: isAccented(item),
@@ -320,8 +324,21 @@ private struct WorkspaceRow: View {
     }
 }
 
+/// The shortcut shown at the end of a tab group row (owner's decision,
+/// October 30, 2026, in place of the group's tab count): ⇧⌘N for the
+/// first nine groups of the window's own workspace, since ⇧⌘N acts on
+/// the key window's workspace (`selectTabGroupByNumber`).
+enum SidebarShortcut {
+    static func tabGroup(number: Int) -> String? {
+        (1...9).contains(number) ? "⇧⌘\(number)" : nil
+    }
+}
+
 private struct TabGroupRow<Menu: View>: View {
     let group: TabGroup
+    /// ⇧⌘N, shown after the name; nil for other workspaces' groups and
+    /// beyond the ninth.
+    let shortcut: String?
     /// Panes of the group needing attention.
     let attentionCount: Int
     let isShown: Bool
@@ -350,9 +367,11 @@ private struct TabGroupRow<Menu: View>: View {
             }
             Spacer(minLength: 4)
             AttentionCount(count: attentionCount)
-            Text("\(group.tabs.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+            if let shortcut {
+                Text(shortcut)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
         .background {
             if isTargeted {

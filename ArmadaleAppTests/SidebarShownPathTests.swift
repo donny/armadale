@@ -50,6 +50,15 @@ struct SidebarShownPathTests {
             .workspace(workspace), in: model, currentWorkspaceID: gone, isWindowActive: true))
     }
 
+    /// Tab group rows show ⇧⌘1…⇧⌘9 (owner's decision, October 30, 2026),
+    /// nothing from the tenth group on.
+    @Test func tabGroupRowsShowTheirShortcut() {
+        #expect(SidebarShortcut.tabGroup(number: 1) == "⇧⌘1")
+        #expect(SidebarShortcut.tabGroup(number: 9) == "⇧⌘9")
+        #expect(SidebarShortcut.tabGroup(number: 10) == nil)
+        #expect(SidebarShortcut.tabGroup(number: 0) == nil)
+    }
+
     @Test func theShownPathIsSemiboldAndTheRestRegular() {
         #expect(SidebarShownPath.font(isShown: true) == Font.body.weight(.semibold))
         #expect(SidebarShownPath.font(isShown: false) == Font.body.weight(.regular))

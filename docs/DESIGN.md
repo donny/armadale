@@ -73,6 +73,10 @@ tab) is in semibold.
 Clicking another workspace brings that window to front, or opens it if its
 window is closed. Under a workspace: tab groups, and under each tab group its
 tabs. Panes are not listed; a tab row shows a status summary of its panes.
+A tab group row of the current window's workspace ends in its shortcut,
+⇧⌘1…⇧⌘9 for the first nine groups (owner's decision, October 30, 2026,
+in place of the group's tab count; other workspaces' groups show nothing
+there, since ⇧⌘N acts on the key window's workspace).
 
 Each tab row carries a status glyph:
 
@@ -2452,7 +2456,12 @@ so the shortcuts appear in the menus and work whatever has focus, and keys
 not bound there reach the terminal (since step 5 the table shown in the
 app, Help › Keyboard Shortcuts, is generated from these menu items). ⌃Tab / ⌃⇧Tab and ⌘+ are hidden
 alternates (`allowsKeyEquivalentWhenHidden`) of ⇧⌘] / ⇧⌘[ and ⌘=. ⌘9 goes
-to the last tab, ⇧⌘9 to the ninth tab group. ⌃⌘ arrows move the nearest
+to the last tab, ⇧⌘9 to the ninth tab group. Show Tab 1…8, Show Last
+Tab and Show Tab Group 1…9 are hidden commands of the Window menu
+(owner's decision, October 30, 2026: eighteen rows crowded it; the tab
+bar shows ⌘N and the sidebar ⇧⌘N instead); their key equivalents work
+and the table lists them, but as they are not visible menu titles,
+rebinding them in System Settings › App Shortcuts was not checked. ⌃⌘ arrows move the nearest
 divider by 5 % of its split (`moveDivider`). ⌘= / ⌘- / ⌘0 change the font
 size of every pane; since step 5 the size is the stored Appearance
 setting, so it persists across launches. ⌘, opens Settings (step 5).

@@ -18,9 +18,11 @@ enum ShortcutTable {
     /// Every menu item Armadale created (``MainMenu/isOwnItem(_:)``) with a
     /// key equivalent, by menu; items AppKit adds (Services, window tiling)
     /// are not Armadale's shortcuts and are left out. A hidden alternate
-    /// (``NSMenuItem/allowsKeyEquivalentWhenHidden``) is listed with the
-    /// visible item of the same action; numbered runs (⌘1…⌘8, ⇧⌘1…⇧⌘9) are
-    /// collapsed into one row.
+    /// (``NSMenuItem/allowsKeyEquivalentWhenHidden``, the same title and
+    /// action as the item before it) is listed with that visible item; a
+    /// hidden command with a title of its own (Show Tab 1…9, Show Tab
+    /// Group 1…9, kept out of the Window menu) is a row like any other;
+    /// numbered runs (⌘1…⌘8, ⇧⌘1…⇧⌘9) are collapsed into one row.
     static func rows(from mainMenu: NSMenu) -> [Row] {
         var entries: [Entry] = []
         for top in mainMenu.items {
@@ -54,11 +56,12 @@ enum ShortcutTable {
             }
             guard MainMenu.isOwnItem(item), !item.keyEquivalent.isEmpty, !item.isSeparatorItem else { continue }
             let shortcut = display(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask)
-            if item.isHidden {
+            if item.isHidden,
+               let index = entries.lastIndex(where: {
+                   $0.menu == name && $0.action == item.action && $0.command == item.title
+               }) {
                 // An alternate binding of the command just listed.
-                if let index = entries.lastIndex(where: { $0.menu == name && $0.action == item.action }) {
-                    entries[index].shortcuts.append(shortcut)
-                }
+                entries[index].shortcuts.append(shortcut)
                 continue
             }
             entries.append(Entry(

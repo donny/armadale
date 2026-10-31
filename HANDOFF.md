@@ -292,7 +292,22 @@ not fixed:** dragging a tab does not auto-scroll the track, so only
 visible tabs are drop targets. **Not checked live:** the attention
 reveal's scroll (same selection-change path), a sidebar toggle at the
 same moment as a selection change, a tab closed during a live resize,
-and the last fix in dark mode. Tests: 644, zero warnings.
+and the last fix in dark mode. Tests: 644, zero warnings. Committed as
+49fd474.
+
+October 30, 2026, evening (owner's request, coordinating session, through
+the gate, code-only): **the eighteen Show Tab / Show Tab Group items are
+out of the Window menu**, kept as hidden commands
+(`allowsKeyEquivalentWhenHidden`, `MainMenu.hideCommand`) so ⌘1…⌘9 and
+⇧⌘1…⇧⌘9 still work; `ShortcutTable` folds a hidden item into the one
+before it only when the title matches too, so these keep their rows
+under Help › Keyboard Shortcuts (tested). And **a tab group row of the
+current workspace ends in its ⇧⌘N shortcut** (`SidebarShortcut`, first
+nine groups, nothing for other workspaces' groups) instead of the tab
+count. `docs/DESIGN.md` sections 1 and 9. **Not checked live** (the Mac
+was not free): the Window menu's look without the items and the sidebar
+badge; the owner will see both on the next install. Tests: 646, zero
+warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

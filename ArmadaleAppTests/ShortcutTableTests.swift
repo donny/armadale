@@ -45,6 +45,28 @@ struct ShortcutTableTests {
         #expect(shortcut("Next Pane Needing Attention") == "⌃⌘A")
     }
 
+    /// Owner's decision, October 30, 2026: the eighteen numbered commands
+    /// are out of the Window menu but keep their shortcuts and their rows.
+    @Test func numberedTabCommandsAreHiddenButKeepTheirShortcutsAndRows() throws {
+        _ = NSApplication.shared
+        let menu = MainMenu.make(installsSpecialMenus: false)
+        let window = try #require(menu.items.first { $0.title == "Window" }?.submenu)
+        let numbered = window.items.filter { $0.title.hasPrefix("Show Tab ") || $0.title == "Show Last Tab" }
+        #expect(numbered.count == 18)
+        #expect(numbered.allSatisfy { $0.isHidden && $0.allowsKeyEquivalentWhenHidden && !$0.keyEquivalent.isEmpty })
+        let visible = window.items.filter { !$0.isHidden && !$0.isSeparatorItem }.map(\.title)
+        #expect(visible == [
+            "Minimize", "Zoom", "Show Next Tab", "Show Previous Tab", "Next Pane Needing Attention",
+            "Clear All Attention", "Bring All to Front",
+        ])
+        let separators = window.items.enumerated().filter { $0.element.isSeparatorItem }.map(\.offset)
+        #expect(!separators.contains { separators.contains($0 + 1) }, "no two separators in a row")
+        let table = ShortcutTable.rows(from: menu)
+        #expect(table.first { $0.command == "Show Tab 1–8" }?.shortcut == "⌘1…⌘8")
+        #expect(table.first { $0.command == "Show Last Tab" }?.shortcut == "⌘9")
+        #expect(table.first { $0.command == "Show Tab Group 1–9" }?.shortcut == "⇧⌘1…⇧⌘9")
+    }
+
     @Test func everyRowIsInAMenuAndHiddenAlternatesAreNotRowsOfTheirOwn() {
         let table = rows()
         #expect(table.count == Set(table.map(\.id)).count)
