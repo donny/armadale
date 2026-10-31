@@ -173,11 +173,13 @@ final class SessionRegistry {
         let remoteBackend = session.remoteHostID.flatMap { remoteBackend(for: $0) }
         var makeOutputFilter = runtime.makeOutputFilter
         if session.remoteHostID != nil { makeOutputFilter = { ZmxOutputFilter() } }
+        let paneThemeID = model.pane(showing: sessionID)?.themeID
         let controller = SessionController(
             session: session,
             backend: remoteBackend ?? runtime.backend,
             makeSurface: {
-                factory.makeSurface(appearance: settings.terminalAppearance(for: NSApp.effectiveAppearance))
+                factory.makeSurface(appearance: settings.terminalAppearance(
+                    for: NSApp.effectiveAppearance, paneThemeID: paneThemeID))
             },
             makeOutputFilter: makeOutputFilter)
         controller.delegate = self
@@ -186,7 +188,9 @@ final class SessionRegistry {
             // Never reached through the local backend.
             if remoteBackend == nil { controller.markUnavailable(reason: unreachableHostReason(for: session)) }
         }
-        let pane = PaneView(controller: controller, settings: settings, rendererID: factory.id)
+        let pane = PaneView(
+            controller: controller, settings: settings, rendererID: factory.id,
+            theme: .session(of: controller, in: model))
         pane.titleProvider = { [weak self, weak controller] in
             guard let self, let controller else { return "Shell" }
             return self.displayName(of: controller.session)

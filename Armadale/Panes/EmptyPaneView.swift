@@ -1,6 +1,7 @@
 import AppKit
 import ArmadaleCore
 import SwiftUI
+import TerminalSurface
 
 /// An empty pane (no session yet): the New Session chooser
 /// (``NewSessionPaneView``) over the terminal theme's background, with the
@@ -19,6 +20,9 @@ import SwiftUI
 final class EmptyPaneView: NSView {
     let chooser: NewSessionChooser
     private let settings: AppSettings
+    /// The pane's own theme (DESIGN §8, "Pane context menu"): its
+    /// background, and the menu's check mark.
+    private let theme: PaneThemeBinding
     private let hosting: NSHostingView<NewSessionPaneView>
     private let focusOverlay = PassThroughView()
     private var appearanceObservation: Task<Void, Never>?
@@ -32,9 +36,10 @@ final class EmptyPaneView: NSView {
         }
     }
 
-    init(chooser: NewSessionChooser, settings: AppSettings) {
+    init(chooser: NewSessionChooser, settings: AppSettings, theme: PaneThemeBinding = .detached) {
         self.chooser = chooser
         self.settings = settings
+        self.theme = theme
         hosting = NSHostingView(rootView: NewSessionPaneView(chooser: chooser))
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         wantsLayer = true
@@ -93,6 +98,44 @@ final class EmptyPaneView: NSView {
         }
     }
 
+    // MARK: Context menu
+
+    /// A Control-click without Command (``ContextClick``)
+    /// anywhere in the pane lands on the pane itself rather than on the
+    /// chooser (whose buttons and background tap would take it as a click),
+    /// so it opens the menu as a right-click does.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        guard hit != nil, Self.takesContextClick(NSApp.currentEvent) else { return hit }
+        return self
+    }
+
+    /// Whether `event` is a press the pane takes for its menu instead of the
+    /// chooser: a Control-click without Command.
+    static func takesContextClick(_ event: NSEvent?) -> Bool {
+        ContextClick.isSecondaryClick(event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard Self.takesContextClick(event) else { return super.mouseDown(with: event) }
+        rightMouseDown(with: event)
+    }
+
+    /// A right-click that the chooser leaves to its superview, as on a
+    /// terminal pane: keyboard focus, then the pane's menu.
+    override func rightMouseDown(with event: NSEvent) {
+        focusPane()
+        guard let menu = menu(for: event) else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let theme = theme
+        return PaneMenu.make(
+            PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes),
+            actions: PaneMenu.Actions(chooseTheme: { theme.choose($0) }))
+    }
+
     // MARK: Appearance
 
     private func updateFocusOverlay() {
@@ -121,8 +164,11 @@ final class EmptyPaneView: NSView {
     /// The terminal theme's background, so an empty pane sits among
     /// terminals like one of them.
     private func applyAppearance() {
+        let paneThemeID = theme.current()
+        matchAppearance(toPaneTheme: settings.paneTheme(paneThemeID))
         updateFocusOverlay()
-        let background = settings.terminalAppearance(for: effectiveAppearance).theme.background
+        let background = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID)
+            .theme.background
         layer?.backgroundColor = CGColor(
             srgbRed: CGFloat(background.red) / 255, green: CGFloat(background.green) / 255,
             blue: CGFloat(background.blue) / 255, alpha: 1)
@@ -130,9 +176,12 @@ final class EmptyPaneView: NSView {
 
     private func observeAppearance() {
         let settings = settings
+        let theme = theme
         appearanceObservation = Task { [weak self] in
-            var last: AppSettings.AppearanceChange?
-            for await change in Observations({ settings.appearanceChange }) {
+            var last: PaneAppearanceChange?
+            for await change in Observations({
+                PaneAppearanceChange(settings: settings.appearanceChange, paneThemeID: theme.current())
+            }) {
                 guard let self else { return }
                 if last != nil, last != change { self.applyAppearance() }
                 last = change

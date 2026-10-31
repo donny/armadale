@@ -150,13 +150,24 @@ public struct Tab: Identifiable, Codable, Sendable, Hashable {
 /// session is started in it (``AppModel/startSession(in:request:)``;
 /// DESIGN §1, §8 "New sessions"). Saved without the key when empty, and a
 /// file without it decodes as empty.
+///
+/// A pane may also have its own terminal theme (``themeID``, chosen from the
+/// pane's context menu; DESIGN §8 "Pane context menu"). It belongs to the
+/// pane, not the session, so it survives a respawn, a relaunch and any move
+/// of the pane's tab. Saved without the key when unset, like `sessionID`,
+/// so older files load unchanged.
 public struct Pane: Identifiable, Codable, Sendable, Hashable {
     public let id: PaneID
     public var sessionID: SessionID?
+    /// The pane's own theme (a theme catalog ID such as `builtin.dracula`),
+    /// shown whatever the system appearance; `nil` follows the app's
+    /// Settings choice. An ID the app does not know is shown as `nil`.
+    public var themeID: String?
 
-    public init(id: PaneID = .generate(), sessionID: SessionID? = nil) {
+    public init(id: PaneID = .generate(), sessionID: SessionID? = nil, themeID: String? = nil) {
         self.id = id
         self.sessionID = sessionID
+        self.themeID = themeID
     }
 
     /// Whether no session has been started in this pane yet.

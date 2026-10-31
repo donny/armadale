@@ -267,7 +267,8 @@ final class ContentViewController: NSViewController {
     private func makeEmptyPane(_ paneID: PaneID) -> EmptyPaneView {
         EmptyPaneView(
             chooser: NewSessionChooser(model: model, paneID: paneID, actions: actions),
-            settings: registry.settings)
+            settings: registry.settings,
+            theme: .pane(paneID, in: model))
     }
 
     // MARK: From the view to the model

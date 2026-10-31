@@ -1,4 +1,5 @@
 import AppKit
+import ArmadaleCore
 import SwiftUI
 import TerminalSurface
 
@@ -7,6 +8,8 @@ import TerminalSurface
 /// attach).
 struct AppearanceSettingsView: View {
     let settings: AppSettings
+    /// Where panes keep their own theme; removing a theme clears it there.
+    var model: AppModel?
     @Bindable private var preferences: Preferences
     private let themes: ThemeCatalog
     @State private var families = FontChoice.monospacedFamilies()
@@ -17,8 +20,9 @@ struct AppearanceSettingsView: View {
     /// Follows the system's light / dark appearance (the window's).
     @Environment(\.colorScheme) private var colorScheme
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, model: AppModel? = nil) {
         self.settings = settings
+        self.model = model
         self.preferences = settings.preferences
         self.themes = settings.themes
     }
@@ -201,8 +205,7 @@ struct AppearanceSettingsView: View {
     /// Removes an imported theme; choices that used it go back to the defaults.
     private func removeTheme(_ entry: ThemeEntry) {
         do {
-            try themes.removeUserTheme(id: entry.id)
-            preferences.forgetTheme(entry.id)
+            try settings.removeUserTheme(entry.id, model: model)
         } catch {
             importReport = ImportReport(
                 title: "“\(entry.name)” could not be removed", message: error.localizedDescription)

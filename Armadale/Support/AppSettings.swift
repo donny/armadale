@@ -1,4 +1,5 @@
 import AppKit
+import ArmadaleCore
 import SwiftTermSurface
 import TerminalSurface
 
@@ -18,17 +19,42 @@ struct AppSettings {
         themes: ThemeCatalog(directory: ThemeCatalog.userThemesDirectory()),
         surfaces: .standard)
 
-    /// The terminal appearance for a view shown in `appearance` (light or dark).
-    func terminalAppearance(for appearance: NSAppearance) -> TerminalAppearance {
-        terminalAppearance(isDark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+    /// The terminal appearance for a view shown in `appearance` (light or
+    /// dark). `paneThemeID` is a pane's own theme (``Pane/themeID``, DESIGN §8
+    /// "Pane context menu"): when the catalog knows it, it is used whatever
+    /// the appearance; when it is `nil` or unknown (a theme removed outside
+    /// the app, a typo in the state file), the Settings choice for the
+    /// appearance is used.
+    func terminalAppearance(for appearance: NSAppearance, paneThemeID: String? = nil) -> TerminalAppearance {
+        terminalAppearance(isDark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua, paneThemeID: paneThemeID)
     }
 
-    func terminalAppearance(isDark: Bool) -> TerminalAppearance {
+    func terminalAppearance(isDark: Bool, paneThemeID: String? = nil) -> TerminalAppearance {
         TerminalAppearance(
             fontName: preferences.fontName,
             fontSize: preferences.fontSize,
-            theme: themes.theme(id: preferences.themeID(isDark: isDark), isDark: isDark),
+            theme: theme(isDark: isDark, paneThemeID: paneThemeID),
             cursor: TerminalCursorStyle(shape: preferences.cursorShape, blinks: preferences.cursorBlinks))
+    }
+
+    /// The theme a pane shows: its own when the catalog knows it, else the
+    /// Settings choice for the appearance.
+    func theme(isDark: Bool, paneThemeID: String? = nil) -> TerminalTheme {
+        paneTheme(paneThemeID) ?? themes.theme(id: preferences.themeID(isDark: isDark), isDark: isDark)
+    }
+
+    /// A pane's own theme, if it has one the catalog knows.
+    func paneTheme(_ paneThemeID: String?) -> TerminalTheme? {
+        paneThemeID.flatMap { themes.entry(id: $0)?.theme }
+    }
+
+    /// Settings › Appearance › Remove: deletes an imported theme; the
+    /// Settings choices naming it go back to the defaults and the panes
+    /// using it (``AppModel/forgetTheme(_:)``) back to the Settings choice.
+    func removeUserTheme(_ id: String, model: AppModel?) throws {
+        try themes.removeUserTheme(id: id)
+        preferences.forgetTheme(id)
+        model?.forgetTheme(id)
     }
 
     /// The renderer new surfaces are made with.

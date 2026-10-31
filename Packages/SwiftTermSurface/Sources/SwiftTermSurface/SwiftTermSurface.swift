@@ -13,7 +13,7 @@ import TerminalSurface
 public final class SwiftTermSurface: TerminalSurface {
     public weak var delegate: (any TerminalSurfaceDelegate)?
 
-    private let terminalView: TerminalView
+    private let terminalView: HostTerminalView
     private let bridge: DelegateBridge
     /// The appearance last applied.
     public private(set) var appearance: TerminalAppearance
@@ -25,7 +25,7 @@ public final class SwiftTermSurface: TerminalSurface {
 
     /// Creates a surface with `appearance` applied.
     public init(appearance: TerminalAppearance = .default) {
-        terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        terminalView = HostTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         bridge = DelegateBridge()
         self.appearance = appearance
         bridge.owner = self
@@ -224,6 +224,69 @@ public final class SwiftTermSurface: TerminalSurface {
         case (.bar, true): .blinkBar
         case (.bar, false): .steadyBar
         }
+    }
+}
+
+/// SwiftTerm's view with the host's context-menu rules (DESIGN §8, "Pane
+/// context menu"; ``TerminalSurface``'s contract):
+///
+/// - **Shift + right-click** is never reported to the program, even one that
+///   asked to see Shift with the mouse (XTSHIFTESCAPE, which SwiftTerm's own
+///   Shift bypass honours): it goes straight to the next responder, the
+///   host's pane view, which opens its menu.
+/// - **Control-click** (without Command) is a right-click, as everywhere on
+///   macOS: the press, drags and release are handed on as right-button
+///   events without the Control flag, so a program that asked for the
+///   mouse gets a right button, and otherwise the next responder gets the
+///   right-click. A click with Command held stays SwiftTerm's (⌘-click
+///   opens a link). The rules are ``ContextClick``'s, in `TerminalSurface`.
+///
+/// Every other event is SwiftTerm's: a right-click goes to a program that
+/// asked for the mouse, and otherwise (SwiftTerm calls `super`, and NSView
+/// passes a right-click it has no menu for up the responder chain) to the
+/// pane.
+final class HostTerminalView: TerminalView {
+    /// Whether the left-button press under way began as a Control-click,
+    /// so its drags and release are right-button events too.
+    private var pressIsSecondaryClick = false
+
+    override func rightMouseDown(with event: NSEvent) {
+        if ContextClick.bypassesProgram(event.modifierFlags) {
+            nextResponder?.rightMouseDown(with: event)
+        } else {
+            super.rightMouseDown(with: event)
+        }
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        if ContextClick.bypassesProgram(event.modifierFlags) {
+            nextResponder?.rightMouseUp(with: event)
+        } else {
+            super.rightMouseUp(with: event)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pressIsSecondaryClick = ContextClick.isSecondaryClick(event.modifierFlags)
+        guard pressIsSecondaryClick, let right = ContextClick.rightButtonEvent(.rightMouseDown, from: event) else {
+            pressIsSecondaryClick = false
+            return super.mouseDown(with: event)
+        }
+        rightMouseDown(with: right)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard pressIsSecondaryClick, let right = ContextClick.rightButtonEvent(.rightMouseDragged, from: event) else {
+            return super.mouseDragged(with: event)
+        }
+        rightMouseDragged(with: right)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressIsSecondaryClick else { return super.mouseUp(with: event) }
+        pressIsSecondaryClick = false
+        guard let right = ContextClick.rightButtonEvent(.rightMouseUp, from: event) else { return }
+        rightMouseUp(with: right)
     }
 }
 

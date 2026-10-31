@@ -196,7 +196,7 @@ extension PersistedState {
                 issues.append("Dropped duplicate pane \(pane.id)")
             } else if let session = pane.sessionID, !knownSessions.contains(session) {
                 issues.append("Emptied pane \(pane.id) whose session \(session) is missing")
-                panes.append(Pane(id: pane.id))
+                panes.append(Pane(id: pane.id, themeID: pane.themeID))
             } else {
                 panes.append(pane)
             }

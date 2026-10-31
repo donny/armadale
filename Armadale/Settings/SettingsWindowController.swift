@@ -63,7 +63,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
         for tab in Tab.allCases {
             let root: AnyView = switch tab {
             case .general: AnyView(GeneralSettingsView(preferences: settings.preferences))
-            case .appearance: AnyView(AppearanceSettingsView(settings: settings))
+            case .appearance: AnyView(AppearanceSettingsView(settings: settings, model: model))
             case .profiles: AnyView(ProfilesSettingsView(model: model))
             case .hosts: AnyView(HostsSettingsView(model: model, tools: hostTools))
             case .favorites: AnyView(FavoritesSettingsView(model: model) { [weak tabs] in

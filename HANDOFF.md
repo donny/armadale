@@ -307,7 +307,46 @@ nine groups, nothing for other workspaces' groups) instead of the tab
 count. `docs/DESIGN.md` sections 1 and 9. **Not checked live** (the Mac
 was not free): the Window menu's look without the items and the sidebar
 badge; the owner will see both on the next install. Tests: 646, zero
-warnings.
+warnings. Committed as 2b64971.
+
+October 30, 2026, evening (owner's decision, implementer → reviewer
+loop): **a right-click context menu per pane, with a Theme submenu that
+sets that pane's theme.** `Pane.themeID` (saved only when set, missing
+key decodes nil, no schema bump; older builds read the file and drop the
+themes on their next save), `AppModel.setTheme(_:forPane:)` and
+`forgetTheme(_:)` (a removed user theme clears panes using it, wired
+into Settings › Appearance › Remove through `AppSettings.removeUserTheme`).
+One explicit theme per pane for both appearances; Default follows
+Settings. `PaneMenu.make` (`Panes/PaneMenu.swift`) is the pure builder
+future pane items go into; `PaneThemeBinding` ties a pane to the model.
+Click rules are `ContextClick` in `TerminalSurface`, used by
+`HostTerminalView` (SwiftTermSurface subclass; the SwiftTerm checkout is
+untouched): a right-click goes to a program that asked for the mouse,
+otherwise to the pane; Shift + right-click always opens the pane menu;
+Control-click (without Command) is a right-click and reaches such a
+program as a right button; ⌘-click is left to SwiftTerm. A themed pane
+draws its chooser and placeholder (and, cosmetically, its menu) in the
+appearance suiting the theme. `docs/DESIGN.md` sections 2, 8 ("Pane
+context menu") and 11. **Owner decision pending** (DESIGN names the
+one-line alternative): Control-click reaching a mouse-aware program as a
+right button means it never sees Control+left-click (Emacs's buffer
+menu). **Checked live** by the implementer (test build, isolated state,
+dark Mac): menu on terminal, padding, placeholder and empty pane;
+Dracula on one of two panes; Default; Settings theme changes only
+Default panes; import and remove of a Ghostty theme; survival across
+respawn, a sidebar tab move and quit/relaunch; forced light appearance;
+vim with mouse=a (plain right-click and Control-click to vim, Shift +
+right-click to the menu). The reviewer reproduced the menu, the themes,
+vim, the mouse bytes in SGR and X10 modes and SIGTERM persistence, then
+**stopped its live pass at about 20:15: a mis-aimed Control-drag landed
+on the desktop** (Finder frontmost on the guard check) and Finder made
+`~/Desktop/Pasted 2026-10-30 at 8.14.53 PM.textClipping` from stale drag
+data; the reviewer moved it to the Trash. **Not re-verified by the
+reviewer:** ⌘Q through the quit alert then relaunch, respawn, theme
+import/remove, forced light, the Session Ended placeholder, Control-click
+and Control-drag in a plain shell, Control-click on an empty pane
+(`NSApp.currentEvent` path, not unit-testable), attention colours on a
+themed pane. Tests: 674, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

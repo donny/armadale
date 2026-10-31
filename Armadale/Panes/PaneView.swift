@@ -5,7 +5,8 @@ import SwiftUI
 import TerminalSurface
 
 /// One pane: the session's terminal view filling it, and the *Session
-/// Ended* placeholder over it once the session is over.
+/// Ended* placeholder over it once the session is over. A right-click in it
+/// opens the pane's context menu (``PaneMenu``).
 ///
 /// A `PaneView` belongs to its ``SessionController`` for the session's whole
 /// life (the registry keeps both) and is only ever reparented, so a
@@ -16,6 +17,9 @@ final class PaneView: NSView {
     let controller: SessionController
     /// Where the terminal's appearance comes from.
     let settings: AppSettings
+    /// The pane's own theme, which overrides the Settings choice
+    /// (DESIGN §8, "Pane context menu").
+    let theme: PaneThemeBinding
     /// The renderer of the surface shown (``SurfaceFactory/id``).
     private(set) var rendererID: String
     /// The renderer the surface is replaced by at the next attach, if any.
@@ -60,9 +64,10 @@ final class PaneView: NSView {
     /// is collapsed.
     private static let padding = NSEdgeInsets(top: 4, left: 10, bottom: 10, right: 10)
 
-    init(controller: SessionController, settings: AppSettings, rendererID: String) {
+    init(controller: SessionController, settings: AppSettings, rendererID: String, theme: PaneThemeBinding = .detached) {
         self.controller = controller
         self.settings = settings
+        self.theme = theme
         self.rendererID = rendererID
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         wantsLayer = true
@@ -102,9 +107,11 @@ final class PaneView: NSView {
         }
         pendingRendererID = factory.id
         let settings = settings
+        let theme = theme
         controller.replaceSurfaceOnNextAttach {
             // The pane applies its own appearance once the surface is in.
-            factory.makeSurface(appearance: settings.terminalAppearance(for: NSApp.effectiveAppearance))
+            factory.makeSurface(appearance: settings.terminalAppearance(
+                for: NSApp.effectiveAppearance, paneThemeID: theme.current()))
         }
     }
 
@@ -172,9 +179,36 @@ final class PaneView: NSView {
         return responder.isDescendant(of: self)
     }
 
-    /// A click on the padding around the terminal focuses it too.
+    /// A click on the padding around the terminal focuses it too; a
+    /// Control-click there is a right-click.
     override func mouseDown(with event: NSEvent) {
+        if ContextClick.isSecondaryClick(event) { return showMenu(for: event) }
         focusTerminal()
+    }
+
+    // MARK: Context menu
+
+    /// A right-click on the padding, on the placeholder, or on the terminal
+    /// when the program did not take it (the terminal view passes it up the
+    /// responder chain, Shift + right-click always; ``TerminalSurface``):
+    /// the pane takes keyboard focus, as a click would, and shows its menu.
+    override func rightMouseDown(with event: NSEvent) {
+        showMenu(for: event)
+    }
+
+    private func showMenu(for event: NSEvent) {
+        focusTerminal()
+        guard let menu = menu(for: event) else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    /// The pane's context menu, built fresh each time from the pane's
+    /// theme and the theme catalog.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let theme = theme
+        return PaneMenu.make(
+            PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes),
+            actions: PaneMenu.Actions(chooseTheme: { theme.choose($0) }))
     }
 
     private func updateFocusOverlay() {
@@ -202,8 +236,10 @@ final class PaneView: NSView {
     }
 
     private func applyAppearance() {
+        let paneThemeID = theme.current()
+        matchAppearance(toPaneTheme: settings.paneTheme(paneThemeID))
         updateFocusOverlay()
-        let appearance = settings.terminalAppearance(for: effectiveAppearance)
+        let appearance = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID)
         controller.surface.apply(appearance)
         let background = appearance.theme.background
         layer?.backgroundColor = CGColor(
@@ -224,12 +260,16 @@ final class PaneView: NSView {
     }
 
     /// Every appearance setting (font, size from ⌘= / ⌘- / ⌘0, theme,
-    /// cursor) applies at once to every pane, shown or not.
+    /// cursor) and the pane's own theme apply at once to every pane, shown
+    /// or not.
     private func observeAppearance() {
         let settings = settings
+        let theme = theme
         appearanceObservation = Task { [weak self] in
-            var last: AppSettings.AppearanceChange?
-            for await change in Observations({ settings.appearanceChange }) {
+            var last: PaneAppearanceChange?
+            for await change in Observations({
+                PaneAppearanceChange(settings: settings.appearanceChange, paneThemeID: theme.current())
+            }) {
                 guard let self else { return }
                 if last != nil, last != change { self.applyAppearance() }
                 last = change
@@ -299,6 +339,26 @@ final class PaneView: NSView {
             if let window, window.firstResponder === controller.surface.view { window.makeFirstResponder(self) }
         }
     }
+}
+
+extension NSView {
+    /// A pane with its own theme draws its controls (the *Session Ended*
+    /// placeholder, the New Session chooser) in the system appearance that
+    /// suits the theme's background, dark or light, so a light theme in dark
+    /// mode does not get a dark card with faded text; without one the pane
+    /// follows the window (DESIGN §8, "Pane context menu"). Only set when it
+    /// changes: setting it re-applies the pane's appearance.
+    func matchAppearance(toPaneTheme theme: TerminalTheme?) {
+        let wanted = theme.flatMap { NSAppearance(named: $0.background.luminance < 0.4 ? .darkAqua : .aqua) }
+        if appearance?.name != wanted?.name { appearance = wanted }
+    }
+}
+
+/// What a pane's appearance is made from: the app's settings and the
+/// pane's own theme. Re-applied when it changes.
+struct PaneAppearanceChange: Hashable, Sendable {
+    var settings: AppSettings.AppearanceChange
+    var paneThemeID: String?
 }
 
 /// A view that draws but never takes mouse events, so clicks reach the

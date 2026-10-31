@@ -531,6 +531,51 @@ public final class AppModel {
         return .closedPane(paneID, in: tab.id)
     }
 
+    // MARK: Pane themes
+
+    /// Gives a pane its own terminal theme (DESIGN §8, "Pane context menu"),
+    /// or with `nil` (or a blank ID) returns it to the app's Settings choice.
+    /// The ID is stored with surrounding whitespace trimmed; the app shows
+    /// an unknown one as the Settings choice. Does nothing, and saves
+    /// nothing, when the pane is unknown or already has that theme.
+    public func setTheme(_ themeID: String?, forPane paneID: PaneID) {
+        let themeID = themeID
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        guard let path = path(ofPane: paneID),
+              let index = workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].panes
+                  .firstIndex(where: { $0.id == paneID }),
+              workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].panes[index].themeID != themeID
+        else { return }
+        workspaces[path.workspace].tabGroups[path.tabGroup].tabs[path.tab].panes[index].themeID = themeID
+        didChange()
+    }
+
+    /// A theme was removed (Settings › Appearance › Remove): every pane
+    /// naming it, compared case-insensitively as theme IDs are, goes back to
+    /// the Settings choice. Saves once, and only if a pane changed.
+    public func forgetTheme(_ themeID: String) {
+        let key = themeID.lowercased()
+        var changed = false
+        for w in workspaces.indices {
+            for g in workspaces[w].tabGroups.indices {
+                for t in workspaces[w].tabGroups[g].tabs.indices {
+                    for p in workspaces[w].tabGroups[g].tabs[t].panes.indices
+                    where workspaces[w].tabGroups[g].tabs[t].panes[p].themeID?.lowercased() == key {
+                        workspaces[w].tabGroups[g].tabs[t].panes[p].themeID = nil
+                        changed = true
+                    }
+                }
+            }
+        }
+        if changed { didChange() }
+    }
+
+    /// The pane record bound to `session`, if any.
+    public func pane(showing session: SessionID) -> Pane? {
+        place(of: session).flatMap { pane($0.pane) }
+    }
+
     /// Splits the focused pane of the workspace's selected tab.
     @discardableResult
     public func splitFocusedPane(axis: Axis, in workspaceID: WorkspaceID) -> PaneID? {
