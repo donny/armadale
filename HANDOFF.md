@@ -405,7 +405,33 @@ menu, mouse bytes reaching `cat -v` for right, Control and left clicks,
 typing after every header action, the three review fixes. **Not checked
 live:** the *Disconnected* placeholder, Increase Contrast, dark mode for
 the review fixes, release on the respawn path (the close path is
-tested). Tests: 675, zero warnings.
+tested). Tests: 675, zero warnings. Committed as 8f601d1.
+
+October 31, 2026, mid-morning (owner's request, implementer → reviewer
+loop): **Split Right and Split Down in the pane menu and as header
+buttons.** The pane menu is Split Right ⌘D, Split Down ⇧⌘D, separator,
+Theme; the items split the pane the menu was opened for
+(`PaneThemeBinding.split(axis)`, `WorkspaceActions.split(pane:axis:)`,
+which records the pane's session as last focused so the New Session
+dialog takes its directory as after ⌘D; the registry finds the pane's
+window from the model, wired by the app delegate, and falls back to the
+model without one). The header shows Split Right, Split Down and "…" as
+three 24 × 20 pt buttons at its trailing end (text width = header width
+− 116 pt with a glyph); the split buttons hide below a 156 pt header,
+where the menu still offers both splits. The owner reversed the earlier
+"no split buttons" decision; zoom and close stay out of the header.
+DESIGN §8 (both bullets). **Checked live** (implementer and reviewer,
+light): buttons and tooltips on terminal and empty panes, Split Down
+from an unfocused pane's button splitting that pane with the chooser
+focused in the new pane, both items from the right-click menu with the
+shortcuts shown, ⌘D with the menu open splitting once, typing after,
+truncation beside three buttons in a 417 pt pane, headers of about
+105 pt hiding the split buttons cleanly, the rightmost "…" menu inside
+the window. **Not checked live:** dark mode, the dialog's directory after
+a split (unit-tested), a pane moved to another window. Review's three
+low findings fixed by the coordinator: DESIGN wording on the shortcuts,
+`StatusGlyph.width` shared with `PaneCardStyle.glyphWidth`, the release
+test now exercises the split closures. Tests: 682, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

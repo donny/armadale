@@ -39,14 +39,19 @@ struct PaneHeaderModel: Equatable, Sendable {
 }
 
 /// The header row of a pane card: status glyph, title, working directory,
-/// and the "…" button that opens the pane menu. Drawn in the pane's
-/// appearance, in the theme's foreground at reduced opacity.
+/// and at its trailing end the Split Right and Split Down buttons and the
+/// "…" button that opens the pane menu. Drawn in the pane's appearance, in
+/// the theme's foreground at reduced opacity.
 struct PaneHeaderView: View {
-    let model: PaneHeaderModel
+    var model: PaneHeaderModel
+    /// Whether the split buttons show (``PaneCardStyle/showsSplitButtons(headerWidth:)``);
+    /// "…" always does.
+    var showsSplitButtons = true
     /// The "…" button was pressed.
     var openMenu: () -> Void = {}
-
-    @State private var isHoveringButton = false
+    /// A split button was pressed: `.horizontal` is Split Right, `.vertical`
+    /// Split Down.
+    var split: (ArmadaleCore.Axis) -> Void = { _ in }
 
     private var title: some View {
         Text(model.title)
@@ -64,8 +69,9 @@ struct PaneHeaderView: View {
             if let status = model.status {
                 StatusGlyph(status: status)
             }
-            // The title and the directory share the width by
-            // ``PaneCardStyle/headerTextWidths(available:title:directory:)``.
+            // The title and the directory share the width the row leaves
+            // them (``PaneCardStyle/headerTextSpace(headerWidth:hasGlyph:showsSplitButtons:)``)
+            // by ``PaneCardStyle/headerTextWidths(available:title:directory:)``.
             HeaderTextLayout {
                 title
                 if let directory = model.shownDirectory {
@@ -80,23 +86,49 @@ struct PaneHeaderView: View {
                 }
             }
             Spacer(minLength: 0)
-            Button(action: openMenu) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: PaneCardStyle.menuButtonSize.width, height: PaneCardStyle.menuButtonSize.height)
-                    .contentShape(Rectangle())
+            HStack(spacing: PaneCardStyle.headerButtonSpacing) {
+                if showsSplitButtons {
+                    PaneHeaderButton(symbol: "rectangle.split.2x1", label: PaneMenu.splitRightTitle, foreground: foreground) {
+                        split(.horizontal)
+                    }
+                    PaneHeaderButton(symbol: "rectangle.split.1x2", label: PaneMenu.splitDownTitle, foreground: foreground) {
+                        split(.vertical)
+                    }
+                }
+                PaneHeaderButton(symbol: "ellipsis", label: "Pane Menu", foreground: foreground, action: openMenu)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(foreground.opacity(
-                isHoveringButton ? PaneCardStyle.menuButtonHoverOpacity : PaneCardStyle.menuButtonOpacity))
-            .onHover { isHoveringButton = $0 }
-            .help("Pane Menu")
-            .accessibilityLabel("Pane Menu")
         }
         .padding(.leading, PaneCardStyle.headerLeading)
         .padding(.trailing, PaneCardStyle.headerTrailing)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+    }
+}
+
+/// One of a header's buttons: a symbol in the theme's foreground at
+/// ``PaneCardStyle/headerButtonOpacity``, full strength under the pointer,
+/// with its label as tooltip.
+private struct PaneHeaderButton: View {
+    let symbol: String
+    let label: String
+    let foreground: Color
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: PaneCardStyle.headerButtonSize.width, height: PaneCardStyle.headerButtonSize.height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(foreground.opacity(
+            isHovering ? PaneCardStyle.headerButtonHoverOpacity : PaneCardStyle.headerButtonOpacity))
+        .onHover { isHovering = $0 }
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -134,8 +166,8 @@ struct HeaderTextLayout: Layout {
 
 /// Hosts a card's ``PaneHeaderView`` in a ``PaneView`` or ``EmptyPaneView``.
 /// The header is the pane's own, never the program's: a click on it focuses
-/// the pane (as a click on the padding does), the "…" button opens the pane
-/// menu below itself, and a right-click (or Control-click) anywhere on it
+/// the pane (as a click on the padding does), the split buttons split it,
+/// the "…" button opens the pane menu below itself, and a right-click (or Control-click) anywhere on it
 /// opens the same menu at the pointer. Nothing here reaches the terminal or
 /// the chooser below, which lie outside the header's frame.
 @MainActor
@@ -154,21 +186,43 @@ final class PaneHeaderHostingView: NSHostingView<PaneHeaderView> {
         NSMenu.popUpContextMenu(menu, with: event, for: view)
     }
 
+    /// Splits the pane (its ``PaneThemeBinding/split``): `.horizontal` is
+    /// Split Right, `.vertical` Split Down.
+    var splitPane: (ArmadaleCore.Axis) -> Void = { _ in }
+
     /// What the header shows; setting a different one redraws it.
     var model: PaneHeaderModel {
         get { rootView.model }
         set {
             guard newValue != rootView.model else { return }
-            rootView = PaneHeaderView(model: newValue, openMenu: rootView.openMenu)
+            var view = rootView
+            view.model = newValue
+            rootView = view
         }
     }
 
-    /// A header showing `model`, wired to its own menu button.
+    /// Whether the split buttons show; follows the header's width
+    /// (``PaneCardStyle/showsSplitButtons(headerWidth:)``).
+    var showsSplitButtons: Bool { rootView.showsSplitButtons }
+
+    /// A header showing `model`, wired to its own buttons.
     static func make(model: PaneHeaderModel) -> PaneHeaderHostingView {
         let header = PaneHeaderHostingView(rootView: PaneHeaderView(model: model))
         header.sizingOptions = []
-        header.rootView = PaneHeaderView(model: model) { [weak header] in header?.openMenuFromButton() }
+        header.rootView = PaneHeaderView(
+            model: model,
+            openMenu: { [weak header] in header?.openMenuFromButton() },
+            split: { [weak header] in header?.splitFromButton($0) })
         return header
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let shows = PaneCardStyle.showsSplitButtons(headerWidth: newSize.width)
+        guard shows != rootView.showsSplitButtons else { return }
+        var view = rootView
+        view.showsSplitButtons = shows
+        rootView = view
     }
 
     /// The "…" button: focus the pane, then the menu as a pull-down under
@@ -180,6 +234,13 @@ final class PaneHeaderHostingView: NSHostingView<PaneHeaderView> {
             inHeaderOf: bounds.size, menuWidth: menu.size.width, roomRightOfHeader: roomRightOfHeader)
         if !isFlipped { origin.y = bounds.height - origin.y }
         presentMenu(menu, origin, self)
+    }
+
+    /// A split button: focus the pane (as a click on the header does),
+    /// then split it, whichever pane was focused before.
+    func splitFromButton(_ axis: ArmadaleCore.Axis) {
+        focusPane()
+        splitPane(axis)
     }
 
     /// The width of the window's content right of this header's trailing

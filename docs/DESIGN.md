@@ -1642,7 +1642,15 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   `PaneMenu.make(_:actions:)` (`Panes/PaneMenu.swift`, tested):
   `PaneMenu.Inputs` holds what the items show and `PaneMenu.Actions` what
   they do, so a later pane item adds a field to each and a few lines to
-  the builder. Today it holds one item, **Theme**, a submenu: "Default"
+  the builder. It holds **Split Right** and **Split Down** (added October
+  31, 2026, at the owner's request; see "Pane cards" below), a separator,
+  then **Theme**. The split items show the Pane menu's shortcuts (⌘D,
+  ⇧⌘D, the same keys and modifiers; a test keeps the two equal; ⌘D with
+  the menu open splits once, seen in review) and split *the pane the menu
+  was opened for*
+  (`AppModel.splitPane(_:axis:)`, Split Right horizontal, Split Down
+  vertical), not whichever pane is focused; the rest is as ⌘D. Theme is a
+  submenu: "Default"
   first, a separator, the built-in themes in catalog order, then, if any,
   a separator and the imported themes; the pane's current choice is
   checked ("Default" when it has none, or when its ID is unknown).
@@ -1740,9 +1748,14 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   a pull-down below itself. A **right-click anywhere on the header** opens
   the same menu at the pointer; a click on the header focuses the pane as
   a click on the padding does; a double-click does nothing for now (a
-  pane has no title of its own to rename). No split, zoom or close
-  buttons in the header (owner's decision: the tab bar and the keyboard
-  have them). An empty pane's header shows
+  pane has no title of its own to rename). *Split buttons* (owner's
+  request, October 31, 2026, replacing the first decision of no buttons
+  but "…"): immediately left of "…", **Split Right**
+  (`rectangle.split.2x1`) and **Split Down** (`rectangle.split.1x2`), the
+  same size, opacity and hover as "…", with the tooltips "Split Right" and
+  "Split Down"; a click focuses the pane, as a click on the header does,
+  then splits that pane. Still no zoom or close buttons in the header
+  (the tab bar and the keyboard have them). An empty pane's header shows
   no glyph and the title "New Session"; a pane showing the *Session Ended*
   or *Disconnected* placeholder keeps its glyph and title, and the
   placeholder's card sits in the content area as now.
@@ -1789,7 +1802,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   and header too; the "Show pane headers" preference comes later; the
   numbers above (gutter 8, gap 8, radius 10, header 28) are judged live
   against the window's own corners and the native tab bar and adjusted
-  in the same change; no split, zoom or close buttons in the header.
+  in the same change; no zoom or close buttons in the header. (The first
+  decision said no split buttons either; later on October 31, 2026 the
+  owner asked for Split Right and Split Down buttons beside "…" and the
+  same two items at the top of the pane menu.)
   *As built (October 31, 2026).* The numbers stayed as agreed after the
   live checks in light and dark (they sit well against the window's
   rounded bottom corners and the 36 pt tab bar): gutter 8, gap 8, corner
@@ -1875,6 +1891,48 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   middle beside the directory in a 417 pt pane, a long directory
   truncated beside a short title, and the rightmost pane's menu ending at
   its button's trailing edge inside the window.
+  *Split buttons and items, as built (October 31, 2026).* The header's
+  buttons are 24 × 20 pt each with no spacing between them (the symbols
+  are narrower than the buttons), "…" 4 pt from the trailing edge, Split
+  Down left of it and Split Right left of that (`PaneCardStyle.HeaderButton`,
+  `headerButtonFrame`, `headerButtonSize`, `headerButtonSpacing`; all at
+  `headerButtonOpacity` 55 %, 100 % on hover); the "…" menu still opens
+  under "…" (`menuOrigin` uses its frame). The title and the directory
+  share what the row leaves them
+  (`PaneCardStyle.headerTextSpace`: the header less 10 pt leading, the
+  glyph and its 6 pt, 6 pt on each side of the flexible space, the
+  buttons and 4 pt trailing; 284 pt in a 400 pt header) by the same rule
+  as before. *Deviation:* a header under 156 pt wide
+  (`PaneCardStyle.showsSplitButtons(headerWidth:)`, the width at which a
+  title beside a glyph keeps `minimumTextWidth`, 40 pt) shows "…" alone,
+  so a narrow pane (about 90 pt, checked earlier) keeps its title rather
+  than three buttons and nothing else; its menu still splits.
+  `PaneHeaderHostingView` follows its width (`setFrameSize`) and splits
+  through `splitFromButton(_:)` (focus, then split). The pane's split
+  travels with its theme in `PaneThemeBinding.split` (a `PaneView` by its
+  session's current pane, an `EmptyPaneView` by its pane ID; detached:
+  nothing), which ends in `WorkspaceActions.split(pane:axis:)` of the
+  pane's window (the registry's `actionsOfWorkspace`, set by the app
+  delegate, or the content controller's actions for an empty pane): it
+  notes the split pane's session for the New Session dialog's directory,
+  as ⌘D notes the focused one, then calls `AppModel.splitPane(_:axis:)`,
+  which focuses the new empty pane; the content controller then gives it
+  keyboard focus and it shows the chooser, as after ⌘D. Tested in
+  `PaneMenuTests` (outline Split Right, Split Down, separator, Theme; the
+  shortcuts equal the main menu's; the menu of an unfocused pane splits
+  that pane and focuses the new one) and `PaneCardTests` (button frames,
+  text space, the width threshold, the buttons splitting their own pane
+  after focusing it, an empty pane's buttons). *Checked live* (test
+  build, light mode): the three buttons on a terminal pane and an empty
+  pane, their tooltips and hover; Split Right from the button, then Split
+  Down from the button of the unfocused terminal pane, which split that
+  pane, with the new pane focused showing the chooser; Split Down and
+  Split Right from a header right-click on unfocused panes, with ⌘D and
+  ⇧⌘D shown; typing in the terminal after clicking back into it; a
+  90-character title and a long OSC 7 directory truncated in the middle
+  side by side in a 417 pt pane; the rightmost pane's "…" menu ending
+  inside the window. Not checked live: the narrow header showing "…"
+  alone (tested), dark mode.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (notifications (step 7), confirm‑on‑close, menu bar mode;
   the default profile and directory were removed on October 24, 2026 with

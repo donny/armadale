@@ -56,6 +56,7 @@ final class EmptyPaneView: NSView {
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusPane() }
         header.makeMenu = { [weak self] in self?.paneMenu() }
+        header.splitPane = { [theme] in theme.split($0) }
         addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
@@ -115,7 +116,10 @@ final class EmptyPaneView: NSView {
         let theme = theme
         return PaneMenu.make(
             PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes),
-            actions: PaneMenu.Actions(chooseTheme: { theme.choose($0) }))
+            actions: PaneMenu.Actions(
+                splitRight: { theme.split(.horizontal) },
+                splitDown: { theme.split(.vertical) },
+                chooseTheme: { theme.choose($0) }))
     }
 
     // MARK: Appearance

@@ -5,6 +5,9 @@ import SwiftUI
 /// (only empty panes, showing the New Session chooser) has none: `nil`
 /// keeps the glyph's place empty.
 struct StatusGlyph: View {
+    /// The glyph's fixed width, which the pane header's text width rule
+    /// (``PaneCardStyle``) counts.
+    nonisolated static let width: CGFloat = 12
     let status: SessionStatus?
 
     var body: some View {
@@ -12,7 +15,7 @@ struct StatusGlyph: View {
             Image(systemName: Self.symbol(status))
                 .font(.system(size: Self.size(status), weight: .semibold))
                 .foregroundStyle(Self.color(status))
-                .frame(width: 12)
+                .frame(width: Self.width)
                 .help(Self.help(status))
                 .accessibilityLabel(Self.help(status))
         } else {

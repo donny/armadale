@@ -86,6 +86,7 @@ final class PaneView: NSView {
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusTerminal() }
         header.makeMenu = { [weak self] in self?.paneMenu() }
+        header.splitPane = { [theme] in theme.split($0) }
         addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
@@ -209,7 +210,10 @@ final class PaneView: NSView {
         let theme = theme
         return PaneMenu.make(
             PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes),
-            actions: PaneMenu.Actions(chooseTheme: { theme.choose($0) }))
+            actions: PaneMenu.Actions(
+                splitRight: { theme.split(.horizontal) },
+                splitDown: { theme.split(.vertical) },
+                chooseTheme: { theme.choose($0) }))
     }
 
     /// The card's corners, background and border for the current theme

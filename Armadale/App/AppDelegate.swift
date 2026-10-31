@@ -161,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         registry.onRuntimeVersionRecorded = { [weak self] in
             self?.saveNow()
         }
+        registry.actionsOfWorkspace = { [weak self] id in self?.windowControllers[id]?.actions }
     }
 
     /// The Dock badge follows the attention total; a revealed session's

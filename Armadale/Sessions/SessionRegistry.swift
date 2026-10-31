@@ -77,6 +77,9 @@ final class SessionRegistry {
     /// the status glyphs show its attention. `nil` in tests that do not
     /// need it.
     @ObservationIgnored var attention: AttentionCenter?
+    /// The actions of a workspace's open window (set by the app delegate),
+    /// through which a pane's header and menu split it (``split(pane:axis:)``).
+    @ObservationIgnored var actionsOfWorkspace: (WorkspaceID) -> WorkspaceActions? = { _ in nil }
     /// Sessions recorded by an earlier run of the app. They are attached to,
     /// never created: a session that is gone must show as ended, not be
     /// silently replaced by a fresh shell.
@@ -164,6 +167,19 @@ final class SessionRegistry {
         }
     }
 
+    /// Splits `paneID` from its header or its menu (``PaneThemeBinding/split``):
+    /// through its window's ``WorkspaceActions/split(pane:axis:)``, as ⌘D
+    /// does for the focused pane, or the model alone when no window shows
+    /// it (tests).
+    func split(pane paneID: PaneID, axis: ArmadaleCore.Axis) {
+        if let tab = model.tab(containing: paneID), let workspace = model.location(of: tab.id)?.workspace,
+           let actions = actionsOfWorkspace(workspace) {
+            actions.split(pane: paneID, axis: axis)
+        } else {
+            model.splitPane(paneID, axis: axis)
+        }
+    }
+
     /// The pane view for `sessionID`, created (with its controller) on first use.
     func paneView(for sessionID: SessionID) -> PaneView? {
         if let pane = panes[sessionID] { return pane }
@@ -190,7 +206,7 @@ final class SessionRegistry {
         }
         let pane = PaneView(
             controller: controller, settings: settings, rendererID: factory.id,
-            theme: .session(of: controller, in: model))
+            theme: .session(of: controller, in: model) { [weak self] in self?.split(pane: $0, axis: $1) })
         pane.titleProvider = { [weak self, weak controller] in
             guard let self, let controller else { return "Shell" }
             return self.displayName(of: controller.session)

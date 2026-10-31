@@ -268,7 +268,7 @@ final class ContentViewController: NSViewController {
         EmptyPaneView(
             chooser: NewSessionChooser(model: model, paneID: paneID, actions: actions),
             settings: registry.settings,
-            theme: .pane(paneID, in: model))
+            theme: .pane(paneID, in: model, splitter: { [weak actions = self.actions] in actions?.split(pane: $0, axis: $1) }))
     }
 
     // MARK: From the view to the model

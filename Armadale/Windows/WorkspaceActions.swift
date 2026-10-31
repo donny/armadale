@@ -75,6 +75,17 @@ final class WorkspaceActions {
         _ = model.splitFocusedPane(axis: axis, in: workspaceID)
     }
 
+    /// The pane header's split buttons and the pane menu's Split Right and
+    /// Split Down: splits `paneID` itself, whichever pane is focused, and
+    /// otherwise as ⌘D / ⇧⌘D do (the new pane is focused and shows the
+    /// chooser; the New Session dialog's directory comes from the split
+    /// pane's session, if it has one).
+    func split(pane paneID: PaneID, axis: ArmadaleCore.Axis) {
+        // What noting the focused session does for ⌘D, the split pane being the focused one.
+        if let session = model.pane(paneID)?.sessionID { lastFocusedSessionID = session }
+        _ = model.splitPane(paneID, axis: axis)
+    }
+
     // MARK: New Session
 
     /// The session of the last focused pane of this window that had one:

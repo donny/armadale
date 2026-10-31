@@ -26,10 +26,14 @@ struct PaneMenuTests {
             selection: TerminalColor(hex: 0x445566)),
         isBuiltIn: false)
 
-    private func menu(themeID: String?, userThemes: [ThemeEntry] = [], chosen: ((String?) -> Void)? = nil) -> NSMenu {
+    private func menu(
+        themeID: String?, userThemes: [ThemeEntry] = [], split: ((ArmadaleCore.Axis) -> Void)? = nil,
+        chosen: ((String?) -> Void)? = nil
+    ) -> NSMenu {
         PaneMenu.make(
             PaneMenu.Inputs(themeID: themeID, builtInThemes: ThemeCatalog.builtIns, userThemes: userThemes),
-            actions: PaneMenu.Actions(chooseTheme: { chosen?($0) }))
+            actions: PaneMenu.Actions(
+                splitRight: { split?(.horizontal) }, splitDown: { split?(.vertical) }, chooseTheme: { chosen?($0) }))
     }
 
     private func themeSubmenu(_ menu: NSMenu) throws -> NSMenu {
@@ -44,6 +48,37 @@ struct PaneMenuTests {
     }
 
     // MARK: Builder
+
+    @Test func theMenuIsSplitRightSplitDownThenTheTheme() throws {
+        var split: [ArmadaleCore.Axis] = []
+        let menu = menu(themeID: nil, split: { split.append($0) })
+        #expect(outline(menu) == ["Split Right", "Split Down", "—", "Theme"])
+        let right = try #require(menu.items.first { $0.identifier == PaneMenu.splitRightItemIdentifier } as? ActionMenuItem)
+        let down = try #require(menu.items.first { $0.identifier == PaneMenu.splitDownItemIdentifier } as? ActionMenuItem)
+        #expect(menu.items.first === right && menu.items[1] === down)
+        for item in [right, down] {
+            #expect(item.isEnabled)
+            #expect(item.target === item)
+        }
+        right.handler()
+        down.handler()
+        #expect(split == [.horizontal, .vertical], "Split Right is a horizontal split, Split Down a vertical one")
+    }
+
+    /// The split items show the application Pane menu's shortcuts (⌘D, ⇧⌘D).
+    @Test func theSplitItemsShowThePaneMenusShortcuts() throws {
+        let main = MainMenu.make(installsSpecialMenus: false)
+        let paneMenu = try #require(main.items.first { $0.title == "Pane" }?.submenu)
+        let menu = menu(themeID: nil)
+        for title in [PaneMenu.splitRightTitle, PaneMenu.splitDownTitle] {
+            let mine = try #require(menu.items.first { $0.title == title })
+            let app = try #require(paneMenu.items.first { $0.title == title })
+            #expect(mine.keyEquivalent == app.keyEquivalent, "\(title)")
+            #expect(mine.keyEquivalentModifierMask == app.keyEquivalentModifierMask, "\(title)")
+        }
+        #expect(menu.items[0].keyEquivalent == "d" && menu.items[0].keyEquivalentModifierMask == [.command])
+        #expect(menu.items[1].keyEquivalent == "d" && menu.items[1].keyEquivalentModifierMask == [.command, .shift])
+    }
 
     @Test func theThemeSubmenuListsDefaultThenBuiltInsThenImported() throws {
         let builtInNames = ThemeCatalog.builtIns.map(\.name)
@@ -68,7 +103,7 @@ struct PaneMenuTests {
 
     @Test func choosingAnItemReportsItsThemeOrDefault() throws {
         var chosen: [String?] = []
-        let submenu = try themeSubmenu(menu(themeID: "builtin.nord", userThemes: [Self.mine]) { chosen.append($0) })
+        let submenu = try themeSubmenu(menu(themeID: "builtin.nord", userThemes: [Self.mine], chosen: { chosen.append($0) }))
         for title in ["Dracula", "Mine", "Default"] {
             let item = try #require(submenu.items.first { $0.title == title } as? ActionMenuItem)
             #expect(item.isEnabled)
@@ -156,6 +191,47 @@ struct PaneMenuTests {
         try #require(again.items.first as? ActionMenuItem).handler()
         #expect(model.pane(first)?.themeID == nil)
         #expect(await eventually { firstSurface.appearance.theme.name == "Gruvbox Dark" })
+    }
+
+    /// The menu splits the pane it was opened for, not the focused one; the
+    /// new pane is focused (as after ⌘D) and empty (it shows the chooser).
+    @Test func theMenuSplitsItsOwnPaneNotTheFocusedOne() throws {
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        let (model, registry, workspace) = makeRegistry(settings: settings)
+        let first = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        let second = try #require(model.splitPane(first, axis: .horizontal))
+        model.fillEmptyPanes()
+        #expect(model.selectedTab(in: workspace)?.focusedPaneID == second)
+        let firstView = try #require(model.pane(first)?.sessionID.flatMap { registry.paneView(for: $0) })
+
+        let menu = firstView.paneMenu()
+        try #require(menu.items.first { $0.identifier == PaneMenu.splitDownItemIdentifier } as? ActionMenuItem).handler()
+        var tab = try #require(model.selectedTab(in: workspace))
+        #expect(tab.layout.leaves().count == 3)
+        let below = try #require(tab.layout.neighbor(of: first, direction: .down), "a new pane below the first")
+        #expect(below != second)
+        #expect(tab.focusedPaneID == below, "the new pane is focused")
+        #expect(model.pane(below)?.isEmpty == true)
+        #expect(tab.layout.neighbor(of: second, direction: .down) == nil, "the focused pane was not split")
+
+        // Split Right from the empty pane's binding: right of that pane.
+        let empty = EmptyPaneView(
+            chooser: NewSessionChooser(
+                model: model, paneID: below,
+                actions: WorkspaceActions(model: model, registry: registry, workspaceID: workspace)),
+            settings: settings, theme: .pane(below, in: model))
+        model.focus(pane: first)
+        try #require(empty.paneMenu().items.first { $0.identifier == PaneMenu.splitRightItemIdentifier } as? ActionMenuItem)
+            .handler()
+        tab = try #require(model.selectedTab(in: workspace))
+        let right = try #require(tab.layout.neighbor(of: below, direction: .right))
+        #expect(right != second && right != first)
+        #expect(tab.focusedPaneID == right)
+
+        // A detached binding (outside any model) splits nothing.
+        PaneThemeBinding.detached.split(.horizontal)
+        #expect(model.selectedTab(in: workspace)?.layout.leaves().count == 4)
     }
 
     @Test func aPaneViewMadeLaterStartsWithItsPanesTheme() throws {
