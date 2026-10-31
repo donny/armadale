@@ -365,8 +365,18 @@ entry point away (it is unreachable in the app until then). Mouse
 behaviour is exactly that of 2b64971. `docs/DESIGN.md` section 8 ("Pane
 context menu", rewritten) and 11. Nothing was run live: the change only
 removes code paths, and the remaining paths are the ones live-tested
-before the menu existed. **Open:** the owner's entry point for the pane
-menu (a toolbar or menu-bar item, a keyboard shortcut, a pane header…).
+before the menu existed. Committed as a9f13c8.
+
+October 31, 2026, morning (owner's decision): **pane cards** are the next
+step. Each pane becomes a rounded card with a gutter and gaps of 8 pt, a
+28 pt header (status glyph, session title, working directory, a "…"
+button and right-click opening the pane menu, which is the menu's entry
+point), hairline and focus borders on the card, attention in the header.
+The agreed design is `docs/DESIGN.md` section 8, "Pane cards" (owner's
+four decisions recorded there; the "Show pane headers" preference is
+deferred, section 13). This commit is the design only; the
+implementation follows through the implementer → reviewer loop and
+needs the Mac for live checks.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

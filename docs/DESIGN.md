@@ -1697,6 +1697,90 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   rest of the app (accepted as cosmetic in the first version).
   The surface a pane's session is created with starts with the pane's
   theme, so nothing flashes in the Settings theme first.
+- **Pane cards** (*design agreed with the owner on October 31, 2026;
+  not yet implemented*). The owner noted that recent
+  terminal and agent front ends (superlogical, Tern, herdr) draw each pane
+  as a rounded card with a margin around it and a header on top, and
+  asked for a design. Armadale adopts it because it makes splits legible
+  without a divider line, makes two differently themed panes look chosen
+  rather than broken, and gives the pane context menu (above) the entry
+  point it lacks: a header no program can take.
+  *Geometry.* The pane area keeps a **gutter of 8 pt** (the tab bar's
+  margin, `TabBarStyle.margin`) on all four sides, and sibling panes in a
+  split are **8 pt apart**: that gap is the split's divider
+  (`dividerThickness` 8, drawn as nothing so the window background shows
+  through; the whole gap is the drag target and shows the resize cursor).
+  Each leaf is a card with **10 pt corner radius**, filled with the pane's
+  theme background (the pane's own theme or the Settings one, as today),
+  clipped to its corners. Inside the card: the **header, 28 pt** tall (the
+  tab bar's track height), then 4 pt, then the terminal grid, with 10 pt
+  of padding left, right and bottom as today; since the padding is at
+  least the radius, no corner cell is clipped. The gutter and the gaps
+  show the window background. A zoomed pane and a tab with one pane show
+  one card with the same gutter and header (consistency with every other
+  tab; owner's decision). The empty tab group state is unchanged.
+  *Header.* Drawn in the pane's appearance over the theme background, in
+  the theme's foreground colour at reduced opacity so it suits any theme:
+  left, the session's status glyph (`StatusGlyph`, as in the tab bar),
+  then the **title** (the session's title, else the profile name; a tab's
+  custom title is the tab's, not the pane's) in the system font at 12 pt
+  semibold at 70 % opacity, then the **working directory** (`~`-abbreviated,
+  from the directory the registry records; nothing while unknown) at 55 %,
+  both truncated in the middle; right, a **"…" button** (`ellipsis`
+  symbol, shown at 55 %, full opacity on hover) that opens `paneMenu()` as
+  a pull-down below itself. A **right-click anywhere on the header** opens
+  the same menu at the pointer; a click on the header focuses the pane as
+  a click on the padding does; a double-click does nothing for now (a
+  pane has no title of its own to rename). No split, zoom or close
+  buttons in the header (owner's decision: the tab bar and the keyboard
+  have them). An empty pane's header shows
+  no glyph and the title "New Session"; a pane showing the *Session Ended*
+  or *Disconnected* placeholder keeps its glyph and title, and the
+  placeholder's card sits in the content area as now.
+  *Focus and attention.* Every card has a **0.5 pt hairline border** in the
+  theme's foreground at 12 % (so a light card has an edge on a light
+  window, and a dark one on a dark window); the **focused card** replaces
+  it with the **1.5 pt accent border at 55 %** used today, now following
+  the rounded edge, and only while more than one pane is on screen (as
+  today; a lone card keeps the hairline). A pane needing attention shows
+  ◐ in its header and tints the header's title with the attention colour
+  (`StatusGlyph.attentionColor`, the tab bar's purple), cleared as the tab
+  bar's is when the session is looked at.
+  *Cost.* Against today's layout a 2 × 2 split loses about 60 pt of height
+  (two headers and the top and bottom gutters against today's 4 + 10 pt
+  pane padding and the 1 pt divider) and about 24 pt of width (three
+  gutters), roughly four rows and three columns at the default font; a
+  single pane loses about 40 pt of height and 16 pt of width. The owner
+  accepts this for the first version; a "Show pane headers" preference
+  (cards and gutters stay, the header row goes) is deferred (owner's
+  decision), noted in section 13.
+  *Menus and chooser.* The pane context menu's entry point is the header
+  ("…" and right-click), which answers the open point above. The New
+  Session chooser's compact widths (below, 340 and 180 pt) are measured
+  against the pane's width as now; with 20 pt less content width the
+  thresholds stay, since they describe the card's content.
+  *Implementation.* `PaneContainerView` insets the split tree by the
+  gutter. `PaneSplitView` gets `dividerThickness` 8 and draws no divider
+  (`drawDivider(in:)` empty; `dividerColor` unused). `PaneView` and
+  `EmptyPaneView` set `layer.cornerRadius` and `masksToBounds`, put the
+  border on their existing focus overlay layer (same radius) and host a
+  `PaneHeaderView` (SwiftUI in an `NSHostingView`, sharing `StatusGlyph`
+  with the tab bar; its inputs are a small `PaneHeaderModel` struct —
+  glyph status, title, directory, attention, pane appearance — that the
+  pane view keeps current from the model the way the tab bar does). A
+  pure `PaneCardStyle` (gutter, gap, radius, header height, insets,
+  border width and colour for each focus state and appearance) is unit
+  tested, as `TabBarStyle` is; the header's title precedence and the "…"
+  button reaching `paneMenu()` are tested with the views in a window.
+  Live checks (the Mac is needed): light and dark, two themes side by
+  side, a 2 × 2 split, zoom, an empty pane, a *Session Ended* pane, a
+  narrow pane at about 90, 165 and 185 pt, divider drags in the gap, and
+  the header menu over vim with `mouse=a`.
+  *Owner's decisions (October 31, 2026).* A lone pane gets the gutter
+  and header too; the "Show pane headers" preference comes later; the
+  numbers above (gutter 8, gap 8, radius 10, header 28) are judged live
+  against the window's own corners and the native tab bar and adjusted
+  in the same change; no split, zoom or close buttons in the header.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (notifications (step 7), confirm‑on‑close, menu bar mode;
   the default profile and directory were removed on October 24, 2026 with
@@ -3064,6 +3148,11 @@ The build order is complete.
 
 ## 13. Risks and open points
 
+- **Pane headers preference** (October 31, 2026). Pane cards (section 8)
+  always show their header row in the first version; a "Show pane headers"
+  preference that keeps the cards and gutters but drops the row is
+  deferred by the owner's decision. When it comes, the pane context menu
+  needs another entry point while headers are hidden.
 - **New Session (step 10).** A state file holding an empty pane is not
   readable by builds before it (accepted: unreleased). The Codex and Claude
   flag names are version facts and will rot; the chooser adds one more
