@@ -1357,15 +1357,17 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     ├── Sidebar: NSHostingController<SidebarView>       SwiftUI List, drag & drop
     └── Content: ContentViewController
         ├── TabBarHostingView<TabBarView>              SwiftUI, ⌘N badges, "+"
-        └── PaneContainerView (NSView)                 or an empty-group state
-            └── SplitTreeView (nested PaneSplitViews mirroring PaneLayout)
-                └── PaneView per leaf with a session   paneMenu(): PaneMenu, no entry point yet
-                │   ├── surface.view                   terminal
+        └── PaneContainerView (NSView)                 8 pt gutter, or an empty-group state
+            └── SplitTreeView (nested PaneSplitViews mirroring PaneLayout; 8 pt gaps)
+                └── PaneView per leaf with a session   a card; paneMenu(): PaneMenu
+                │   ├── surface.view                   terminal, below the header
                 │   ├── NSHostingView<PlaceholderView> Session Ended / Disconnected
-                │   └── focus overlay                  focus border, no hit testing
-                └── EmptyPaneView per empty leaf       first responder when focused
+                │   ├── PaneHeaderHostingView          header: glyph, title, directory, "…"
+                │   └── focus overlay                  hairline / focus border, no hit testing
+                └── EmptyPaneView per empty leaf       a card; first responder when focused
                     ├── NSHostingView<NewSessionPaneView> the New Session chooser
-                    └── focus overlay                  focus border, no hit testing
+                    ├── PaneHeaderHostingView          header: "New Session", "…"
+                    └── focus overlay                  hairline / focus border, no hit testing
 ```
 
 - Window uses `titlebarAppearsTransparent`, `toolbarStyle = .unified`, and
@@ -1423,7 +1425,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   content view extends under both the transparent title bar and the
   floating sidebar.
 - Keyboard focus follows `focusedPaneID`; the focused pane has a subtle
-  accent border (only while more than one pane is on screen). Unfocused
+  accent border (only while more than one pane is on screen; since the
+  pane cards, below, every other card has a hairline). Unfocused
   panes keep their terminal's own background: the dimming overlay of
   steps 2 to 9 was dropped on October 23, 2026 at the owner's request.
 - The tab bar is custom SwiftUI (not `NSTabView`): it needs shortcut badges,
@@ -1647,7 +1650,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   and `EmptyPaneView.paneMenu()` build it fresh from the pane's theme and
   the theme catalog; its items are `ActionMenuItem`s (their own target,
   running a closure).
-  *No mouse event opens it yet.* The first version (ebec034) opened it on
+  *Its entry point is the pane card's header* (October 31, 2026, "Pane
+  cards" below): the header's "…" button and a right-click (or
+  Control-click) on the header open it; nothing over the terminal does.
+  *Until then no mouse event opened it.* The first version (ebec034) opened it on
   a right-click when the program had not asked for the mouse, on Shift +
   right-click always, and treated Control-click as a right-click, which
   meant a program that asked for the mouse never saw Control + left-click
@@ -1655,7 +1661,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   owner decided the same evening that programs such as vim and Emacs
   must get every mouse event exactly as the renderer reports it, and
   that the menu's entry point is to be chosen later (a UI entry point,
-  not a mouse rule). So the subclass that applied those rules
+  not a mouse rule; it became the pane header the next day). So the subclass that applied those rules
   (`HostTerminalView`) and the rules themselves (`ContextClick`) were
   removed in the following commit; `SwiftTermSurface` uses SwiftTerm's
   `TerminalView` unchanged (a right-click goes to a program that asked
@@ -1668,7 +1674,9 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   stay, so the Theme submenu is one entry point away. When one is added,
   the menu should focus the pane first, as a click would, and neither take
   keyboard focus nor change the focused pane (the first version did, seen
-  live).
+  live). The header does exactly that: it focuses the pane (its terminal,
+  or the pane itself while a placeholder or the chooser shows), then opens
+  the menu; after a choice, typing goes on in the pane (seen live).
   *The pane's theme* is `Pane.themeID` in the model (section 2): one
   explicit theme shown in light and dark system appearance alike, not a
   light/dark pair (owner's decision); `nil` ("Default") follows the
@@ -1698,7 +1706,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   The surface a pane's session is created with starts with the pane's
   theme, so nothing flashes in the Settings theme first.
 - **Pane cards** (*design agreed with the owner on October 31, 2026;
-  not yet implemented*). The owner noted that recent
+  implemented the same day*, see *As built* at the end of this bullet).
+  The owner noted that recent
   terminal and agent front ends (superlogical, Tern, herdr) draw each pane
   as a rounded card with a margin around it and a header on top, and
   asked for a design. Armadale adopts it because it makes splits legible
@@ -1781,6 +1790,91 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   numbers above (gutter 8, gap 8, radius 10, header 28) are judged live
   against the window's own corners and the native tab bar and adjusted
   in the same change; no split, zoom or close buttons in the header.
+  *As built (October 31, 2026).* The numbers stayed as agreed after the
+  live checks in light and dark (they sit well against the window's
+  rounded bottom corners and the 36 pt tab bar): gutter 8, gap 8, corner
+  radius 10 (continuous curve), header 28, 4 pt to the grid, padding 10;
+  hairline 0.5 pt at 12 % of the theme foreground, focus border 1.5 pt
+  accent at 55 %; title 12 pt semibold at 70 %, directory 12 pt regular at
+  55 %, "…" at 55 % (100 % on hover). All of it is `PaneCardStyle`
+  (`Panes/PaneCardStyle.swift`, pure, tested in `PaneCardTests`, which
+  also checks the views in a window: title precedence, directory,
+  attention set and cleared, the card's borders, the "…" button and a
+  right-click reaching `paneMenu()` and focusing the pane first, that
+  a header point hit-tests to the header and a grid point to the
+  terminal, and that `PaneView` and `EmptyPaneView` are released with
+  their headers). The header is `PaneHeaderView` (SwiftUI) in a
+  `PaneHeaderHostingView` (`Panes/PaneHeaderView.swift`): `mouseDown`
+  focuses the pane then lets SwiftUI handle the click (the "…" button),
+  `rightMouseDown` and `menu(for:)` (AppKit's Control-click) focus the
+  pane and return its menu, the button pops the menu up under itself
+  (`PaneCardStyle.menuOrigin`): its leading edge at the button's leading
+  edge, or, when the menu would run past the window's right edge (the
+  rightmost pane, seen in review), its trailing edge at the button's
+  trailing edge (tested). A pane view's header content comes from
+  `SessionRegistry.headerModel(for:)` through an `Observations` loop
+  (`PaneView.headerSource`, set by the registry), so it follows the
+  model's title and directory (`AppModel.setTitle`, `setWorkingDirectory`;
+  the directory is abbreviated with `AppModel.abbreviatedDirectory`, now
+  public, so a host's path is shown as it is), the controller's state and
+  `AttentionCenter`. *The directory is shown only once the session's
+  program has reported it with OSC 7* since this launch
+  (`SessionRegistry.reportedDirectories`; restored and respawned sessions
+  count as unreported until they report again): `Session.workingDirectory`
+  is otherwise the directory the session started in, and a shell that
+  sends no OSC 7 (the owner's zsh, section 8, "New sessions") would show
+  it after every `cd` (seen in review: "~" after `cd /private/tmp/…`). An
+  unreported directory is "unknown", which the design shows as nothing.
+  Once reported, a session stays reported, so a program that reports
+  once and hands back to a shell that never does leaves the last
+  reported path in the header (seen in review by sending OSC 7 by hand
+  from the owner's zsh, then `cd`); a shell with OSC 7 integration
+  reports at every prompt, so this is accepted. The header's theme
+  foreground is added when the pane applies its appearance. The gutter is `PaneContainerView.splitTreeFrame`
+  (applied in `resizeSubviews`, so a zero-sized pane area never gets a
+  negative frame); the empty-group state still fills the whole area.
+  `PaneSplitView.dividerThickness` is `PaneCardStyle.gap` and
+  `drawDivider(in:)` draws nothing; the ratio layout already subtracted
+  `dividerThickness`, so it needed no change (the split test now expects
+  `(width - 8) × ratio`). *Deviations, found live:* (1) the directory is
+  not shown when it equals the title (zsh and fish title themselves with
+  the directory, which read "~ ~"; `PaneHeaderModel.shownDirectory`,
+  tested); (2) the title and the directory share the header's text
+  width by a rule (`PaneCardStyle.headerTextWidths`, laid out by
+  `HeaderTextLayout`, tested): both whole when they fit; else the title
+  whole and the directory truncated in the middle to what is left, when
+  that leaves the directory at least 40 % of the width (or 40 pt, or all
+  it needs if less); else the title truncated in the middle and the
+  directory given 40 % of the width (at least 40 pt); and the directory
+  dropped only when that would leave the title under 40 pt, so a narrow
+  pane never shows a stray one-character fragment of it (seen live) and
+  a long title never hides it in a normal pane (the first version's
+  `ViewThatFits` did, seen in review in a 417 pt pane); (3) the *Session Ended* / *Disconnected* placeholder now
+  covers the card below the header (`PaneCardStyle.contentFrame`) rather
+  than the whole pane, so the header (glyph, title, "…") stays clear of
+  its dimming; (4) Control-click on the header opens the menu too
+  (`menu(for:)`, standard AppKit; the header is never the program's).
+  *Checked live* (test build, isolated state, light and forced dark):
+  a 2 × 2 split (gutters, gaps, corners, headers, hairlines, accent border
+  on the focused card only), Default, Gruvbox Dark and Dracula panes side
+  by side chosen from the "…" pull-down and from a header right-click,
+  typing in the pane right after a choice, a lone pane and a zoomed pane,
+  an empty pane at full width and at about 90, 165 and 185 pt (header
+  "Ne…n" with the "…" still there; chooser tiny, small, compact; New…
+  still opens the dialog), a *Session Ended* pane (glyph ○ and title
+  kept), a drag in the 8 pt gap, vim with `mouse=a` (a right-click in
+  the grid moved vim's cursor, `mousemodel=popup_setpos`; a right-click on
+  the header opened Armadale's menu and vim's cursor did not move), a bell
+  in an unfocused pane (◐ and the purple title in its header, with the
+  tab and sidebar), Control-click on the header. Not checked live: the
+  *Disconnected* placeholder (needs a host) and Increase Contrast. The
+  three review fixes (OSC 7-only directory, the shared-width rule, the
+  right-aligned menu on the rightmost pane) were checked live by the
+  reviewer in light mode: no directory after `cd` in a plain zsh, the
+  path after an OSC 7 report, an 80-character title truncated in the
+  middle beside the directory in a 417 pt pane, a long directory
+  truncated beside a short title, and the rightmost pane's menu ending at
+  its button's trailing edge inside the window.
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (notifications (step 7), confirm‑on‑close, menu bar mode;
   the default profile and directory were removed on October 24, 2026 with
@@ -2876,7 +2970,8 @@ armadale/
 │   │                                EmptyPaneView + NewSessionPaneView + NewSessionChooser (the
 │   │                                chooser), NewSessionSheet + NewSessionForm (the dialog),
 │   │                                PaneMenu (the pane context menu builder, PaneThemeBinding,
-│   │                                ActionMenuItem)
+│   │                                ActionMenuItem), PaneCardStyle + PaneHeaderView (pane cards:
+│   │                                geometry and borders, the header and its hosting view)
 │   ├── Sessions/                    SessionRegistry (controllers per session, a backend per host,
 │   │                                RemoteSessionSupport), SessionStatus / CloseRisk,
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)

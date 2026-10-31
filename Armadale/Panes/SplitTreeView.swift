@@ -98,7 +98,10 @@ final class SplitTreeView: NSView {
 }
 
 /// One split of a ``SplitTreeView``: two subviews laid out by `ratio` (the
-/// share of the first), with a thin divider the user can drag.
+/// share of the first), with the gap between the two pane cards as the
+/// divider (DESIGN §8, "Pane cards"): ``PaneCardStyle/gap`` thick, drawn as
+/// nothing so the window background shows through, and draggable over its
+/// whole thickness (NSSplitView shows the resize cursor there).
 @MainActor
 final class PaneSplitView: NSSplitView {
     let nodeID: SplitNodeID
@@ -128,7 +131,10 @@ final class PaneSplitView: NSSplitView {
         fatalError("init(coder:) is not supported")
     }
 
-    override var dividerColor: NSColor { .separatorColor }
+    override var dividerThickness: CGFloat { PaneCardStyle.gap }
+
+    /// The gap is the divider: nothing is drawn in it.
+    override func drawDivider(in rect: NSRect) {}
 
     /// Sets the ratio from the model; lays out again if it changed (or
     /// `relayout` asks for it).

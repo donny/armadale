@@ -307,8 +307,9 @@ final class ContentViewController: NSViewController {
     }
 }
 
-/// The pane area: the split tree, or a note with a New Tab button when the
-/// selected tab group has no tabs.
+/// The pane area: the split tree, inset by the cards' gutter on all four
+/// sides (DESIGN §8, "Pane cards"), or a note with a New Tab button when
+/// the selected tab group has no tabs.
 @MainActor
 final class PaneContainerView: NSView {
     let splitTree = SplitTreeView()
@@ -318,9 +319,24 @@ final class PaneContainerView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        splitTree.frame = bounds
-        splitTree.autoresizingMask = [.width, .height]
+        splitTree.frame = Self.splitTreeFrame(in: bounds)
         addSubview(splitTree)
+    }
+
+    /// The split tree's frame: `bounds` less the gutter, never negative.
+    static func splitTreeFrame(in bounds: NSRect) -> NSRect {
+        let gutter = PaneCardStyle.gutter
+        return NSRect(
+            x: bounds.minX + gutter, y: bounds.minY + gutter,
+            width: max(bounds.width - 2 * gutter, 0), height: max(bounds.height - 2 * gutter, 0))
+    }
+
+    /// Keeps the gutter as the pane area resizes (the empty state and the
+    /// blank views follow their autoresizing masks).
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        let frame = Self.splitTreeFrame(in: bounds)
+        if splitTree.frame != frame { splitTree.frame = frame }
     }
 
     @available(*, unavailable)

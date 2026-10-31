@@ -4,10 +4,12 @@ import ArmadaleSessions
 import SwiftUI
 import TerminalSurface
 
-/// One pane: the session's terminal view filling it, and the *Session
-/// Ended* placeholder over it once the session is over. ``paneMenu()`` is
-/// its context menu (``PaneMenu``), which nothing opens yet (DESIGN §8,
-/// "Pane context menu").
+/// One pane, drawn as a card (DESIGN §8, "Pane cards"): a header on top
+/// (``PaneHeaderHostingView``: status glyph, title, working directory and
+/// the "…" button), the session's terminal view below it, and the *Session
+/// Ended* placeholder over the terminal once the session is over.
+/// ``paneMenu()`` is its context menu (``PaneMenu``), opened from the
+/// header only.
 ///
 /// A `PaneView` belongs to its ``SessionController`` for the session's whole
 /// life (the registry keeps both) and is only ever reparented, so a
@@ -32,10 +34,11 @@ final class PaneView: NSView {
     /// The name shown in the placeholder.
     var titleProvider: () -> String = { "Shell" }
 
-    /// How the pane shows focus: nothing while it is the only pane on
-    /// screen; with several, the focused one gets a subtle accent border.
-    /// The others are left alone: their terminal keeps its own background
-    /// (an earlier dimming overlay was dropped on October 23, 2026).
+    /// How the pane shows focus: every card has a hairline border; with
+    /// several panes on screen the focused one gets the accent border
+    /// instead (``PaneCardStyle/border(for:foreground:)``). The others keep
+    /// their terminal's own background (an earlier dimming overlay was
+    /// dropped on October 23, 2026).
     enum FocusStyle: Equatable {
         case alone, focused, unfocused
     }
@@ -55,15 +58,21 @@ final class PaneView: NSView {
     /// Return presses while the pane has keyboard focus; `nil` without a
     /// placeholder or when it has no such button.
     private var primaryAction: (() -> Void)?
-    private let focusOverlay = PassThroughView()
+    /// Draws the card's border (``PaneCardStyle/border(for:foreground:)``); never takes the mouse.
+    let focusOverlay = PassThroughView()
+    /// The card's header row.
+    let header = PaneHeaderHostingView.make(model: PaneHeaderModel(status: nil, title: "Shell", directory: nil))
+    /// What the header shows, from the model (set by the registry); kept
+    /// current while the pane lives.
+    var headerSource: (@MainActor @Sendable () -> PaneHeaderModel)? {
+        didSet { observeHeader() }
+    }
+    /// The header's content as last read from ``headerSource``, before the
+    /// theme's foreground is added.
+    private var headerContent = PaneHeaderModel(status: nil, title: "Shell", directory: nil)
     private var stateObservation: Task<Void, Never>?
     private var appearanceObservation: Task<Void, Never>?
-
-    /// Space between the pane's edge and the text, filled with the theme's
-    /// background. The bottom and sides are deep enough that the first glyph
-    /// of the last row clears the window's rounded corner when the sidebar
-    /// is collapsed.
-    private static let padding = NSEdgeInsets(top: 4, left: 10, bottom: 10, right: 10)
+    private var headerObservation: Task<Void, Never>?
 
     init(controller: SessionController, settings: AppSettings, rendererID: String, theme: PaneThemeBinding = .detached) {
         self.controller = controller
@@ -73,6 +82,11 @@ final class PaneView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         wantsLayer = true
         addTerminalView(controller.surface.view)
+        header.frame = PaneCardStyle.headerFrame(in: bounds)
+        header.autoresizingMask = [.width, .minYMargin]
+        header.focusPane = { [weak self] in self?.focusTerminal() }
+        header.makeMenu = { [weak self] in self?.paneMenu() }
+        addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
         focusOverlay.wantsLayer = true
@@ -81,12 +95,9 @@ final class PaneView: NSView {
         observeAppearance()
     }
 
+    /// Below the header, inside the padding (``PaneCardStyle/terminalInsets``).
     private var terminalFrame: NSRect {
-        let padding = Self.padding
-        return NSRect(
-            x: padding.left, y: padding.bottom,
-            width: max(bounds.width - padding.left - padding.right, 0),
-            height: max(bounds.height - padding.top - padding.bottom, 0))
+        PaneCardStyle.terminalFrame(in: bounds)
     }
 
     /// Puts a terminal view at the bottom of the pane, inside the padding.
@@ -138,6 +149,7 @@ final class PaneView: NSView {
     isolated deinit {
         stateObservation?.cancel()
         appearanceObservation?.cancel()
+        headerObservation?.cancel()
     }
 
     /// Gives the pane keyboard focus: the terminal, or the pane itself
@@ -180,7 +192,8 @@ final class PaneView: NSView {
         return responder.isDescendant(of: self)
     }
 
-    /// A click on the padding around the terminal focuses it too.
+    /// A click on the padding around the terminal focuses it too (a click
+    /// on the header does, through ``PaneHeaderHostingView``).
     override func mouseDown(with event: NSEvent) {
         focusTerminal()
     }
@@ -188,10 +201,10 @@ final class PaneView: NSView {
     // MARK: Context menu
 
     /// The pane's context menu, built fresh each time from the pane's
-    /// theme and the theme catalog. Not an override of `menu(for:)`, and
-    /// no mouse event opens it: the pane's mouse events are all the
-    /// program's (DESIGN §8, "Pane context menu"); an entry point is to be
-    /// chosen.
+    /// theme and the theme catalog. Opened only from the header (its "…"
+    /// button, or a right-click on it); not an override of `menu(for:)`:
+    /// every mouse event over the terminal is the program's (DESIGN §8,
+    /// "Pane context menu", "Pane cards").
     func paneMenu() -> NSMenu {
         let theme = theme
         return PaneMenu.make(
@@ -199,18 +212,11 @@ final class PaneView: NSView {
             actions: PaneMenu.Actions(chooseTheme: { theme.choose($0) }))
     }
 
+    /// The card's corners, background and border for the current theme
+    /// and focus style.
     private func updateFocusOverlay() {
-        guard let layer = focusOverlay.layer else { return }
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer.backgroundColor = nil
-            switch focusStyle {
-            case .alone, .unfocused:
-                layer.borderWidth = 0
-            case .focused:
-                layer.borderWidth = 1.5
-                layer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.55).cgColor
-            }
-        }
+        let cardTheme = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: theme.current()).theme
+        PaneCardStyle.apply(to: self, overlay: focusOverlay, style: focusStyle, theme: cardTheme)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -226,13 +232,33 @@ final class PaneView: NSView {
     private func applyAppearance() {
         let paneThemeID = theme.current()
         matchAppearance(toPaneTheme: settings.paneTheme(paneThemeID))
-        updateFocusOverlay()
         let appearance = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID)
         controller.surface.apply(appearance)
-        let background = appearance.theme.background
-        layer?.backgroundColor = CGColor(
-            srgbRed: CGFloat(background.red) / 255, green: CGFloat(background.green) / 255,
-            blue: CGFloat(background.blue) / 255, alpha: 1)
+        PaneCardStyle.apply(to: self, overlay: focusOverlay, style: focusStyle, theme: appearance.theme)
+        updateHeader(foreground: appearance.theme.foreground)
+    }
+
+    /// Shows ``headerContent`` in the theme's foreground.
+    private func updateHeader(foreground: TerminalColor? = nil) {
+        var model = headerContent
+        model.foreground = foreground ?? header.model.foreground
+        header.model = model
+    }
+
+    /// Follows the header's content (title, directory, status, attention)
+    /// in the model.
+    private func observeHeader() {
+        headerObservation?.cancel()
+        guard let source = headerSource else { return }
+        headerContent = source()
+        updateHeader()
+        headerObservation = Task { [weak self] in
+            for await content in Observations({ source() }) {
+                guard let self else { return }
+                self.headerContent = content
+                self.updateHeader()
+            }
+        }
     }
 
     private func observeState() {
@@ -318,9 +344,11 @@ final class PaneView: NSView {
             placeholder.rootView = view
         } else {
             let hosting = NSHostingView(rootView: view)
-            hosting.frame = bounds
+            // Under the header, which keeps its title and glyph (DESIGN §8,
+            // "Pane cards").
+            hosting.frame = PaneCardStyle.contentFrame(in: bounds)
             hosting.autoresizingMask = [.width, .height]
-            addSubview(hosting, positioned: .below, relativeTo: focusOverlay)
+            addSubview(hosting, positioned: .below, relativeTo: header)
             placeholder = hosting
             // The dead terminal had keyboard focus: the pane takes it, so
             // Return reaches ``keyDown(with:)``.

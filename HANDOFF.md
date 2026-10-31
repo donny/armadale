@@ -376,7 +376,36 @@ The agreed design is `docs/DESIGN.md` section 8, "Pane cards" (owner's
 four decisions recorded there; the "Show pane headers" preference is
 deferred, section 13). This commit is the design only; the
 implementation follows through the implementer → reviewer loop and
-needs the Mac for live checks.
+needs the Mac for live checks. Committed as 20b315b.
+
+October 31, 2026, morning (implementer → reviewer loop): **pane cards
+implemented.** `Panes/PaneCardStyle.swift` (pure geometry and borders:
+gutter 8, gap 8, radius 10, header 28, 4 pt to the grid, padding 10,
+hairline 0.5 pt at 12 %, focus 1.5 pt accent at 55 %, the header text
+width rule, the menu origin), `Panes/PaneHeaderView.swift`
+(`PaneHeaderModel`, the SwiftUI header, `PaneHeaderHostingView`: a click
+focuses the pane; "…", right-click and Control-click open `paneMenu()`),
+`PaneView` and `EmptyPaneView` as clipped rounded cards hosting the
+header, `SplitTreeView` with an 8 pt invisible divider,
+`ContentViewController` insetting the split tree, `SessionRegistry`
+feeding the headers (title, `~`-abbreviated directory only after an OSC 7
+report, status glyph, attention). Deviations recorded in DESIGN §8 "As
+built": directory hidden when equal to the title and shown only after
+OSC 7; title and directory share the header (directory at least 40 pt
+or 40 % of the text width, dropped only when the title would go under
+40 pt); the placeholder covers only the area below the header; the "…"
+menu right-aligns on the rightmost pane; a once-reported directory can
+go stale (accepted). **Checked live** (implementer, light and dark via a
+test-only injected dylib; reviewer, light): 2 × 2 split, two themes side
+by side from "…" and from a header right-click, lone and zoomed panes,
+empty pane at 90/165/185 pt, Session Ended pane, divider drag in the gap,
+vim with mouse=a keeping its right-clicks while the header opens the
+menu, mouse bytes reaching `cat -v` for right, Control and left clicks,
+`stty size` after split/zoom/resize/drag, a bell's ◐ and purple title,
+typing after every header action, the three review fixes. **Not checked
+live:** the *Disconnected* placeholder, Increase Contrast, dark mode for
+the review fixes, release on the respawn path (the close path is
+tested). Tests: 675, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

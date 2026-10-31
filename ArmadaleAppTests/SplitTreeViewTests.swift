@@ -136,7 +136,8 @@ struct SplitTreeViewTests {
         }
         #expect(surfaceA.sizes.count == 1)
         #expect(surfaceB.sizes.count == 1)
-        #expect(abs(paneA.frame.width - 300) <= 1)
+        // The gap between the cards is the divider (DESIGN §8, "Pane cards").
+        #expect(abs(paneA.frame.width - (1000 - PaneCardStyle.gap) * 0.3) <= 1)
     }
 }
 

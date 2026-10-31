@@ -941,7 +941,10 @@ public final class AppModel {
         return "\(base) \(n)"
     }
 
-    private func abbreviatedDirectory(_ directory: String, location: Location) -> String {
+    /// `directory` as shown to the user: a local path under the home
+    /// directory with `~` for it, blank as `~`, a host's path as it is
+    /// (favorite names, pane headers).
+    public func abbreviatedDirectory(_ directory: String, location: Location) -> String {
         let trimmed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "~" }
         guard case .local = location else { return trimmed }

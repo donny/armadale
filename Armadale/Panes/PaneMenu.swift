@@ -43,9 +43,11 @@ struct PaneThemeBinding: Sendable {
 }
 
 /// The context menu of a pane (``PaneView/paneMenu()``,
-/// ``EmptyPaneView/paneMenu()``). No mouse event opens it yet: right-click
-/// and Control-click stay the program's, and the owner is choosing an
-/// entry point (DESIGN §8, "Pane context menu").
+/// ``EmptyPaneView/paneMenu()``), opened from the pane card's header: its
+/// "…" button, or a right-click or Control-click on it
+/// (``PaneHeaderHostingView``). Over the terminal, right-click and
+/// Control-click stay the program's (DESIGN §8, "Pane context menu",
+/// "Pane cards").
 ///
 /// ``make(_:actions:)`` is a pure function of its inputs, so the menu can be
 /// tested without a window. Items added later take their state from new

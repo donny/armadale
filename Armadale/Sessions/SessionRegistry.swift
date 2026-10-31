@@ -196,6 +196,10 @@ final class SessionRegistry {
             return self.displayName(of: controller.session)
         }
         pane.onRetryPersistence = { [weak self] in self?.retryPersistence() }
+        pane.headerSource = { [weak self, weak controller] in
+            guard let self, let controller else { return PaneHeaderModel(status: .ended, title: "Shell", directory: nil) }
+            return self.headerModel(for: controller.session.id)
+        }
         panes[sessionID] = pane
         return pane
     }
@@ -318,6 +322,7 @@ final class SessionRegistry {
     /// Unavailable sessions cannot be reached, so they are left running.
     func close(_ sessionID: SessionID) {
         guard finishedSessionIDs.insert(sessionID).inserted else { return }
+        reportedDirectories.remove(sessionID)
         let wasRestored = restoredSessionIDs.remove(sessionID) != nil
         if let pane = panes.removeValue(forKey: sessionID) {
             pane.removeFromSuperview()
@@ -708,6 +713,30 @@ final class SessionRegistry {
 
     // MARK: Helpers
 
+    /// The sessions whose program has reported its working directory (OSC
+    /// 7) since this launch. Only their directory is shown in a pane header:
+    /// `Session.workingDirectory` is otherwise the directory the session
+    /// started in, which a shell sending no OSC 7 leaves behind at its first
+    /// `cd` (DESIGN §8, "Pane cards"). Restored sessions count as unreported
+    /// until they report again.
+    private var reportedDirectories: Set<SessionID> = []
+
+    /// What the header of `sessionID`'s pane card shows (DESIGN §8, "Pane
+    /// cards"): its glyph (◐ while it needs attention), the session's title
+    /// else its profile's name, its working directory once its program has
+    /// reported it (else nothing: unknown), and its attention.
+    func headerModel(for sessionID: SessionID) -> PaneHeaderModel {
+        guard let session = model.session(sessionID) else {
+            return PaneHeaderModel(status: glyphStatus(of: sessionID), title: "Shell", directory: nil)
+        }
+        return PaneHeaderModel(
+            status: glyphStatus(of: sessionID),
+            title: PaneHeaderModel.title(sessionTitle: session.title, profileName: model.profile(session.profileID)?.name),
+            directory: reportedDirectories.contains(sessionID)
+                ? model.abbreviatedDirectory(session.workingDirectory, location: session.location) : nil,
+            needsAttention: attention?.needsAttention(sessionID) ?? false)
+    }
+
     private func displayName(of session: Session) -> String {
         if !session.title.isEmpty { return session.title }
         return model.profile(session.profileID)?.name ?? "Shell"
@@ -763,6 +792,7 @@ extension SessionRegistry: SessionControllerDelegate {
     }
 
     func sessionController(_ controller: SessionController, didChangeDirectory path: String) {
+        reportedDirectories.insert(controller.session.id)
         model.setWorkingDirectory(path, for: controller.session.id)
     }
 
@@ -780,6 +810,7 @@ extension SessionRegistry: SessionControllerDelegate {
         }
         finishedSessionIDs.insert(old)
         restoredSessionIDs.remove(old)
+        reportedDirectories.remove(old)
         model.replaceSession(old, with: new)
         onSessionRetired?(old)
     }

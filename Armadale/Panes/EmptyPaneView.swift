@@ -1,10 +1,12 @@
 import AppKit
 import ArmadaleCore
 import SwiftUI
+import TerminalSurface
 
-/// An empty pane (no session yet): the New Session chooser
-/// (``NewSessionPaneView``) over the terminal theme's background, with the
-/// same focus border as a ``PaneView``. Owned by the content controller,
+/// An empty pane (no session yet), drawn as a card like a ``PaneView``
+/// (DESIGN §8, "Pane cards"): a header with no glyph and the title "New
+/// Session", and below it the New Session chooser (``NewSessionPaneView``)
+/// over the terminal theme's background, with the same borders. Owned by the content controller,
 /// one per empty pane on screen, and dropped once the pane has a session or
 /// is no longer shown.
 ///
@@ -23,7 +25,10 @@ final class EmptyPaneView: NSView {
     /// background, and ``paneMenu()``'s check mark.
     private let theme: PaneThemeBinding
     private let hosting: NSHostingView<NewSessionPaneView>
-    private let focusOverlay = PassThroughView()
+    /// Draws the card's border (``PaneCardStyle/border(for:foreground:)``); never takes the mouse.
+    let focusOverlay = PassThroughView()
+    /// The card's header row.
+    let header = PaneHeaderHostingView.make(model: .newSession)
     private var appearanceObservation: Task<Void, Never>?
 
     /// How the pane shows focus, as ``PaneView/focusStyle``.
@@ -42,11 +47,16 @@ final class EmptyPaneView: NSView {
         hosting = NSHostingView(rootView: NewSessionPaneView(chooser: chooser))
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         wantsLayer = true
-        hosting.frame = bounds
+        hosting.frame = PaneCardStyle.contentFrame(in: bounds)
         hosting.autoresizingMask = [.width, .height]
         hosting.sizingOptions = []
         addSubview(hosting)
         hosting.rootView = NewSessionPaneView(chooser: chooser) { [weak self] in self?.focusPane() }
+        header.frame = PaneCardStyle.headerFrame(in: bounds)
+        header.autoresizingMask = [.width, .minYMargin]
+        header.focusPane = { [weak self] in self?.focusPane() }
+        header.makeMenu = { [weak self] in self?.paneMenu() }
+        addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
         focusOverlay.wantsLayer = true
@@ -68,9 +78,9 @@ final class EmptyPaneView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     /// Gives the pane keyboard focus. A click on the pane outside the card
-    /// lands here through the chooser's clear background (its tap gesture);
-    /// the hosting view covers the whole pane, so the pane itself never
-    /// sees a mouse down.
+    /// lands here through the chooser's clear background (its tap gesture),
+    /// and a click on the header through the header; the two cover the
+    /// whole pane, so the pane itself never sees a mouse down.
     func focusPane() {
         guard let window, window.firstResponder !== self else { return }
         window.makeFirstResponder(self)
@@ -100,8 +110,7 @@ final class EmptyPaneView: NSView {
     // MARK: Context menu
 
     /// The pane's context menu, as ``PaneView/paneMenu()``: built fresh
-    /// each time, opened by no mouse event yet (DESIGN §8, "Pane context
-    /// menu").
+    /// each time, opened from the header (DESIGN §8, "Pane cards").
     func paneMenu() -> NSMenu {
         let theme = theme
         return PaneMenu.make(
@@ -111,17 +120,11 @@ final class EmptyPaneView: NSView {
 
     // MARK: Appearance
 
+    /// The card's corners, background and border for the current theme
+    /// and focus style.
     private func updateFocusOverlay() {
-        guard let layer = focusOverlay.layer else { return }
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            switch focusStyle {
-            case .alone, .unfocused:
-                layer.borderWidth = 0
-            case .focused:
-                layer.borderWidth = 1.5
-                layer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.55).cgColor
-            }
-        }
+        let cardTheme = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: theme.current()).theme
+        PaneCardStyle.apply(to: self, overlay: focusOverlay, style: focusStyle, theme: cardTheme)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -135,16 +138,15 @@ final class EmptyPaneView: NSView {
     }
 
     /// The terminal theme's background, so an empty pane sits among
-    /// terminals like one of them.
+    /// terminals like one of them, and its foreground in the header.
     private func applyAppearance() {
         let paneThemeID = theme.current()
         matchAppearance(toPaneTheme: settings.paneTheme(paneThemeID))
-        updateFocusOverlay()
-        let background = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID)
-            .theme.background
-        layer?.backgroundColor = CGColor(
-            srgbRed: CGFloat(background.red) / 255, green: CGFloat(background.green) / 255,
-            blue: CGFloat(background.blue) / 255, alpha: 1)
+        let cardTheme = settings.terminalAppearance(for: effectiveAppearance, paneThemeID: paneThemeID).theme
+        PaneCardStyle.apply(to: self, overlay: focusOverlay, style: focusStyle, theme: cardTheme)
+        var model = PaneHeaderModel.newSession
+        model.foreground = cardTheme.foreground
+        header.model = model
     }
 
     private func observeAppearance() {
