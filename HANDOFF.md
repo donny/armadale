@@ -598,6 +598,18 @@ without UI: a `--skip-notarize` run passes every in-image check; a
 broken app copy fails it and the image is detached. Tests: 695, zero
 warnings.
 
+Committed as a39f3ab (rebased over two GitHub-made CNAME commits from the
+Pages settings). Then `scripts/bump-build.sh --version 0.1.1 --commit`
+(7560281, build 27), a full `scripts/release.sh` run (app and DMG
+notarizations Accepted, stapled ticket validated inside the image,
+Gatekeeper "Notarized Developer ID" for both), tag `v0.1.1` at 7560281,
+and GitHub release v0.1.1 with `Armadale-0.1.1.dmg` and the same file as
+`Armadale.dmg` (the site's stable link; checked: the download redirects
+to it, the bytes match, `spctl` accepts, `stapler validate` passes). The
+first public release (November 5, 2026, afternoon). The owner has not yet
+opened the DMG to judge the Finder window, nor installed 0.1.1
+(`~/Applications/Armadale.app` is still the earlier 0.1.0 build).
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
