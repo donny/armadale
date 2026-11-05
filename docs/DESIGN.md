@@ -2060,6 +2060,26 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     it as it does Settings; in menu bar mode it is ordered out with
     Settings and closing it hides the app the same way. A `settingsTab`
     preference still reading `shortcuts` opens General.
+  - **Help › Acknowledgements** (`Help/AcknowledgementsWindowController.swift`,
+    November 4, 2026) shows the third-party notices bundled as
+    `Contents/Resources/Acknowledgements.txt` (source
+    `Armadale/Resources/`): SwiftTerm's and the persistence helper's
+    copyright lines and MIT license texts, verbatim from
+    `THIRD_PARTY_LICENSES.md`, and the colour-scheme credits. The MIT
+    license requires the notices in every copy, and the DMG is one. The
+    helper is named "the persistence helper" there, never by its
+    runtime's name (`AcknowledgementsTests` checks that, and that every
+    copyright line, license text and credit of `THIRD_PARTY_LICENSES.md`
+    is in the bundled file, so the file cannot gain a notice the bundle
+    lacks; the texts are compared with upstream by hand on a SwiftTerm or
+    helper bump). One window, kept by
+    the app delegate like Keyboard Shortcuts: a read-only, selectable,
+    plain-text `NSTextView` in the small monospaced system font, 560 × 520
+    points, resizable, centred, titled "Acknowledgements", no document;
+    choosing the item again brings the same window forward, ⌘W closes it,
+    and in menu bar mode it is ordered out and its closing hides the app
+    as for Settings. The item has no key equivalent, so it is not a row
+    of the shortcut table.
   - The window is titled "Settings" whatever the tab, and ⌘W (File ›
     Close Pane, which only workspace windows otherwise handle) closes it.
   - A profile's environment variables must have a non-empty name without
@@ -3079,11 +3099,13 @@ armadale/
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
 │   ├── Settings/                    SettingsWindowController, Preferences, SwiftUI tabs
 │   │                                (General, Appearance, Profiles, Hosts, Favorites)
-│   ├── Help/                        ShortcutTable, ShortcutsWindowController (Help › Keyboard Shortcuts)
+│   ├── Help/                        ShortcutTable, ShortcutsWindowController (Help › Keyboard Shortcuts),
+│   │                                AcknowledgementsWindowController (Help › Acknowledgements)
 │   ├── Resources/                   AppIcon.icon (Icon Composer document), Assets.xcassets
 │   │                                (AppIcon rasters, StatusItem template glyph), Info.plist,
 │   │                                Armadale.entitlements,
-│   │                                armadale-notify (helper for agent hooks → Contents/Resources)
+│   │                                armadale-notify (helper for agent hooks → Contents/Resources),
+│   │                                Acknowledgements.txt (third-party notices → Contents/Resources)
 │   └── Support/                     ThemeCatalog (built-in + user themes), AppSettings
 │                                    (+ SurfaceRegistry.standard), HierarchyDragItem,
 │                                    InlineRenameField, UserNotificationService;
@@ -3101,6 +3123,9 @@ armadale/
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
 │                                    render-app-icon.swift, release.sh, install-release.sh
 ├── docs/                            DESIGN.md, icon/AppIcon.svg (generated master vector)
+├── LICENSE, CONTRIBUTING.md         MIT license; contribution terms
+├── THIRD_PARTY_LICENSES.md          bundled components' licenses, colour-scheme credits
+│                                    (mirrored in Armadale/Resources/Acknowledgements.txt)
 ├── AGENTS.md                        how to work in this repository (process, rules, test hosts)
 └── HANDOFF.md                       where development stopped (status, next step, open items)
 ```
@@ -3173,7 +3198,18 @@ stapled DMG**.
   why); `embed-zmx.sh` already follows the build's identity and hardened
   flag. `armadale-notify` is a shell script in Resources and is not
   Mach-O; the Linux `zmx` binaries are data. Nothing else in the bundle
-  needs signing. A Release build must launch and run sessions: the
+  needs signing.
+- **Third-party notices.** SwiftTerm (linked) and `zmx` (bundled) are
+  MIT-licensed, which requires their copyright and license notices in
+  every copy; the DMG is one. They ship in the bundle as
+  `Contents/Resources/Acknowledgements.txt`, shown by Help ›
+  Acknowledgements (section 8), with the colour-scheme credits; it is a
+  plain resource and needs no signing of its own. When a bundled
+  component or its notice changes, update `THIRD_PARTY_LICENSES.md` and
+  the resource together (`AcknowledgementsTests` fails when the file
+  gains a notice the resource lacks; nothing compares either with the
+  upstream text, so re-read the upstream LICENSE on a bump). A Release
+  build must launch and run sessions: the
   AMFI concern (a restricted entitlement on a helper) is what
   `scripts/check-quit.sh` against the Release app proves absent.
 - **`scripts/release.sh`** builds the artifact from a clean working

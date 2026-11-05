@@ -514,13 +514,51 @@ history and scripts for anything that should not be public; the notices
 shipped inside the app bundle with a Help › Acknowledgements item (the
 MIT condition is that the notice accompanies every copy, and the DMG is
 a copy; in-app text must say "persistence helper", never the helper's
-name); the site under `site/` served by GitHub Pages with the DMG as a
-GitHub Release here (`releases/latest/download/Armadale.dmg` as a stable
+name); the site under `docs/` (GitHub Pages serves a branch root or
+`docs/`, and Actions are off) with the DMG as a GitHub Release here (`releases/latest/download/Armadale.dmg` as a stable
 link); Namecheap DNS (A records to GitHub Pages, `www` CNAME, domain
 verification TXT) and Enforce HTTPS, which a `.dev` domain requires; a
 notarized DMG from a full `scripts/release.sh` run, since the installed
 build is made with `--skip-notarize`. The repository visibility change
 is the owner's to flip.
+
+Committed as 7047a64.
+
+November 4, 2026, later evening (owner: "go with all three"; coordinator
+scan and site, implementer → reviewer loop for the code, no live UI as
+the Mac was not declared free): **ready to go public.** (1) **Scan:** all
+80 commits and 663 unique blobs grepped for key material (private keys,
+GitHub/AWS/Slack/Anthropic token shapes, JWTs): none. The tree holds
+the team ID, the bundle id, the notary profile name, the Lima VM name
+and `/Users/donny` in test fixtures, none of them secret; HANDOFF and
+AGENTS describe this Mac in detail, which is the owner's call. Ever-
+tracked paths: only `.github/workflows/ci.yml` and superseded sources
+were deleted; no plist, key or env file was ever committed. (2) **Help ›
+Acknowledgements:** `Armadale/Resources/Acknowledgements.txt` (SwiftTerm's
+and the persistence helper's MIT notices verbatim, the palette credits,
+never the helper's name), `Armadale/Help/AcknowledgementsWindowController.swift`
+(one window kept by the app delegate like Keyboard Shortcuts, read-only
+selectable monospaced text, hidden in menu bar mode), the Help menu item
+without a shortcut, `AcknowledgementsTests` (the file cannot gain a
+notice the bundle lacks; no "zmx" in the resource). Review: no blocker;
+low findings fixed by the coordinator (DESIGN no longer claims the two
+files "cannot drift"; the inert find-bar lines dropped; the text view
+is the window's initial first responder; the About panel's "All rights
+reserved" now reads "MIT License"). Accepted: no test checks the app
+bundle itself for the resource (the reviewer confirmed it by hand);
+`showAcknowledgements` is covered by reading, not a test. **Not checked
+live:** the window's look in light and dark, ⌘W, bring-to-front on a
+second request, menu bar mode hiding; `scripts/check-quit.sh` not re-run
+(the quit code is untouched). (3) **Site:** `docs/index.html`, `docs/CNAME`
+(armadale.dev), `docs/.nojekyll`; icon, name, tagline, a Download button
+to `releases/latest/download/Armadale.dmg`, an All releases link and a
+Source link, dark mode, phone width; the reviewer's contrast finding
+fixed (dark text on the accent, 5.6:1). README "Releasing" gained step 4
+(tag, `gh release create` with the DMG uploaded under its versioned
+name and as `Armadale.dmg`) and "The website" (Pages from `main`
+`/docs`, DNS records, Enforce HTTPS). Every GitHub link on the page is
+dead until the repository is public, Pages is on and a release carries
+`Armadale.dmg`. Tests: 692, zero warnings.
 
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero

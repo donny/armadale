@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     let settings: AppSettings
     private var settingsWindowController: SettingsWindowController?
     private var shortcutsWindowController: ShortcutsWindowController?
+    private var acknowledgementsWindowController: AcknowledgementsWindowController?
     /// Session controllers for every pane shown so far.
     private let registry: SessionRegistry
     /// Which sessions need attention; the Dock badge and notifications.
@@ -557,6 +558,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.activate()
     }
 
+    /// Help › Acknowledgements: the one window with the third-party
+    /// notices bundled as `Acknowledgements.txt`.
+    @objc func showAcknowledgements(_ sender: Any?) {
+        let controller = AcknowledgementsWindowController.reusing(acknowledgementsWindowController)
+        controller.onClose = { [weak self] in
+            self?.auxiliaryWindowDidClose()
+        }
+        acknowledgementsWindowController = controller
+        NSApp.unhide(nil) // hidden after a window closed in menu bar mode
+        controller.show()
+        NSApp.activate()
+    }
+
     /// View › Bigger (⌘=): every pane; stored like the Settings font size.
     @objc func increaseFontSize(_ sender: Any?) {
         settings.preferences.increaseFontSize()
@@ -775,6 +789,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         settingsWindowController?.window?.orderOut(nil)
         shortcutsWindowController?.window?.orderOut(nil)
+        acknowledgementsWindowController?.window?.orderOut(nil)
         NSApp.setActivationPolicy(.accessory)
         let registry = registry
         menuBarItem = MenuBarStatusItem(
@@ -806,20 +821,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Closing Settings or Keyboard Shortcuts (⌘W) in menu bar mode would
-    /// leave an active accessory app with no window, taking keystrokes
-    /// nowhere: once the close is done, and no such window is left on
-    /// screen, the app hides, which activates the app that was active
-    /// before (`NSApp.deactivate()` does not, for an accessory app: it
+    /// Closing Settings, Keyboard Shortcuts or Acknowledgements (⌘W) in
+    /// menu bar mode would leave an active accessory app with no window,
+    /// taking keystrokes nowhere: once the close is done, and no such
+    /// window is left on screen, the app hides, which activates the app
+    /// that was active before (`NSApp.deactivate()` does not, for an accessory app: it
     /// stayed the frontmost application). The status item stays; every
     /// way back unhides (``leaveMenuBarMode()``, ``showSettings(tab:)``,
-    /// ``showKeyboardShortcuts(_:)``).
+    /// ``showKeyboardShortcuts(_:)``, ``showAcknowledgements(_:)``).
     private func auxiliaryWindowDidClose() {
         guard menuBarItem != nil else { return }
         Task { @MainActor [weak self] in
             guard let self, self.menuBarItem != nil,
                   self.settingsWindowController?.window?.isVisible != true,
-                  self.shortcutsWindowController?.window?.isVisible != true
+                  self.shortcutsWindowController?.window?.isVisible != true,
+                  self.acknowledgementsWindowController?.window?.isVisible != true
             else { return }
             NSApp.hide(nil)
         }

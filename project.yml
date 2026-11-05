@@ -40,6 +40,9 @@ targets:
       # Contents/Resources/armadale-notify, a POSIX sh script (executable).
       - path: Armadale/Resources/armadale-notify
         buildPhase: resources
+    # Armadale/Resources/Acknowledgements.txt (Help › Acknowledgements, the
+    # third-party notices) is a resource by its extension:
+    # Contents/Resources/Acknowledgements.txt.
     info:
       path: Armadale/Resources/Info.plist
       properties:
@@ -48,7 +51,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.developer-tools
-        NSHumanReadableCopyright: "Copyright © 2026 Donny Kurniawan.\nAll rights reserved."
+        NSHumanReadableCopyright: "Copyright © 2026 Donny Kurniawan.\nMIT License."
         NSPrincipalClass: ArmadaleApplication
         # Quitting must go through applicationWillTerminate so state is saved.
         NSSupportsAutomaticTermination: false
@@ -202,6 +205,10 @@ targets:
         excludes:
           - App/main.swift
           - Resources/**
+      # The acknowledgements, so AcknowledgementsTests read them from a
+      # bundle as the app does.
+      - path: Armadale/Resources/Acknowledgements.txt
+        buildPhase: resources
     dependencies:
       - package: ArmadaleCore
       - package: ArmadaleSessions

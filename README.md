@@ -484,12 +484,43 @@ To release:
    a file with that name is not a release. The script prints the suggested
    `git tag` command; tagging and publishing are up to you.
 
+4. Publish it as a GitHub Release so the website can link to it. The
+   site's Download button points at the latest release's asset named
+   exactly `Armadale.dmg`, a URL GitHub keeps stable across releases, so
+   upload the DMG twice: under its versioned name for people browsing the
+   releases page, and as `Armadale.dmg` for the button.
+
+   ```sh
+   git tag v<version> && git push origin v<version>
+   cp build/release/Armadale-<version>.dmg build/release/Armadale.dmg
+   gh release create v<version> --title "Armadale <version>" --notes "…" \
+     build/release/Armadale-<version>.dmg build/release/Armadale.dmg
+   ```
+
+   The DMG must be the notarized one: Gatekeeper refuses a `--skip-notarize`
+   build downloaded from the web.
+
 To run the release build on this Mac, `scripts/install-release.sh` runs
 `scripts/release.sh` (passing on any options, such as `--skip-notarize`),
 mounts the DMG and installs the app from it into `~/Applications`,
 replacing the copy there. It refuses while Armadale is running (quit it
 first; persistent sessions keep running). `--from-dmg` installs the DMG
 already in `build/release/` without building again.
+
+### The website
+
+[armadale.dev](https://armadale.dev) is the static page in `docs/`
+(`index.html`, the icon, `CNAME`, `.nojekyll`), served by GitHub Pages
+from the `docs` folder of `main`: Settings › Pages › "Deploy from a
+branch", `main`, `/docs`, custom domain `armadale.dev`, Enforce HTTPS
+(a `.dev` domain is HTTPS-only). GitHub Pages is free for a public
+repository only. DNS at the registrar: `A` records for the apex to
+GitHub Pages (185.199.108.153, 185.199.109.153, 185.199.110.153,
+185.199.111.153), `CNAME www` to `donny.github.io`, and the
+`_github-pages-challenge-donny` TXT record from GitHub's domain
+verification. `docs/DESIGN.md` is served too, as a raw file; that is
+fine, the repository is public. A change to the page is a normal commit
+on `main`; Pages redeploys within a minute or two.
 
 `scripts/release.sh --skip-notarize` (no credentials needed) stops after
 the signature checks and builds `build/release/Armadale-<version>-unnotarized.dmg`,
@@ -509,7 +540,7 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
 | `docs/` | `DESIGN.md` (the design contract), `icon/AppIcon.svg` (master vector of the app icon, generated) |
-| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), `AttentionCenter`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog`, `AppSettings` and `UserNotificationService` (`Support/`), `Resources/armadale-notify` |
+| `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), `AttentionCenter`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog`, `AppSettings` and `UserNotificationService` (`Support/`), `Resources/armadale-notify`, `Resources/Acknowledgements.txt` (the third-party notices shown by Help › Acknowledgements) |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `AttentionTracker`, `AgentIntegration`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
@@ -523,4 +554,5 @@ Armadale is open source under the [MIT License](LICENSE). Contributions
 are accepted under the same terms ([CONTRIBUTING.md](CONTRIBUTING.md)).
 The licenses of the components it bundles, SwiftTerm and the persistence
 helper, and the credits for the built-in colour schemes are in
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md); the app carries the
+same notices under Help › Acknowledgements.

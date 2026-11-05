@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Armadale</title>
+  <meta name="description" content="Armadale is a native macOS terminal for running and supervising persistent agent sessions.">
+  <link rel="icon" type="image/svg+xml" href="icon/AppIcon.svg">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f5f7;
+      --fg: #1d1d1f;
+      --muted: #6e6e73;
+      --accent: #f26b4a;
+      --accent-fg: #1d1d1f;
+      --rule: rgba(0, 0, 0, 0.12);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1e2228;
+        --fg: #f0f0f2;
+        --muted: #9a9ea6;
+        --rule: rgba(255, 255, 255, 0.14);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font: 17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      padding: 0 16px;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 64px 0 48px;
+    }
+    .icon { width: 160px; height: 160px; }
+    h1 {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 20px 0 8px;
+    }
+    .tagline {
+      max-width: 34em;
+      margin: 0 0 32px;
+      color: var(--muted);
+      font-size: 19px;
+    }
+    .download {
+      display: inline-block;
+      background: var(--accent);
+      color: var(--accent-fg);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 17px;
+      padding: 13px 28px;
+      border-radius: 999px;
+    }
+    .download:hover { filter: brightness(1.06); }
+    .download:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+    .requirements {
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    footer {
+      border-top: 1px solid var(--rule);
+      padding: 16px 0 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    footer a, .requirements a { color: inherit; }
+  </style>
+</head>
+<body>
+  <main>
+    <img class="icon" src="icon/AppIcon.svg" alt="" width="160" height="160">
+    <h1>Armadale</h1>
+    <p class="tagline">A native macOS terminal for running and supervising persistent agent sessions.</p>
+    <a class="download" href="https://github.com/donny/armadale/releases/latest/download/Armadale.dmg">Download for Mac</a>
+    <p class="requirements">macOS 27 or later, Apple silicon. <a href="https://github.com/donny/armadale/releases/latest">All releases</a></p>
+  </main>
+  <footer>
+    Open source under the MIT License · <a href="https://github.com/donny/armadale">Source on GitHub</a>
+  </footer>
+</body>
+</html>

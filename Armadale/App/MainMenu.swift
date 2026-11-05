@@ -200,6 +200,9 @@ enum MainMenu {
         // No key equivalent, so the table it shows is not changed by it.
         help.addItem(withTitle: "Keyboard Shortcuts",
                      action: #selector(AppDelegate.showKeyboardShortcuts(_:)), keyEquivalent: "")
+        // The third-party notices the MIT licenses require in every copy.
+        help.addItem(withTitle: "Acknowledgements",
+                     action: #selector(AppDelegate.showAcknowledgements(_:)), keyEquivalent: "")
         if installsSpecialMenus { NSApp.helpMenu = help }
 
         markOwnItems(in: main, path: "")
