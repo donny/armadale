@@ -516,3 +516,11 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
 | `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |
+
+## License
+
+Armadale is open source under the [MIT License](LICENSE). Contributions
+are accepted under the same terms ([CONTRIBUTING.md](CONTRIBUTING.md)).
+The licenses of the components it bundles, SwiftTerm and the persistence
+helper, and the credits for the built-in colour schemes are in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

@@ -495,6 +495,33 @@ zoomed from its typing); it released them, rewrote the helper, and the
 reviewer and the coordinator confirmed no modifier held afterwards
 (`CGEventSource.flagsState`). Tests: 686, zero warnings.
 
+Committed as c2c3aa2.
+
+November 4, 2026, evening (owner's decision, coordinator): **MIT
+License.** The owner plans to make the repository public and to put a
+simple site at armadale.dev (bought at Namecheap; a logo and a DMG link;
+GitHub Pages, free once the repository is public). Options weighed:
+plain MIT, MIT with the Commons Clause, the marketplace-only variant of
+it (as joseph/mud uses), BSL/FSL and AGPL; the owner first chose
+"anyone can read and fork, only I ship it through stores", then plain
+MIT for simplicity, as SwiftTerm, Ghostty and the persistence helper
+are. Added: `LICENSE` (MIT, the owner's name), `CONTRIBUTING.md`
+(contributions under the same license), `THIRD_PARTY_LICENSES.md`
+(SwiftTerm's and the persistence helper's MIT notices in full, credits
+for the six built-in palettes) and a README "License" section. Still to
+do before the switch to public, each for its own go-ahead: a scan of the
+history and scripts for anything that should not be public; the notices
+shipped inside the app bundle with a Help › Acknowledgements item (the
+MIT condition is that the notice accompanies every copy, and the DMG is
+a copy; in-app text must say "persistence helper", never the helper's
+name); the site under `site/` served by GitHub Pages with the DMG as a
+GitHub Release here (`releases/latest/download/Armadale.dmg` as a stable
+link); Namecheap DNS (A records to GitHub Pages, `www` CNAME, domain
+verification TXT) and Enforce HTTPS, which a `.dev` domain requires; a
+notarized DMG from a full `scripts/release.sh` run, since the installed
+build is made with `--skip-notarize`. The repository visibility change
+is the owner's to flip.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
