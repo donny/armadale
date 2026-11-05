@@ -96,12 +96,16 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 - macOS 27, Xcode 27 (Swift 6.4)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- For releases only: `/usr/bin/python3` (it comes with Xcode), into which
+  `scripts/fetch-dmgbuild.sh` installs the pinned dmgbuild (see
+  [Releasing](#releasing))
 
 ## Generate, build, test
 
 ```sh
 scripts/fetch-zmx.sh  # downloads the pinned zmx into Vendor/zmx (git-ignored)
 xcodegen generate     # creates Armadale.xcodeproj (git-ignored)
+# (before a release, once: scripts/fetch-dmgbuild.sh; see Releasing)
 
 # Build the app
 xcodebuild -project Armadale.xcodeproj -scheme Armadale \
@@ -448,6 +452,17 @@ Prerequisites, once per Mac:
   ```
 
   No credentials live in the repository.
+- The pinned [dmgbuild](https://github.com/dmgbuild/dmgbuild), which lays
+  out the DMG's Finder window: run `scripts/fetch-dmgbuild.sh` once. It
+  makes `Vendor/dmgbuild/` (git-ignored) a virtual environment of
+  `/usr/bin/python3` and installs dmgbuild and its two dependencies from
+  `scripts/dmgbuild-requirements.txt`, whose versions and wheel hashes
+  are pinned (`pip install --require-hashes`); nothing is installed
+  outside `Vendor/dmgbuild`. Running it again does nothing while the
+  environment was installed from the current requirements file (it keeps
+  that file's SHA-256) with the pinned versions, and `--check` only
+  verifies. `release.sh`
+  checks it before building and says to run the script if it is missing.
 
 To release:
 
@@ -474,10 +489,13 @@ To release:
    signatures of the app and both helpers (Developer ID of `YJ8LXVCB3T`,
    hardened runtime, secure timestamp, no entitlements on the helpers, only
    the sandbox-off entitlement on the app, a universal persistence
-   helper), notarizes and staples the app, builds the DMG (volume
-   "Armadale" with the app and an Applications link), signs, notarizes
-   and staples it, and checks both with Gatekeeper (`spctl`) and `stapler
-   validate`. Notarization usually takes a few minutes per submission; a
+   helper), notarizes and staples the app, builds the DMG with dmgbuild
+   (volume "Armadale" with the app and an Applications link, laid out in a
+   600 × 400 Finder window with a background showing an arrow and "Drag
+   Armadale to Applications", and the app icon as the volume icon),
+   checks inside it that the app is an exact, validly signed copy, signs,
+   notarizes and staples it, and checks both with Gatekeeper (`spctl`) and
+   `stapler validate`. Notarization usually takes a few minutes per submission; a
    rejected submission fails the script and prints the notary log.
 3. The result is `build/release/Armadale-<version>.dmg`. Until every
    check has passed the DMG is called `Armadale-<version>-pending.dmg`, so
@@ -545,8 +563,9 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
-| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`; edit the script, not the generated files) |
+| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `fetch-dmgbuild.sh` and `dmgbuild-requirements.txt` (the pinned dmgbuild for the DMG), `dmg/settings.py` (the DMG's dmgbuild settings: contents, window, icon positions), `render-dmg-background.swift` (regenerates the DMG window's background, `dmg/background.png`, `dmg/background@2x.png` and `dmg/background.tiff`), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`); edit the scripts, not the generated files |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |
+| `Vendor/dmgbuild/` | dmgbuild virtual environment for releases (`scripts/fetch-dmgbuild.sh`, git-ignored) |
 
 ## License
 

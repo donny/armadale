@@ -3120,8 +3120,12 @@ armadale/
 │   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
+├── Vendor/dmgbuild/                 dmgbuild virtual environment for releases (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
-│                                    render-app-icon.swift, release.sh, install-release.sh
+│                                    render-app-icon.swift, release.sh, install-release.sh,
+│                                    fetch-dmgbuild.sh, dmgbuild-requirements.txt,
+│                                    render-dmg-background.swift, dmg/ (settings.py and the
+│                                    generated window background)
 ├── docs/                            DESIGN.md, icon/AppIcon.svg (generated master vector)
 ├── LICENSE, CONTRIBUTING.md         MIT license; contribution terms
 ├── THIRD_PARTY_LICENSES.md          bundled components' licenses, colour-scheme credits
@@ -3231,6 +3235,8 @@ stapled DMG**.
   4. Build the DMG from the stapled app with `hdiutil` (volume
      "Armadale", the app and an `Applications` symlink, UDZO), sign the
      DMG with the same identity, notarize it the same way, staple it.
+     (Since November 2026 the DMG is built with dmgbuild and has a
+     designed Finder window; see "The DMG window" below.)
   5. Final checks: `spctl --assess --type execute` on the app and
      `spctl --assess --type open --context context:primary-signature` on
      the DMG; `stapler validate` on both. Output
@@ -3330,6 +3336,116 @@ or adds to it:
 - *`hdiutil` on macOS 27* prints a deprecation warning for `create`,
   pointing at `diskutil image create from` (whose folder images are
   APFS). `hdiutil` still works and is kept; the switch is a later chore.
+  dmgbuild also runs `hdiutil create`, `attach` and `convert`, and each
+  prints the same kind of warning on stderr.
+
+**The DMG window (November 2026).** A deviation from the plain DMG of
+step 4: opening the DMG shows a laid-out Finder window instead of two
+icons on white. It is built with
+[dmgbuild](https://github.com/dmgbuild/dmgbuild) (MIT), which writes the
+window's `.DS_Store` directly, so nothing drives Finder or AppleScript and
+the build needs no logged-in UI.
+
+- *Layout.* Icon view, 600 × 400 points (`window_rect` `((200, 250),
+  (600, 400))`; dmgbuild documents y as running bottom to top, and Finder
+  moves a window that would be off screen back onto it), no sidebar,
+  toolbar, status bar or path bar, icon previews off, 128 pt icons with
+  13 pt labels below. Positions are Finder's: each icon's centre, in
+  points from the top-left of the content area. `Armadale.app` is at
+  (150, 200) and the `Applications` symlink at (450, 200); the hidden
+  `.background.tiff`, `.VolumeIcon.icns` and `.DS_Store` are placed at
+  (900, 900), outside the window, so Finder's "show all files" does not
+  put them over the design (dmgbuild writes an `Iloc` for every name in
+  `icon_locations`, whether or not it added the file). The
+  background is the website's light ground `#F5F5F7`; a 3 pt arrow in
+  the website's muted `#6E6E73`, with round caps and an open head, runs
+  from x 230 to 370 at y 200, between the two icons (the app icon's right
+  edge is at 214, the folder's left edge at 386); the caption "Drag
+  Armadale to Applications", system font 13 pt in `#6E6E73`, is centred
+  at (300, 320). The brief said about y 300; the icons' labels occupy
+  about 268–286, so 320 keeps a clear gap under them. Nothing else: no
+  logo (the app icon itself is the first item), no other text.
+- *Background.* `scripts/render-dmg-background.swift` draws it with
+  CoreGraphics and Core Text (offscreen, no UI) in the same top-left
+  coordinates and writes `scripts/dmg/background.png` (600 × 400 px,
+  72 dpi), `background@2x.png` (1200 × 800 px, 144 dpi) and
+  `background.tiff`, both combined with `tiffutil -cathidpicheck`. The
+  three are committed, so a release renders nothing; rerun the script
+  after changing it (`swift scripts/render-dmg-background.swift`), never
+  edit the images. The settings point dmgbuild at the TIFF; dmgbuild
+  copies it into the volume as `.background.tiff` (at the root, not in a
+  `.background/` folder) and records it in `.DS_Store` as an alias and a
+  bookmark. (dmgbuild can also take a PNG and combine an `@2x` file next
+  to it with `tiffutil` itself; the committed TIFF makes that step
+  unnecessary, and the TIFF's name has no `@2x` sibling, so dmgbuild uses
+  it as it is.)
+- *Volume icon.* The plain app icon. `release.sh` builds
+  `build/release/dmg/Armadale.icns` with `iconutil` from the 16–1024 px
+  rasters of `Assets.xcassets/AppIcon.appiconset`, rather than reusing
+  the app's own `Contents/Resources/AppIcon.icns` (compiled by actool
+  from the Icon Composer document), which holds only the 16 and 128 pt
+  sizes. dmgbuild copies it to `.VolumeIcon.icns` and sets the volume's
+  custom-icon flag with `SetFile -a C`.
+- *Image.* `scripts/dmg/settings.py` is the dmgbuild settings file (it is
+  Python): volume "Armadale", UDZO, HFS+ as before, the app (passed as
+  `-D app=…`, copied with `ditto`, so its signature and stapled ticket
+  are kept), the `Applications` → `/Applications` symlink, the volume
+  icon (`-D icon=…`) and the window above. dmgbuild creates a read-write
+  image, attaches it with `-nobrowse` (Finder shows nothing), fills it,
+  shrinks it and converts it to UDZO. dmgbuild attaches the scratch image
+  at `/Volumes/Armadale` and the background bookmark records that path,
+  so the preflight fails with "a volume named Armadale is mounted; eject
+  it first" if one is.
+- *Checks inside the image.* dmgbuild ignores the exit status of the
+  `ditto` that copies the app and of `SetFile`, so before signing the
+  DMG `release.sh` mounts it read-only (`hdiutil attach -nobrowse
+  -noautoopen -readonly` at `build/release/dmg/mount`) and requires:
+  `diff -r` of the archived app and the copy finds nothing; `codesign
+  --verify --deep --strict` passes on the copy; on the notarized path
+  (the DMG is built from the app stapled in step 3) `xcrun stapler
+  validate` passes on the copy; `Applications` is a symlink to
+  `/Applications`; `.background.tiff`, `.VolumeIcon.icns` and `.DS_Store`
+  exist; `GetFileInfo -aC` on the volume prints 1. It detaches the image
+  afterwards, and an `EXIT` trap detaches it when a check fails.
+  Everything after that is unchanged: `codesign` of the DMG, `codesign
+  --verify --strict`, `hdiutil verify`, notarization, stapling and the
+  Gatekeeper checks.
+- *Pinned environment.* `scripts/fetch-dmgbuild.sh` mirrors
+  `fetch-zmx.sh`: it makes `Vendor/dmgbuild/` (git-ignored) a virtual
+  environment of `/usr/bin/python3` (Python 3.9.6 on this Mac, from
+  Xcode) with `python3 -m venv` (its pip comes from Python's bundled
+  ensurepip, so only the packages are downloaded) and installs
+  `scripts/dmgbuild-requirements.txt` with `pip install --isolated
+  --require-hashes --only-binary :all:` and `PIP_CONFIG_FILE=/dev/null`
+  (`--isolated` alone still reads the global and site `pip.conf` and a
+  `PIP_CONFIG_FILE`; `/dev/null` makes pip skip every configuration
+  file): dmgbuild 1.6.5, ds_store 1.3.1
+  and mac_alias 2.2.2, each pinned to the SHA-256 of its PyPI wheel. These
+  are the newest releases that support Python 3.9 (dmgbuild 1.6.6,
+  ds_store 1.3.2 and mac_alias 2.2.3 and later need 3.10; a newer
+  `/usr/bin/python3` works with the same pins, and the script does not
+  check the version). The install stores the SHA-256 of the requirements
+  file in `Vendor/dmgbuild/requirements.sha256`; a run does nothing when
+  that matches the current file, the installed versions are the pinned
+  ones and dmgbuild imports, and otherwise (a changed pin or hash, a
+  broken environment) rebuilds it from an empty directory. A failed
+  install leaves no environment behind. `--check` only verifies, the same
+  way. pip checks the wheel hashes at install time; later runs do not
+  re-hash the installed files. `release.sh` runs `fetch-dmgbuild.sh --check`
+  in its preflight, before the archive, and stops with "run
+  scripts/fetch-dmgbuild.sh" if it fails; it runs dmgbuild as
+  `Vendor/dmgbuild/bin/python3 -I -m dmgbuild` (isolated mode: no
+  `PYTHON*` variables or user site-packages, and no dependence on the
+  `bin/dmgbuild` launcher's absolute interpreter path). Nothing from
+  dmgbuild ships in the DMG.
+- *Not checked without a Finder window.* The `.DS_Store` contents
+  (window bounds, view options, icon positions, background reference) are
+  checked by parsing the file with the environment's `ds_store` module;
+  how Finder actually draws the window has to be looked at by opening the
+  DMG. Whether Finder treats `WindowBounds` as the content size or the
+  whole window including its title bar is not documented; if the latter,
+  the bottom ~28 points of the background are hidden, which is plain
+  ground colour.
 
 ---
 

@@ -560,6 +560,44 @@ name and as `Armadale.dmg`) and "The website" (Pages from `main`
 dead until the repository is public, Pages is on and a release carries
 `Armadale.dmg`. Tests: 692, zero warnings.
 
+Committed as 7fc2e32. The owner then enabled Pages (main, `/docs`), set
+the Namecheap records, verified the domain and ticked Enforce HTTPS once
+GitHub's DNS check (stale for ~30 minutes after the records changed) and
+the Let's Encrypt certificate came through; https://armadale.dev is live
+(November 4, 2026, late evening).
+
+November 5, 2026, after midnight (owner: 0.1.1, dmgbuild, go; implementer
+→ reviewer loop, no Finder on screen): **the release DMG opens to a
+designed Finder window.** `scripts/fetch-dmgbuild.sh` installs dmgbuild
+1.6.5 (with ds_store 1.3.1 and mac_alias 2.2.2, the newest for Xcode's
+Python 3.9.6) into the git-ignored `Vendor/dmgbuild` venv from
+`scripts/dmgbuild-requirements.txt` (sha256-pinned, `--require-hashes
+--only-binary`, `PIP_CONFIG_FILE=/dev/null`), stamping the requirements
+file's hash so `--check` catches a changed pin or hash.
+`scripts/render-dmg-background.swift` draws `scripts/dmg/background.png`,
+`x.png` and the two-representation `background.tiff` (600 × 400 pt,
+#F5F5F7 ground, a #6E6E73 arrow between the icon spots, caption "Drag
+Armadale to Applications" at y 320) deterministically; `scripts/dmg/settings.py`
+places Armadale.app at (150, 200) and Applications at (450, 200), 128 pt
+icons, 13 pt labels, window {{200, 250}, {600, 400}}, sidebar/toolbar/
+status/path bars off, the hidden files parked at (900, 900), the volume
+icon made at release time with iconutil from the appiconset. `release.sh`
+checks dmgbuild in Preflight (and that no volume named Armadale is
+mounted), builds the DMG with it, then mounts the image unbrowsed and
+checks inside before signing: the app identical to the archive (`diff
+-r`), `codesign --verify --deep --strict`, `stapler validate` on the
+notarized path, the Applications link, the background, the volume icon
+flag and `.DS_Store`; an EXIT trap detaches on failure. `DMGLayoutTests`
+checks the committed images' pixel sizes and DPI and the settings values.
+Review: no blocker; the medium (nothing checked inside the image) and
+the lows fixed as above; accepted: no Python version guard (documented).
+**Not checked:** how Finder draws the window (whether `WindowBounds` is
+the content size or the frame, the 2x background on Retina, the volume
+icon on the desktop); the owner opens the notarized DMG. Verified
+without UI: a `--skip-notarize` run passes every in-image check; a
+broken app copy fails it and the image is detached. Tests: 695, zero
+warnings.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the

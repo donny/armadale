@@ -17,6 +17,9 @@ Packages/*/Package.resolved
 # Fetched zmx binaries (scripts/fetch-zmx.sh)
 Vendor/zmx/
 
+# The pinned dmgbuild environment for the release DMG (scripts/fetch-dmgbuild.sh)
+Vendor/dmgbuild/
+
 # SwiftPM / Xcode build products
 .build/
 DerivedData/

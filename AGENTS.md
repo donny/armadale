@@ -149,7 +149,10 @@ agent configuration files. Design deviations are written into
   `scripts/install-release.sh` (the same, then installed to
   `~/Applications`) need the Developer ID certificate in the login
   keychain and the notary profile `armadale-notary`; both exist on this
-  Mac. Never store or print credentials; never create keychain profiles
+  Mac. They also need `scripts/fetch-dmgbuild.sh` run once: it installs
+  dmgbuild, which lays out the DMG's Finder window, into `Vendor/dmgbuild`
+  (git-ignored), pinned with hashes in `scripts/dmgbuild-requirements.txt`.
+  Never store or print credentials; never create keychain profiles
   on the owner's behalf. A release run deletes `build/release/`, takes
   several minutes and submits to Apple, so do not run it casually; the
   Debug gate never touches the keychain. Running the Release app for a

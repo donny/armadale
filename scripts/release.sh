@@ -19,15 +19,18 @@
 # Steps: xcodegen; `xcodebuild archive` (Release) into build/release/;
 # verify the app and both helpers (Developer ID, hardened runtime, secure
 # timestamp, entitlements, universal zmx); notarize and staple the app;
-# build, sign, notarize and staple the DMG; final Gatekeeper checks. Output:
+# build the DMG with dmgbuild (the designed Finder window: background,
+# icon positions, volume icon; scripts/dmg/settings.py), sign, notarize and
+# staple it; final Gatekeeper checks. Output:
 # build/release/Armadale-<MARKETING_VERSION>.dmg (named so only once every
 # check has passed). Nothing is tagged or uploaded; the suggested tag
 # command is printed at the end.
 #
 # Prerequisites: the team's "Developer ID Application" certificate in the
 # login keychain (if several valid ones exist, for example after a renewal,
-# set ARMADALE_SIGNING_IDENTITY to the SHA-1 of the one to use), and
-# (unless --skip-notarize) the notary keychain profile, created once with
+# set ARMADALE_SIGNING_IDENTITY to the SHA-1 of the one to use); the pinned
+# dmgbuild in Vendor/dmgbuild, installed once with scripts/fetch-dmgbuild.sh;
+# and (unless --skip-notarize) the notary keychain profile, created once with
 #   xcrun notarytool store-credentials armadale-notary \
 #     --apple-id <apple id> --team-id YJ8LXVCB3T
 set -euo pipefail
@@ -43,7 +46,7 @@ for arg in "$@"; do
         --skip-notarize) skip_notarize=1 ;;
         --allow-dirty) allow_dirty=1 ;;
         --allow-existing-tag) allow_existing_tag=1 ;;
-        -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "release: unknown option: $arg (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -58,6 +61,19 @@ cd "$(dirname "$0")/.."
 # --- Preflight --------------------------------------------------------------
 step "Preflight"
 command -v xcodegen >/dev/null || fail "xcodegen is not installed (brew install xcodegen)"
+# dmgbuild lays out the DMG (step 4); checked now rather than after the
+# archive and notarization.
+DMGBUILD_PYTHON="Vendor/dmgbuild/bin/python3"
+scripts/fetch-dmgbuild.sh --check >/dev/null 2>&1 \
+    || fail "Vendor/dmgbuild is missing or does not match scripts/dmgbuild-requirements.txt; run scripts/fetch-dmgbuild.sh"
+info "dmgbuild $("$DMGBUILD_PYTHON" -I -c 'from importlib import metadata; print(metadata.version("dmgbuild"))')"
+for file in scripts/dmg/settings.py scripts/dmg/background.tiff; do
+    [ -f "$file" ] || fail "$file is missing"
+done
+# dmgbuild attaches its scratch image at /Volumes/Armadale and records that
+# path in the window's background bookmark; a mounted volume of that name
+# would push it to "/Volumes/Armadale 1".
+[ ! -e /Volumes/Armadale ] || fail "a volume named Armadale is mounted; eject it first"
 
 # --untracked-files=normal: a status.showUntrackedFiles setting must not
 # hide untracked files (XcodeGen compiles whatever is in the source folders).
@@ -286,19 +302,86 @@ else
     FINAL_DMG="$DMG"
 fi
 step "Build $DMG"
-mkdir -p build/release/dmg-root
-ditto "$APP" build/release/dmg-root/Armadale.app
-ln -s /Applications build/release/dmg-root/Applications
-# (On macOS 27 hdiutil warns on stderr that `create` is deprecated in favour
-# of `diskutil image create from`; it is shown on its own line.)
-if ! out="$(hdiutil create -volname Armadale -srcfolder build/release/dmg-root \
-        -fs HFS+ -format UDZO -ov "$DMG" 2>build/release/verify/hdiutil.err)"; then
-    echo "$out" >&2
-    cat build/release/verify/hdiutil.err >&2
-    fail "hdiutil create failed"
+# The volume icon is the plain app icon, made here from the asset catalog's
+# AppIcon rasters (the app's own AppIcon.icns, compiled from the Icon
+# Composer document, holds only the 16 and 128 pt sizes).
+mkdir -p build/release/dmg/Armadale.iconset
+appiconset="Armadale/Resources/Assets.xcassets/AppIcon.appiconset"
+for points in 16 32 128 256 512; do
+    for scale in 1 2; do
+        source="$appiconset/icon_$((points * scale)).png"
+        [ -f "$source" ] || fail "$source is missing (scripts/render-app-icon.swift writes it)"
+        if [ "$scale" = 1 ]; then name="icon_${points}x${points}.png"; else name="icon_${points}x${points}@2x.png"; fi
+        cp "$source" "build/release/dmg/Armadale.iconset/$name"
+    done
+done
+iconutil -c icns -o build/release/dmg/Armadale.icns build/release/dmg/Armadale.iconset \
+    || fail "iconutil could not make the volume icon"
+# dmgbuild (scripts/dmg/settings.py) makes the image: a read-write HFS+
+# volume "Armadale" holding the app (copied with ditto, so its signature and
+# stapled ticket survive), an Applications symlink, the background and the
+# volume icon, with the Finder window's layout in .DS_Store; then converts
+# it to UDZO. -I keeps PYTHON* variables and the user's site-packages out.
+# (On macOS 27 hdiutil warns on stderr that create, attach and convert are
+# deprecated in favour of `diskutil image`; those lines are shown as they
+# come.)
+if ! "$DMGBUILD_PYTHON" -I -m dmgbuild -s scripts/dmg/settings.py \
+        -D app="$APP" -D icon=build/release/dmg/Armadale.icns \
+        Armadale "$DMG"; then
+    fail "dmgbuild failed (output above)"
 fi
-echo "$out" | sed 's/^/    /'
-sed 's/^/    /' build/release/verify/hdiutil.err
+[ -f "$DMG" ] || fail "dmgbuild did not write $DMG"
+info "$DMG ($(du -h "$DMG" | cut -f1 | tr -d ' '))"
+
+# Check inside the image before signing it: dmgbuild ignores the exit
+# status of the ditto that copies the app and of the SetFile that sets the
+# volume icon flag. The image is mounted read-only without showing it in
+# Finder, and detached again even when a check fails.
+MOUNT="$PWD/build/release/dmg/mount"
+mkdir -p "$MOUNT"
+image_mounted=0
+detach_image() {
+    if [ "$image_mounted" = 1 ]; then
+        hdiutil detach "$MOUNT" -quiet 2>/dev/null || hdiutil detach "$MOUNT" -force -quiet 2>/dev/null || true
+        image_mounted=0
+    fi
+    rmdir "$MOUNT" 2>/dev/null || true
+}
+trap detach_image EXIT
+hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MOUNT" "$DMG" >/dev/null 2>&1 \
+    || fail "could not mount $DMG to check it"
+image_mounted=1
+[ -d "$MOUNT/Armadale.app" ] || fail "the DMG has no Armadale.app"
+if ! diff -r "$APP" "$MOUNT/Armadale.app" >build/release/verify/dmg-app.diff 2>&1; then
+    head -20 build/release/verify/dmg-app.diff >&2
+    fail "Armadale.app in the DMG differs from $APP (full list: build/release/verify/dmg-app.diff)"
+fi
+info "Armadale.app in the DMG is identical to the archived app"
+if ! out="$(codesign --verify --deep --strict "$MOUNT/Armadale.app" 2>&1)"; then
+    echo "$out" >&2
+    fail "codesign --verify --deep --strict rejects Armadale.app inside the DMG"
+fi
+info "Armadale.app in the DMG: signature verifies (--deep --strict)"
+if [ "$skip_notarize" = 0 ]; then
+    if ! out="$(xcrun stapler validate "$MOUNT/Armadale.app" 2>&1)"; then
+        echo "$out" >&2
+        fail "Armadale.app inside the DMG has no valid stapled ticket"
+    fi
+    info "Armadale.app in the DMG: stapled ticket validates"
+fi
+[ "$(readlink "$MOUNT/Applications" || true)" = /Applications ] \
+    || fail "the DMG's Applications item is not a symlink to /Applications"
+for file in .background.tiff .VolumeIcon.icns .DS_Store; do
+    [ -f "$MOUNT/$file" ] || fail "the DMG has no $file"
+done
+[ "$(GetFileInfo -aC "$MOUNT" 2>/dev/null || true)" = 1 ] \
+    || fail "the DMG's volume does not have the custom icon flag set (SetFile -a C)"
+info "Applications link, background, volume icon (custom icon flag set) and .DS_Store present"
+hdiutil detach "$MOUNT" -quiet || fail "could not detach the DMG from $MOUNT"
+image_mounted=0
+trap - EXIT
+rmdir "$MOUNT"
+
 codesign --sign "$signing_hash" --timestamp "$DMG" || fail "signing the DMG failed"
 if ! out="$(codesign --verify --strict --verbose=2 "$DMG" 2>&1)"; then
     echo "$out" >&2
