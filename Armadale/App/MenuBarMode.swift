@@ -56,14 +56,57 @@ enum QuitDecision: Equatable, Sendable {
     }
 }
 
+/// Bringing Armadale forward for a window the user just asked for from
+/// the status menu or the main menu (docs/DESIGN.md section 8,
+/// "Activation"). `NSApp.activate()` is cooperative since macOS 14, and
+/// on macOS 27 the system refuses it after a real click on the status
+/// item: the active app keeps the focus and the window opens behind it.
+/// Activating *from* the frontmost app, as if it had yielded, is let
+/// through (measured November 9, 2026).
+enum AppActivation {
+    /// The app to take activation from: the frontmost app when it is
+    /// another one; `nil` (a plain `NSApp.activate()`) when Armadale is
+    /// already frontmost or nothing is.
+    static func source(frontmost: NSRunningApplication?, current: NSRunningApplication) -> NSRunningApplication? {
+        guard let frontmost, frontmost.processIdentifier != current.processIdentifier else { return nil }
+        return frontmost
+    }
+
+    /// Activates the app for a window it has just put on screen.
+    /// `allWindows` brings every window forward (Open Armadale), not only
+    /// the key and main ones.
+    ///
+    /// `activate(from:options:)` is documented for an app the other one has
+    /// yielded to (`yieldActivation(to:)`); the frontmost app here never
+    /// yields. macOS 27 lets the request through anyway (checked live with
+    /// a real status-item click), where the cooperative `NSApp.activate()`
+    /// and a switch to the regular policy were refused. AppKit promises no
+    /// activation at all, so a refusal falls back to the plain request.
+    @MainActor
+    static func bringForward(allWindows: Bool = false) {
+        let current = NSRunningApplication.current
+        if let source = source(frontmost: NSWorkspace.shared.frontmostApplication, current: current),
+           current.activate(from: source, options: allWindows ? [.activateAllWindows] : []) {
+            return
+        }
+        NSApp.activate()
+    }
+}
+
 /// The user-visible wording of the quit question and the status item.
 enum MenuBarText {
     static func alertMessage(running: Int) -> String {
         running == 1 ? "1 session is still running" : "\(running) sessions are still running"
     }
 
-    static let alertInformative = "Armadale can keep them running and stay in the menu bar, where you can "
-        + "reopen it or end the sessions later. Ending the sessions stops every program running in them."
+    static func alertInformative(running: Int) -> String {
+        if running == 1 {
+            return "Armadale can keep the session running and stay in the menu bar, where you can "
+                + "reopen it or end the session later. Ending the session stops every program running in it."
+        }
+        return "Armadale can keep them running and stay in the menu bar, where you can "
+            + "reopen it or end the sessions later. Ending the sessions stops every program running in them."
+    }
     static let keepButton = "Keep Running in Menu Bar"
     static let endButton = "End Sessions and Quit"
     static let cancelButton = "Cancel"

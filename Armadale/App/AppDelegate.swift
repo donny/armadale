@@ -540,7 +540,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         NSApp.unhide(nil) // hidden after Settings closed in menu bar mode
         settingsWindowController?.show(tab)
-        NSApp.activate()
+        AppActivation.bringForward()
     }
 
     /// Help › Keyboard Shortcuts: the one window with the shortcut table,
@@ -555,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         NSApp.unhide(nil) // hidden after a window closed in menu bar mode
         shortcutsWindowController?.show()
-        NSApp.activate()
+        AppActivation.bringForward()
     }
 
     /// Help › Acknowledgements: the one window with the third-party
@@ -568,7 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         acknowledgementsWindowController = controller
         NSApp.unhide(nil) // hidden after a window closed in menu bar mode
         controller.show()
-        NSApp.activate()
+        AppActivation.bringForward()
     }
 
     /// View › Bigger (⌘=): every pane; stored like the Settings font size.
@@ -767,7 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func askAboutRunningSessions(_ running: Int) -> NSApplication.ModalResponse {
         let alert = NSAlert()
         alert.messageText = MenuBarText.alertMessage(running: running)
-        alert.informativeText = MenuBarText.alertInformative
+        alert.informativeText = MenuBarText.alertInformative(running: running)
         alert.addButton(withTitle: MenuBarText.keepButton)
         let end = alert.addButton(withTitle: MenuBarText.endButton)
         end.hasDestructiveAction = true
@@ -851,7 +851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 newWindow(nil)
             }
         }
-        NSApp.activate()
+        AppActivation.bringForward(allWindows: true)
     }
 
     /// Status menu › Quit, Keep Sessions Running: a plain quit from

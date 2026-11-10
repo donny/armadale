@@ -643,6 +643,41 @@ cleared the owner's clipboard after a copy test. The local `build/` and
 `Packages/*/.build` folders were deleted on the owner's request
 (November 9).
 
+Committed as 8ef4178.
+
+November 9, 2026, evening (owner's go, Mac free; implementer → reviewer
+loop with real status-item clicks under the new window-layer rule):
+**menu bar mode activates the app again.** Reproduced with a real click:
+Settings… and Open Armadale from the status item left the other app
+active (cooperative `NSApp.activate()` refused; a switch to `.regular`
+first refused too). Fix: `AppActivation.bringForward(allWindows:)` in
+`Armadale/App/MenuBarMode.swift` activates with
+`NSRunningApplication.current.activate(from: frontmostApp)` when another
+app is frontmost (not deprecated; let through on macOS 27 though the
+header documents it for a yielding app; the result is checked and a
+refusal falls back to `NSApp.activate()`), used by Settings, Keyboard
+Shortcuts, Acknowledgements and Open Armadale (the last with
+`.activateAllWindows`). Decision (coordinator, owner may overrule):
+Settings and the Help windows shown from menu bar mode keep the
+accessory policy, so no Dock icon appears and the menu bar stays the
+previous app's; key equivalents work. Also: the quit alert agrees in
+number for one session ("keep the session running … end the session
+later. Ending the session stops every program running in it."). DESIGN
+§8 rewritten (its old claim that real status-menu clicks activated the
+app was false). **Checked live** by both agents: Settings… from the
+status item makes Armadale active with the window in front and drawn
+active; Open Armadale brings the workspace forward, regular, with
+Armadale's menu bar and Dock item; ⌘W returns to the previous app; the
+one-session alert text. Review: no blocker; lows: result ignored (fixed
+by the coordinator), the Help items are not reachable from the status
+menu so their change is for consistency only. **Open, found by the
+reviewer, unverified:** the quit alert for a Dock or script quit still
+uses plain `NSApp.activate()` and DESIGN says it "brings it forward";
+after ⌘W on Settings in menu bar mode the app reported `hidden false`
+where DESIGN says it hides. Not tested: Open Armadale while already
+frontmost; ⌘Q from Settings in accessory mode. Tests: 696, zero
+warnings.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the

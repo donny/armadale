@@ -109,6 +109,10 @@ struct QuitDecisionTests {
     @Test func wording() {
         #expect(MenuBarText.alertMessage(running: 1) == "1 session is still running")
         #expect(MenuBarText.alertMessage(running: 3) == "3 sessions are still running")
+        #expect(MenuBarText.alertInformative(running: 1).hasPrefix("Armadale can keep the session running"))
+        #expect(MenuBarText.alertInformative(running: 1).hasSuffix("every program running in it."))
+        #expect(!MenuBarText.alertInformative(running: 1).contains("them"), "one session is not \"them\"")
+        #expect(MenuBarText.alertInformative(running: 2).hasPrefix("Armadale can keep them running"))
         #expect(MenuBarText.runningLine(1) == "1 session running")
         #expect(MenuBarText.runningLine(0) == "0 sessions running")
         #expect(MenuBarText.buttonTitle(attentionTotal: 0).isEmpty)
@@ -117,7 +121,8 @@ struct QuitDecisionTests {
         #expect(MenuBarText.toolTip(attentionTotal: 0, isRunning: true) == "Armadale: sessions running")
         #expect(MenuBarText.toolTip(attentionTotal: 0, isRunning: false) == "Armadale", "no session running")
         let visible = [
-            MenuBarText.alertMessage(running: 2), MenuBarText.alertInformative, MenuBarText.keepButton,
+            MenuBarText.alertMessage(running: 2), MenuBarText.alertInformative(running: 1),
+            MenuBarText.alertInformative(running: 2), MenuBarText.keepButton,
             MenuBarText.endButton, MenuBarText.cancelButton, MenuBarText.runningLine(2), MenuBarText.open,
             MenuBarText.settings, MenuBarText.quitKeepingSessions, MenuBarText.endSessionsAndQuit,
             MenuBarText.toolTip(attentionTotal: 0, isRunning: true), MenuBarText.toolTip(attentionTotal: 2, isRunning: true),
@@ -128,6 +133,20 @@ struct QuitDecisionTests {
         }
         #expect(Choice.allCases.map(\.title) == ["Ask", "Keep running in the menu bar", "End sessions"])
         #expect(MenuBarText.ending == "Ending sessions…")
+    }
+
+    // MARK: Activation
+
+    @Test func activationIsTakenFromAnotherFrontmostApp() throws {
+        let current = NSRunningApplication.current
+        let other = try #require(NSWorkspace.shared.runningApplications.first {
+            $0.processIdentifier != current.processIdentifier
+        })
+        #expect(AppActivation.source(frontmost: other, current: current) == other)
+        #expect(AppActivation.source(frontmost: current, current: current) == nil, "already frontmost: a plain activate")
+        #expect(AppActivation.source(frontmost: nil, current: current) == nil)
+        let sameProcess = try #require(NSRunningApplication(processIdentifier: current.processIdentifier))
+        #expect(AppActivation.source(frontmost: sameProcess, current: current) == nil, "compared by process, not object")
     }
 
     private final class Target: NSObject {

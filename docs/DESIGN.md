@@ -2612,7 +2612,8 @@ the menu bar.
   are still running" (singular for one), informative text explaining
   that Armadale can keep them running from the menu bar, where it can be
   reopened or the sessions ended later, and that ending them stops every
-  program running in them. Buttons: **Keep Running in Menu Bar**
+  program running in them (for one session it says "the session" and
+  "it", `MenuBarText.alertInformative(running:)`). Buttons: **Keep Running in Menu Bar**
   (default), **End Sessions and Quit** (destructive), **Cancel**. The
   alert never offers a plain quit that leaves sessions behind: that is
   the path where the Dock's "Stop Running in Background" ends them all.
@@ -2707,7 +2708,8 @@ the menu bar.
 *Implementation (step 8):* `App/MenuBarMode.swift` holds the pure rule,
 `QuitDecision.decide(running:preference:context:)` → *quit now*, *ask*,
 *keep in menu bar*, *end sessions* or *cancel*, the wording
-(`MenuBarText`) and the status item (`MenuBarStatusItem`);
+(`MenuBarText`), the status item (`MenuBarStatusItem`) and bringing the
+app forward (`AppActivation`, "Activation" below);
 `AppDelegate.applicationShouldTerminate` acts on the decision.
 `Preferences.quitWithRunningSessions` (key `quitWithRunningSessions`,
 values `ask` / `keepInMenuBar` / `endSessions`, anything else reads as
@@ -2752,14 +2754,27 @@ above:
   regular policy, removes the status item, shows every hidden window, and
   sets the Dock badge again from `AttentionCenter.total`.
 - **Activation.** The alert calls `NSApp.activate()` so a quit sent from
-  the Dock or a script brings it forward, and *Settings…* and *Open
-  Armadale* activate the app. With a real click on the status menu both
-  do (verified in review: `NSWorkspace.frontmostApplication` became
-  Armadale). Two testing artefacts look otherwise and are not app
-  behaviour: System Events' `frontmost` reports false for an accessory
-  app even while it is active, and items pressed through accessibility
-  (AX) carry no user click, so macOS may decline the activation they ask
-  for (cooperative activation, macOS 14 and later).
+  the Dock or a script brings it forward. *Settings…* and *Open
+  Armadale* from the status menu, and Help › Keyboard Shortcuts and
+  Help › Acknowledgements, bring the app forward with
+  `AppActivation.bringForward()`: when another app is frontmost it calls
+  `NSRunningApplication.current.activate(from:options:)` with that app
+  (as if it had yielded; *Open Armadale* adds `.activateAllWindows`),
+  else `NSApp.activate()`. Found November 9, 2026 on macOS 27 with a real
+  click on the status item and the item chosen from its menu: plain
+  `NSApp.activate()` is refused (cooperative activation, macOS 14 and
+  later), so Settings opened behind the active app's front window, drawn
+  inactive, and *Open Armadale* left the regular app inactive with its
+  windows behind; switching to the regular policy before `activate()`
+  was refused the same way. `activate(from:)` was let through every time
+  (the app active, the window key and in front). `activate(ignoringOtherApps:)`
+  also worked but is marked to be deprecated and is not used.
+  Settings and the Help windows shown from menu bar mode keep the
+  accessory policy (no Dock icon), so the menu bar stays the previous
+  app's while they are in front; their key equivalents still work (⌘W,
+  ⌘Q, editing). Testing artefact: System Events' `frontmost` reports
+  false for an accessory app even while it is active (use
+  `NSWorkspace.frontmostApplication`).
 - **Closing Settings in menu bar mode** (⌘W, the close button) would
   leave an active accessory app with no window, so keystrokes would go
   nowhere: once the close is done the app hides (`NSApp.hide`), which
