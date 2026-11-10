@@ -69,6 +69,17 @@ Screenshot only the app's window, never the full screen, and delete
 screenshots afterwards. In an earlier round an agent typed into the lock
 screen; these rules exist because of that.
 
+Before a click, check what is under the point with the on-screen window
+list (`CGWindowListCopyWindowInfo(.optionOnScreenOnly)`), including
+windows above the normal layer: a notification banner at the top right
+belongs to another process, and a click meant for a title bar once
+landed on a Calendar banner and opened Calendar in front of the test
+build. Keep clicks out of the top-right 500 × 200 pt region. Modifier
+keys go through a keystroke helper as press and release events, never as
+event flags alone: one helper left ⌘ and ⇧ held system-wide for minutes.
+Afterwards `CGEventSource.flagsState(.combinedSessionState)` must print
+0 or 0x20000000. Do not clear the owner's clipboard in a copy test.
+
 Probes that need no input and are safe at any time: the Dock's items
 through System Events (`tell process "Dock" to return name of every UI
 element of list 1`; an item left after the app exited whose

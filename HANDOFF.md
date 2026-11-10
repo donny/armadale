@@ -610,6 +610,39 @@ first public release (November 5, 2026, afternoon). The owner has not yet
 opened the DMG to judge the Finder window, nor installed 0.1.1
 (`~/Applications/Armadale.app` is still the earlier 0.1.0 build).
 
+Committed as ade6f27. The owner judged the DMG window "great" and
+installed 0.1.1 (November 5, 2026).
+
+November 5 and 9, 2026 (owner: Mac free; live-check agents only, no code
+changes): **Help › Acknowledgements checked live**, light and dark
+(dark forced on the test build by a tiny injected dylib setting
+`NSApp.appearance`; `DYLD_INSERT_LIBRARIES` is dropped when the launch
+goes through `env` or `nohup`, so export it and exec the binary directly):
+the window, wrapping, overlay scrollbar, credits at the bottom, ⌘W with
+"Close Acknowledgements" in File, the same window returning to the front,
+⌘A/⌘C, hiding and returning in menu bar mode, and a real ⌘Q with the
+quit alert ("1 session is still running"; Keep Running in Menu Bar / End
+Sessions and Quit / Cancel) ending the session and exiting: all pass.
+Minor: a reopened window keeps its scroll position; the alert says "keep
+them running" for one session. **Found, not fixed (owner's go needed):
+menu bar mode does not activate the app.** With Armadale accessory and
+Terminal active, Settings… from the status item (pressed through
+accessibility) opens the Settings window under Terminal's front window,
+drawn inactive, the menu bar still Terminal's; Help › Acknowledgements
+then lands behind Settings. `showSettings` and `showAcknowledgements`
+call `NSApp.activate()` (cooperative since macOS 14), which the system
+refuses when the active app does not yield; whether a real mouse click
+on the status item counts as the user event that would let it through
+is untested (the click lies in the top-right region agents avoid).
+Candidate fix: `activate(ignoringOtherApps: true)` or a temporary
+`.regular` policy while an auxiliary window is shown, then a live check
+with a real status-item click. Incidents: on November 5 an agent's click
+hit a Calendar notification banner and opened Calendar (rule added to
+AGENTS.md with the modifier-key and clipboard rules); the same agent
+cleared the owner's clipboard after a copy test. The local `build/` and
+`Packages/*/.build` folders were deleted on the owner's request
+(November 9).
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
