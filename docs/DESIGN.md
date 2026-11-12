@@ -2753,9 +2753,9 @@ above:
   app), and ⌘N or ⌃⌘A pressed in the Settings window. Leaving restores the
   regular policy, removes the status item, shows every hidden window, and
   sets the Dock badge again from `AttentionCenter.total`.
-- **Activation.** The alert calls `NSApp.activate()` so a quit sent from
-  the Dock or a script brings it forward. *Settings…* and *Open
-  Armadale* from the status menu, and Help › Keyboard Shortcuts and
+- **Activation.** The quit alert (a quit sent from the Dock or a script
+  comes while another app is active), *Settings…* and *Open Armadale*
+  from the status menu, and Help › Keyboard Shortcuts and
   Help › Acknowledgements, bring the app forward with
   `AppActivation.bringForward()`: when another app is frontmost it calls
   `NSRunningApplication.current.activate(from:options:)` with that app
@@ -2766,7 +2766,10 @@ above:
   later), so Settings opened behind the active app's front window, drawn
   inactive, and *Open Armadale* left the regular app inactive with its
   windows behind; switching to the regular policy before `activate()`
-  was refused the same way. `activate(from:)` was let through every time
+  was refused the same way; the quit alert, which still called
+  `NSApp.activate()`, opened behind the active app's front window
+  (November 12, 2026, a scripted quit with Terminal active).
+  `activate(from:)` was let through every time
   (the app active, the window key and in front). `activate(ignoringOtherApps:)`
   also worked but is marked to be deprecated and is not used.
   Settings and the Help windows shown from menu bar mode keep the
@@ -2782,6 +2785,10 @@ above:
   `NSApp.deactivate()` was tried first and does not: the accessory app
   stayed the frontmost application. The status item stays while hidden,
   and every way back (`leaveMenuBarMode()`, *Settings…*) unhides.
+  Testing artefact: `NSRunningApplication.isHidden` stays false for an
+  accessory app after a successful `hide` (`NSApp.isHidden` is true;
+  checked November 12, 2026 with a windowless accessory app), so the
+  check is that the previously active app is frontmost again.
 - **Status item glyph**: the lit pane solid, the two idle panes as 1 pt
   outlines, so the lit one stands out in one colour; the panes' bounding
   box is 16 pt inside the 18 pt image, edges snapped to each scale's pixel

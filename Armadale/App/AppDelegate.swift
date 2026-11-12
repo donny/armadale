@@ -772,9 +772,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let end = alert.addButton(withTitle: MenuBarText.endButton)
         end.hasDestructiveAction = true
         alert.addButton(withTitle: MenuBarText.cancelButton)
-        // A quit from the Dock's menu, or from another app, may come while
-        // Armadale is in the background: the alert needs it in front.
-        NSApp.activate()
+        // A quit from the Dock's menu, or from another app, comes while
+        // Armadale is in the background: the alert needs it in front, and
+        // on macOS 27 the plain `NSApp.activate()` is refused there (the
+        // alert opened behind the active app's window, checked live).
+        AppActivation.bringForward()
         return alert.runModal()
     }
 

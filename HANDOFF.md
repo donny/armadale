@@ -678,6 +678,27 @@ where DESIGN says it hides. Not tested: Open Armadale while already
 frontmost; ⌘Q from Settings in accessory mode. Tests: 696, zero
 warnings.
 
+Committed as dcdeb50.
+
+November 12, 2026 (owner's go, Mac free; a short live check by the
+coordinator, then the fix through the gate): **the quit alert comes
+forward again.** The reviewer's first open item was real: with
+Terminal active and a shell session running, a scripted quit opened the
+alert behind Terminal's front window with Armadale inactive (the plain
+`NSApp.activate()` refused, as for Settings). Fix: the alert uses
+`AppActivation.bringForward()` too (`askAboutRunningSessions`,
+`Armadale/App/AppDelegate.swift`); checked live the same way: Armadale
+active, its own menu bar, the alert in front. The second item was a
+probe artefact: after ⌘W on Settings in menu bar mode Terminal was
+frontmost again, as designed; `NSRunningApplication.isHidden` stays
+false for an accessory app after a successful `hide` (`NSApp.isHidden`
+is true; confirmed with a windowless accessory app). DESIGN §8 records
+both. Also seen: Settings… from a real status-item click came up in
+front and active (dcdeb50 holds). Still not tested: Open Armadale while
+already frontmost; ⌘Q from Settings in accessory mode. The installed
+0.1.1 has neither activation fix; a new release would ship them. Tests:
+696, zero warnings.
+
 ac7094b removed GitHub Actions: there is no CI. Every commit was made after
 the full local build and test command passed (452 tests at dac547f, zero
 warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
