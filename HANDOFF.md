@@ -862,6 +862,10 @@ after any quit when it is off, from the menu bar too (tested October 19,
 The owner deferred that last decision on October 19, 2026; it is an
 open item, not started.
 
+An architecture review on November 12, 2026 added candidates of its
+own, with a suggested order: "Architecture review" at the end of the
+open items below. None is started.
+
 ## Open items carried forward
 
 Known, accepted for now, and worth a round of their own. None is a
@@ -1015,6 +1019,81 @@ Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
 - No updater and no crash reporting (decided for v1, October 19, 2026).
+
+Architecture review (November 12, 2026)
+
+Findings from reading the documents and the code. Nothing was built or
+run, so none is reproduced live, and none is started. Suggested order:
+the orphan reclaim and the save scheduling first (small, in
+`ArmadaleCore` and `AppDelegate`, testable without launching the app),
+the schema rule before the next change to the state file's shape, then
+the documents; attaching restored sessions at launch needs an owner
+decision on pane sizes and is a step of its own.
+- **Restored sessions in tabs not shown yet are not attached.**
+  `SessionRegistry.startIfNeeded` is called only for the panes of a
+  window's selected tab (`ContentViewController.show`) and by
+  `retryPersistence`, as DESIGN section 8 "App lifecycle" says ("the
+  rest lazily when their tab is first shown"). Until then a restored
+  session has no client, so its bell or OSC 9 / 777 never reaches
+  `AttentionCenter`: no ◐, no badge, no notification, for an agent
+  that finished in a tab not visited since the relaunch. Attaching
+  every live restored session after launch needs a size before the
+  pane is laid out (an attach at another size resizes the program);
+  saving each pane's last grid size would give one.
+- **Orphan reclaim is held back for one launch only.** After an
+  unreadable state file (`.unparseable`, with or without a usable
+  backup) `stateLoadedCleanly` is false and nothing is killed, but
+  that run saves a clean file (`ensureWorkspacesToOpen` makes a
+  workspace, the quit flushes). The next launch loads it cleanly and
+  `OrphanReclaimer` ends every live session it does not name: all of
+  them after a fresh start, those newer than the backup after a
+  recovery. The quarantined `state.json.corrupt-<time>` is kept, but
+  the sessions it names are gone by then. Possible: save with the
+  state that its references are incomplete, and reclaim only sessions
+  created after that.
+- **No rule for an older build reading a newer file.** The schema is
+  still 1 with additive decoding (`Migrations.steps` is empty), which
+  DESIGN section 3 justifies for a new build reading old files. Since
+  v0.1.0 an older build is a real reader: a change it cannot decode,
+  made without a version bump, is `.unparseable` there (quarantine,
+  fresh start, then the reclaim above) instead of the safe
+  `.newerVersion` alert, and a key it does not know is dropped by its
+  next save. Rule to adopt: bump `schemaVersion` whenever a released
+  build could not decode the file. No test reads a state file written
+  by a released version; a fixture per release would hold the rule.
+- **Save scheduling.** Every title change (`AppModel.setTitle`, OSC
+  0/2) increments `changeCount`, and `StateSaver.schedule` restarts
+  its 500 ms timer on every change with no longest wait, so programs
+  that keep changing their titles (several agents at work) can put
+  layout saves off until the model is quiet or the app quits; a crash
+  meanwhile loses them. New sessions are safe
+  (`onRuntimeVersionRecorded` saves at once). `state.json.bak` is
+  replaced by every save (`StateStore.rotateBackup`), so two saves of
+  a bad state leave no good copy; a backup kept once per launch would.
+- **The persistence helper's workarounds.** Create's double attach,
+  attach-only through `/usr/bin/true`, telling the cases apart by a
+  client's first bytes within 2 s, the RIS filter, the flood reattach
+  by sampled footprint (local only) and the exit recorder all make up
+  for what zmx 0.8.1 lacks. An attach-only flag, the program's exit
+  status and a bounded client buffer, upstream or in a fork, would
+  remove most of them.
+- **The documents.** `docs/DESIGN.md` is 235 KB (3,644 lines, section
+  8 alone 1,440) and this file 84 KB, and AGENTS.md has every agent
+  read both before changing code. DESIGN.md mixes the contract with
+  its history: 69 lines carry an October 2026 date or "until then".
+  Separating what is true now from a decision log, and cutting this
+  file's Status to the current state, would make the contract
+  findable.
+- **Live UI testing shares the owner's screen.** Most of AGENTS.md's
+  "Rules learned the hard way" guards against synthetic input landing
+  in the wrong place. A macOS guest VM for those passes would remove
+  the risk instead of guarding against it.
+- Smaller: `AppDelegate` (955 lines) holds launch, the quit paths,
+  menu bar mode and window management, and the quit paths already
+  need `scripts/check-quit.sh`; about 20 `NSLog` calls remain beside
+  two `Logger`s, although NSLog is `<private>` in `log show` on macOS
+  27 (10c, above); the load-sensitive flood tests run beside four
+  other test bundles in the gate.
 
 ## Investigations (October 19, 2026), decisions pending
 
