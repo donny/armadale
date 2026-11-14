@@ -32,18 +32,19 @@ or similar in the app target. That is the indexer, not the build; trust
 Each step of the build order (`docs/DESIGN.md` §12) goes through the same
 loop, and it has worked well:
 
-1. An **implementer** agent (Opus) builds the step from `docs/DESIGN.md`,
-   writes tests, updates DESIGN.md where it deviates, does a first live
-   check, and reports. It never commits.
-2. A separate **reviewer** agent (Opus) reads the diff, is told to be
-   adversarial, verifies the implementer's claims with evidence, and does
-   its own live keystroke checks. It never commits or fixes.
+1. An **implementer** agent (the latest Opus: Opus 5.5 as of November
+   2026) builds the step from `docs/DESIGN.md`, writes tests, updates
+   DESIGN.md where it deviates, does a first live check, and reports. It
+   never commits.
+2. A separate **reviewer** agent (the same model) reads the diff, is told
+   to be adversarial, verifies the implementer's claims with evidence, and
+   does its own live keystroke checks. It never commits or fixes.
 3. Findings go back to the implementer as a numbered fix list with
    decisions already made (blocker / medium / low); it fixes and re-verifies.
 4. The coordinating session runs the full build and test command itself,
-   checks for stray processes, commits `Step N: …` on `main` with a
-   `Co-Authored-By: Claude <noreply@anthropic.com>` line, pushes, and
-   notifies the owner.
+   checks for stray processes, commits `Step N: …` on `main` with no
+   Claude attribution (no `Co-Authored-By` trailer, no "Generated with"
+   line), pushes, and notifies the owner.
 
 The owner wants to give the go-ahead before each step starts, and
 sometimes runs other UI-driving agents on this Mac. Ask before starting a
