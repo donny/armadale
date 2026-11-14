@@ -237,9 +237,24 @@ schemes:
         Armadale: all
     run:
       config: Debug
+      # Run in Xcode never shares the real state directory or settings with
+      # an installed Armadale (docs/DESIGN.md section 8, "App lifecycle":
+      # one process per state directory). Same values as README's
+      # development runs.
+      environmentVariables:
+        ARMADALE_STATE_DIR: /tmp/armadale-dev
+        ARMADALE_DEFAULTS_SUITE: armadale-dev
     test:
       config: Debug
       gatherCoverageData: false
+      # Tests must not inherit the run action's environment above. XcodeGen
+      # makes the test action reuse it ("Use the Run action's arguments and
+      # environment variables") whenever the test action has none of its
+      # own, so it gets one, disabled: nothing is passed to the tests.
+      environmentVariables:
+        - variable: ARMADALE_TEST_PLACEHOLDER
+          value: unused
+          isEnabled: false
       # Tests live in the local packages; this makes
       # `xcodebuild test -scheme Armadale` run all of them.
       targets:

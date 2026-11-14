@@ -247,11 +247,21 @@ the test process without the prefix.
 
 | Variable | Effect |
 |---|---|
-| `ARMADALE_STATE_DIR=/dir` | State directory: `state.json`, `bin/` (helper copies) and `run/` (sessions). Use a short path (such as `/tmp/armadale-dev`) so socket paths stay under the limit. |
+| `ARMADALE_STATE_DIR=/dir` | State directory: `state.json`, `armadale.lock`, `bin/` (helper copies) and `run/` (sessions). Use a short path (such as `/tmp/armadale-dev`) so socket paths stay under the limit. Only one Armadale process can use a state directory at a time (see below). |
 | `ARMADALE_BACKEND=ephemeral` | Plain PTY sessions that end when the app quits (tests, debugging). |
 | `ARMADALE_ZMX=/path/to/zmx` | zmx binary to bundle-install and test with, instead of the app's `Contents/Helpers/zmx` or `Vendor/zmx`. |
 | `ARMADALE_CTTY_EXEC=/path/to/ctty-exec` | `ctty-exec` to use (see below). |
 | `ARMADALE_DEFAULTS_SUITE=name` | Keep settings in the UserDefaults suite `name` instead of the app's domain (same as the `-ArmadaleDefaultsSuite name` argument). |
+
+Each running Armadale holds a lock (`flock`) on `armadale.lock` in its
+state directory; the file holds its pid. A second process started on the
+same directory shows "Armadale is already running" and quits without
+reading or writing anything there, printing the holder's pid and the lock
+file on standard error; give it its own `ARMADALE_STATE_DIR` to run both. A
+leftover lock file from a process that is gone blocks nothing. If no lock
+can be taken at all (a volume without `flock`), that is logged and the app
+runs without one. Builds from before the lock (0.1.1 included) take none,
+so they are not detected.
 
 An `ARMADALE_ZMX` or `ARMADALE_CTTY_EXEC` that does not name an executable
 file is an error (logged and thrown), never a reason to fall back to the
@@ -406,7 +416,11 @@ a file with the same name replaces the earlier one. To remove an imported
 theme, delete its JSON file (it falls back to the default theme).
 
 To keep test or debugging runs away from your real settings, point the app
-at another defaults suite:
+at another defaults suite and state directory. Run in Xcode does this
+already: the scheme's Run action sets `ARMADALE_STATE_DIR=/tmp/armadale-dev`
+and `ARMADALE_DEFAULTS_SUITE=armadale-dev` (the test action does not get
+them; Profile, which reuses Run's environment, does, so Instruments runs
+against them too). From the command line:
 
 ```sh
 ARMADALE_DEFAULTS_SUITE=armadale-dev ARMADALE_STATE_DIR=/tmp/armadale-dev \

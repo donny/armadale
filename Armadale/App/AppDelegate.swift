@@ -48,6 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Loading drops closed workspaces with no tab groups (``StateStore``);
     /// they hold no sessions, so the list stays complete.
     private let stateLoadedCleanly: Bool
+    /// This process's lock on the state directory, held for its whole life
+    /// (``StateLock``); `nil` when it could not be taken.
+    private let stateLock: StateLock?
+    /// Another process holds the state directory's lock: this one loaded
+    /// nothing, runs no helper and only explains and quits.
+    private let isLockedOut: Bool
 
     /// Menu bar mode (docs/DESIGN.md section 8, "Quitting with running
     /// sessions"): the status item while the app stays running with its
@@ -62,15 +68,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var sessionsEnded = false
 
     /// What to tell the user about the state file at launch.
-    private struct LoadReport {
+    struct LoadReport {
         var message: String
         var details: String
         /// The app cannot run safely and quits after the alert.
         var isFatal: Bool
+        /// After a fatal alert: the process to bring forward (the copy that
+        /// holds the state directory's lock), best effort.
+        var bringForward: pid_t? = nil
     }
 
     override init() {
-        let url = StateLocation.stateFile()
+        // The lock first: loading deletes stale temporary files and may
+        // quarantine an unreadable file, so it must never run against a
+        // state directory another process owns (docs/DESIGN.md section 8).
+        let directory = StateLocation.directory()
+        let url = directory.appendingPathComponent(StateStore.fileName)
+        let lockOutcome = StateLock.acquire(directory: directory)
+        if case .acquired(let lock) = lockOutcome { self.stateLock = lock } else { self.stateLock = nil }
+        if let line = InstanceLock.unavailableLogLine(for: lockOutcome) {
+            stateLog.error("\(line, privacy: .public)")
+        }
+        let refusal = InstanceLock.refusal(for: lockOutcome, stateDirectory: directory)
+        if let refusal {
+            stateLog.error("\(refusal.logLine, privacy: .public)")
+            FileHandle.standardError.write(Data((refusal.logLine + "\n").utf8))
+        }
+
+        let loaded = refusal.map(Self.lockedOut) ?? Self.loadState(from: url)
+        let state = loaded.state
+        self.isLockedOut = refusal != nil
+        self.stateURL = url
+        self.stateLoadedCleanly = loaded.loadedCleanly
+        self.canSave = loaded.canSave
+        self.loadReport = loaded.report
+        // Locked out: no themes folder read, no helpers installed, no
+        // runtime prepared, no hosts; nothing in the state directory is
+        // touched beyond the lock file's open.
+        self.settings = refusal == nil
+            ? AppSettings.shared
+            : AppSettings(preferences: .shared, themes: ThemeCatalog(directory: nil), surfaces: .standard)
+        self.model = AppModel(state: state, defaultWorkingDirectory: NSHomeDirectory())
+        let sessions = refusal == nil ? Self.makeSessionBackend(for: state.sessions) : Self.ephemeralBackend(failure: nil)
+        self.zmxRuntime = sessions.runtime
+        self.sessionSetupFailure = sessions.failure
+        self.registry = SessionRegistry(
+            model: model,
+            runtime: sessions.setup,
+            restoredSessionIDs: Set(state.sessions.map(\.id)),
+            settings: settings,
+            remote: refusal == nil ? Self.makeRemoteSupport(cttyExec: sessions.cttyExec) : nil)
+        let notifications = UserNotificationService()
+        self.notifications = notifications
+        self.attention = AttentionCenter(
+            model: model, preferences: settings.preferences, notifications: notifications)
+        self.saver = StateSaver(url: url)
+        super.init()
+        wireRegistry()
+        wireAttention()
+    }
+
+    /// The state as loaded (and repaired), and what to make of it.
+    private struct LoadedState {
+        var state: PersistedState
+        var report: LoadReport?
+        var canSave: Bool
+        var loadedCleanly: Bool
+    }
+
+    /// Another process owns the state directory: nothing is loaded, nothing
+    /// will be saved, and the alert explains before the app quits.
+    private static func lockedOut(_ refusal: InstanceLock.Refusal) -> LoadedState {
+        LoadedState(
+            state: .empty,
+            report: LoadReport(
+                message: refusal.message, details: refusal.details, isFatal: true, bringForward: refusal.otherPID),
+            canSave: false,
+            loadedCleanly: false)
+    }
+
+    private static func loadState(from url: URL) -> LoadedState {
         var droppedWorkspaces = 0
         let result = StateStore.load(from: url) { droppedWorkspaces = $0 }
         var state = result.state ?? .empty
@@ -116,38 +193,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             stateLog.notice("Armadale: repaired saved layout: \(issues.joined(separator: "; "), privacy: .public)")
             state = repaired
         }
-
-        self.stateURL = url
         // Orphan reclaim needs a state file that existed and loaded: with no
         // file at all (first launch, or a file the user removed) the references
         // are unknown, and running sessions must not be killed.
-        if case .loaded(_, isFirstLaunch: false) = result { self.stateLoadedCleanly = true } else { self.stateLoadedCleanly = false }
-        self.canSave = result.allowsSaving
-        self.loadReport = report
-        self.settings = AppSettings.shared
-        self.model = AppModel(state: state, defaultWorkingDirectory: NSHomeDirectory())
-        let sessions = Self.makeSessionBackend(for: state.sessions)
-        self.zmxRuntime = sessions.runtime
-        self.sessionSetupFailure = sessions.failure
-        self.registry = SessionRegistry(
-            model: model,
-            runtime: sessions.setup,
-            restoredSessionIDs: Set(state.sessions.map(\.id)),
-            settings: settings,
-            remote: Self.makeRemoteSupport(cttyExec: sessions.cttyExec))
-        let notifications = UserNotificationService()
-        self.notifications = notifications
-        self.attention = AttentionCenter(
-            model: model, preferences: settings.preferences, notifications: notifications)
-        self.saver = StateSaver(url: url)
-        super.init()
-        wireRegistry()
-        wireAttention()
+        let loadedCleanly: Bool
+        if case .loaded(_, isFirstLaunch: false) = result { loadedCleanly = true } else { loadedCleanly = false }
+        return LoadedState(state: state, report: report, canSave: result.allowsSaving, loadedCleanly: loadedCleanly)
     }
 
     private func wireRegistry() {
         registry.setUpPersistentRuntime = { [weak self] in
-            guard let self, ProcessInfo.processInfo.environment["ARMADALE_BACKEND"] != "ephemeral" else { return nil }
+            guard let self, !self.isLockedOut,
+                  ProcessInfo.processInfo.environment["ARMADALE_BACKEND"] != "ephemeral" else { return nil }
             let sessions = Self.makeSessionBackend(for: self.model.sessions)
             guard sessions.setup.isPersistent else { return nil }
             self.zmxRuntime = sessions.runtime
@@ -264,18 +321,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
     }
 
+    /// Plain PTY sessions that end when the app quits; nothing on disk.
+    private static func ephemeralBackend(failure: String?) -> SessionBackend {
+        SessionBackend(
+            setup: SessionRuntimeSetup(
+                backend: EphemeralBackend(), makeOutputFilter: { IdentityOutputFilter() }, isPersistent: false),
+            runtime: nil, failure: failure)
+    }
+
     /// The persistent zmx backend, with the helpers installed into the
     /// state directory's `bin/`. If that cannot be set up the app still
     /// works, with sessions that end when it quits. `ARMADALE_BACKEND=ephemeral`
     /// selects those deliberately (tests, debugging).
     private static func makeSessionBackend(for sessions: [Session]) -> SessionBackend {
         let environment = ProcessInfo.processInfo.environment
-        let ephemeral = { (failure: String?) in
-            SessionBackend(
-                setup: SessionRuntimeSetup(
-                    backend: EphemeralBackend(), makeOutputFilter: { IdentityOutputFilter() }, isPersistent: false),
-                runtime: nil, failure: failure)
-        }
+        let ephemeral = ephemeralBackend(failure:)
         if environment["ARMADALE_BACKEND"] == "ephemeral" {
             return ephemeral(nil)
         }
@@ -364,8 +424,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         if let report = loadReport, report.isFatal {
             // Do not open windows or save anything: the file on disk wins.
-            NSApp.activate()
+            // A copy started from a shell or a script comes up behind the
+            // active app, where the cooperative `NSApp.activate()` is
+            // refused; activating from the frontmost app is let through, as
+            // for the quit alert (docs/DESIGN.md section 8, "Activation").
+            AppActivation.bringForward()
             showAlert(message: report.message, details: report.details, style: .critical)
+            InstanceLock.bringForward(pid: report.bringForward)
             isForcedQuit = true
             NSApp.terminate(nil)
             return
@@ -489,7 +554,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         false
     }
 
+    /// A reopen (Dock click, `open -a`) does nothing while a fatal launch
+    /// report is pending: the app shows its alert and quits, and must not
+    /// open a window on the state it refused to load.
+    static func ignoresReopen(pendingReport: LoadReport?) -> Bool {
+        pendingReport?.isFatal == true
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // A fatal launch (another copy owns the state directory, a newer
+        // or unreadable state file) is quitting under its alert: open nothing.
+        if Self.ignoresReopen(pendingReport: loadReport) { return false }
         // `open -a`, Finder, or a second launch while in menu bar mode.
         if menuBarItem != nil {
             openFromMenuBar(nil)

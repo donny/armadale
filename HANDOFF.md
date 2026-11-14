@@ -740,6 +740,42 @@ git-ignored and wiped by the script). Built with the implementer →
 reviewer loop. The app is arm64 only (macOS 27 has no Intel support);
 the bundled persistence helper stays universal for Intel Mac hosts.
 
+November 14, 2026 (implementer → reviewer loop on Opus 5.5, two review
+rounds, three live passes): **one Armadale process per state
+directory**, the first item of the architecture review's second pass.
+`StateLock` (ArmadaleCore) takes an exclusive `flock` on
+`armadale.lock` in the state directory, close-on-exec, held for the
+life of the process; `AppDelegate.init` takes it before
+`StateStore.load`. A second process on the same directory loads and
+saves nothing, starts no helper, shows "Armadale is already running",
+writes the holder's pid and the lock file to standard error and the
+log, and quits through the fatal launch path; after the alert it
+brings the other copy forward when that is a regular app. A lock that
+cannot be taken at all (no `flock` on the volume) is logged and the
+app runs without one. A fatal launch (this one, a newer or an
+unreadable state file) now brings itself forward with
+`AppActivation.bringForward()` and ignores a reopen while its alert is
+up. The scheme's Run action sets `ARMADALE_STATE_DIR=/tmp/armadale-dev`
+and `ARMADALE_DEFAULTS_SUITE=armadale-dev` (Profile inherits them; the
+test action does not, through a disabled placeholder variable that
+XcodeGen needs). `docs/DESIGN.md` sections 3, 8 and 11; README. Checked
+live, all on test builds in `/tmp/armadale-lock`: the refused copy's
+alert text read on screen, matching `InstanceLock.refusal` word for
+word; the state directory's listing identical before, during and after
+it; Return dismissing it, the copy quitting by itself and the first
+copy coming forward; SIGTERM with the alert up ending it in about
+60 ms; a session started from the chooser whose daemon, trampoline,
+shell and client held no descriptor on the lock; a relaunch taking the
+lock while that daemon ran; a refused copy while the first was in menu
+bar mode (alert shown, the first not activated, its windows still
+hidden); `scripts/check-quit.sh`, three scenarios. Known limit: builds
+before this one, 0.1.1 included, take no lock, so the installed app
+and a new build are not kept apart until the installed app is
+replaced; AGENTS.md's isolation rule still stands. Seen on the way: a
+normal launch started from a shell does not come forward (open items,
+Hierarchy and UI). Tests: 711 at this change (236 app + 247 core + 206
+sessions + 13 + 9).
+
 ## Next
 
 **Step 10, New Session (owner's request, October 24, 2026): done in
@@ -867,7 +903,11 @@ own, with a suggested order: "Architecture review" at the end of the
 open items below. A second pass on November 14, 2026 added three
 findings and put a new one first, a lock against two processes
 sharing one state directory: "Architecture review, second pass",
-after it. None is started.
+after it. The lock is done (November 14, 2026, Status above). The
+owner gave the go-ahead the same day for the rest in the suggested
+order: the orphan reclaim and the save scheduling, the schema rule,
+the documents. Attaching restored sessions at launch and a fork of
+the persistence helper still wait for owner decisions.
 
 ## Open items carried forward
 
@@ -970,6 +1010,14 @@ Hierarchy and UI
   DESIGN section 4). A recorder killed by SIGKILL or ended by a reboot
   leaves no record, so that pane shows "is no longer running." and
   stays.
+- A copy started from a shell or a script by its binary path does not
+  come forward on a normal launch: the plain `NSApp.activate()` at the
+  end of `applicationDidFinishLaunching` is refused while another app
+  is active, as the quit alert's was (seen November 14, 2026 with
+  Terminal frontmost; a launch through Finder, the Dock or `open` is
+  not affected). A fatal launch uses `AppActivation.bringForward()`
+  and does come forward. Left alone: it only shows with test builds,
+  where staying behind may even be wanted.
 - A tab whose shell exited keeps its last terminal title.
 - The font panel lists proportional fonts; Armadale refuses them only after
   selection.
@@ -1124,7 +1172,8 @@ restored sessions at launch stays a step of its own.
   `StateStore.load` and held for the life of the process (a second
   process explains and quits, or activates the first), and an
   `ARMADALE_STATE_DIR` in the scheme's Run environment. Test builds
-  with their own state directory are unaffected.
+  with their own state directory are unaffected. **Built November 14,
+  2026** (Status above).
 - **New: the status of a session never shown is the launch probe's
   answer, and is never refreshed.** For a restored session without a
   controller, `SessionRegistry.status(of:)` answers from `liveAtLaunch`
@@ -1448,6 +1497,24 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   sessions may appear once more; it uses the real state directory
   (`~/Library/Application Support/Armadale`), never a test one. Do not
   replace it or run it during tests without the owner's say-so.
+- Privacy grants for agent sessions run from the Claude desktop app
+  (November 14, 2026). Commands there run under the bundle "Claude
+  Code" (`com.anthropic.claude-code`, inside
+  `~/Library/Application Support/Claude/claude-code/<version>/`), which
+  macOS holds responsible, not the Claude app itself. The owner allowed
+  it to control System Events (the dialog that AGENTS.md's frontmost
+  check raises on first use, and which blocks that check until it is
+  answered) and switched on Accessibility for it, which the System
+  Events window probes and synthetic keystrokes need: without it they
+  fail with -1719 or -1728 and no dialog appears. Screen Recording is
+  not granted, so `screencapture -l` fails there. The owner may switch
+  Accessibility off again; `AXIsProcessTrusted()` says whether it is
+  on, and `lsappinfo info -only name -only pid "$(lsappinfo front)"`
+  gives the frontmost app and its pid with no permission at all. With
+  several test builds running, the frontmost check by name is not
+  enough (all are "Armadale"); compare the pid too. Synthetic
+  keystrokes reset `HIDIdleTime`, so the idle gate only means
+  something before the first one.
 - The Lima VM `default` is stopped and has no `~/.armadale` inside it.
 - Claude Code 2.1.292 and Codex 0.163.0 are installed; `docs/DESIGN.md`
   §10 records what each offers and the source lines consulted. Re-check

@@ -506,6 +506,23 @@ persistence.
 - A backup of the previous file is kept as `state.json.bak`; a parse failure
   on launch falls back to it and reports the problem rather than starting
   empty.
+- **One process per state directory.** `StateLock` (`ArmadaleCore`) takes
+  an exclusive, non-blocking `flock` on `armadale.lock` in the state
+  directory (creating the directory if needed) and the app holds it for its
+  whole life; the kernel drops it when the process exits, however it exits,
+  so a leftover file blocks nothing and the file is never deleted. The
+  holder writes its pid into the file, for diagnostics only. The descriptor
+  is opened `O_CLOEXEC`: session daemons outlive the app, and one that
+  inherited the descriptor would hold the lock for as long as it runs (a
+  test spawns a child while the lock is held, releases it and takes it
+  again; its control shows that a descriptor opened without the flag is
+  inherited and keeps the lock). Three outcomes: acquired; held by another
+  process (with its recorded pid when readable); unavailable (the directory
+  cannot be created, the file cannot be opened, the volume does not support
+  `flock`), which is logged and otherwise ignored. What the app does with
+  them: section 8, "App lifecycle". Builds before this lock (0.1.1
+  included) take none, so a new build cannot detect an old one sharing its
+  directory.
 
 SwiftData was considered and rejected: the state is a small tree that is
 easier to inspect, diff and migrate as JSON.
@@ -2416,6 +2433,42 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
 
 ### App lifecycle
 
+- **First, the state directory's lock** (section 3, "One process per state
+  directory"), taken in `AppDelegate.init` before `StateStore.load`, since
+  loading deletes stale temporary files and may quarantine a file. When
+  another process holds it, this one loads and saves nothing, installs no
+  helper, prepares no persistent runtime, reads no themes folder, lists or
+  ends no session and opens no window: it is built with empty state, the
+  plain PTY backend and no remote support, logs the holder (os.Logger,
+  category `state`, and one line on standard error naming the lock file and
+  `ARMADALE_STATE_DIR`), shows "Armadale is already running" (another copy
+  uses the same saved layout and sessions in that directory, perhaps from
+  the menu bar; this copy quits so the two don't overwrite each other's
+  layout) and quits like a fatal load (`LoadReport.isFatal`). After the
+  alert it brings the other copy forward, best effort, only when that pid
+  is a running app with Armadale's bundle identifier and a regular
+  activation policy (one in menu bar mode is left alone: activating it with
+  hidden windows would send keystrokes nowhere). `InstanceLock` holds the
+  decision and wording, unit-tested. A lock that is unavailable is logged
+  and the app runs as before the lock existed. The scheme's Run action sets
+  `ARMADALE_STATE_DIR=/tmp/armadale-dev` and `ARMADALE_DEFAULTS_SUITE=armadale-dev`,
+  so Run in Xcode never shares the installed app's directory; its test
+  action does not inherit them, but its Profile action does (Instruments
+  runs against `/tmp/armadale-dev` and the `armadale-dev` suite too).
+- **A fatal launch** (another copy holds the lock, a newer or unreadable
+  state file) shows its alert and quits without opening a window. It
+  brings itself forward with `AppActivation.bringForward()` ("Activation",
+  below) rather than the plain `NSApp.activate()`, which macOS 27 refuses
+  for a copy started from a shell or a script while another app is
+  active: in review (November 14, 2026) a locked-out copy started by its
+  binary path from a shell put its alert on screen (layer 0) while the
+  other app stayed frontmost. With `bringForward()` (same check, same day,
+  Terminal frontmost) the locked-out copy was the frontmost app at 1, 3, 6
+  and 10 s, its alert on the modal-panel layer (8), and SIGTERM with the
+  alert up ended it in 0.06 s. The normal launch's plain `NSApp.activate()`
+  was refused the same way (the first copy, started from the shell, stayed
+  behind Terminal); it is unchanged for now. A reopen (Dock click, `open -a`) while the
+  report is pending opens nothing (`AppDelegate.ignoresReopen`).
 - `NSApplicationDelegate` loads `StateStore`, builds `AppModel`, probes each
   backend's live sessions once, then opens every workspace whose window was
   open at last quit (else the first workspace; with none at all, a fresh
@@ -2754,7 +2807,7 @@ above:
   regular policy, removes the status item, shows every hidden window, and
   sets the Dock badge again from `AttentionCenter.total`.
 - **Activation.** The quit alert (a quit sent from the Dock or a script
-  comes while another app is active), *Settings…* and *Open Armadale*
+  comes while another app is active), a fatal launch's alert, *Settings…* and *Open Armadale*
   from the status menu, and Help › Keyboard Shortcuts and
   Help › Acknowledgements, bring the app forward with
   `AppActivation.bringForward()`: when another app is frontmost it calls
@@ -3105,7 +3158,8 @@ armadale/
 ├── project.yml                      XcodeGen spec
 ├── Armadale/                        app target (AppKit)
 │   ├── App/                         main.swift, AppDelegate, menus, MenuBarMode (QuitDecision,
-│   │                                MenuBarText, MenuBarStatusItem: quitting and menu bar mode)
+│   │                                MenuBarText, MenuBarStatusItem: quitting and menu bar mode),
+│   │                                InstanceLock (a second process on one state directory)
 │   ├── Windows/                     WorkspaceWindowController, WorkspaceActions (+ InlineRename),
 │   │                                ContentViewController
 │   ├── Sidebar/                     SidebarView (SwiftUI)
@@ -3134,7 +3188,7 @@ armadale/
 │                                    the shortcut table's source is App/MainMenu
 ├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/
-│   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, migrations,
+│   ├── ArmadaleCore/                model, PaneLayout ops, StateStore, StateLock, migrations,
 │   │                                AttentionTracker, AgentIntegration              (no AppKit)
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
 │   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
