@@ -30,7 +30,7 @@ struct SparedSessionStateTests {
         let state = try StateStore.decode(Data(json.utf8))
         #expect(state.sparedSessionIDs.isEmpty)
         #expect(!state.sessionListIncomplete)
-        #expect(state.schemaVersion == 1)
+        #expect(state.schemaVersion == 2, "upgraded by the version-only step 1 → 2")
     }
 
     @Test func roundTripWithTheNewKeys() throws {
@@ -42,7 +42,7 @@ struct SparedSessionStateTests {
         let decoded = try StateStore.decode(data)
         #expect(decoded.sparedSessionIDs == ids)
         #expect(decoded.sessionListIncomplete)
-        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.schemaVersion == PersistedState.currentSchemaVersion)
     }
 
     @Test func repairKeepsASparedIDOutOfTheSessions() {

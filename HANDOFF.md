@@ -779,9 +779,10 @@ sessions + 13 + 9).
 Then, the same day (same loop, three fix rounds, five live passes, all
 without input): **reclaim and save safety**, the review's orphan
 reclaim and save scheduling findings. The state file gained two
-fields, still schema 1: `sparedSessionIDs`, sessions the orphan
-reclaim must never end, and `sessionListIncomplete`, set whenever a
-launch did not read `state.json` as written (a first launch, a missing
+fields, in schema 1 at that commit: `sparedSessionIDs`, sessions the
+orphan reclaim must never end, and `sessionListIncomplete`, set
+whenever a launch did not read `state.json` as written (a first
+launch, a missing
 or unreadable file, a recovery from a backup) and cleared once that
 launch has recorded what was running. A launch that may not reclaim
 ends nothing and spares every live session no saved session names,
@@ -818,6 +819,44 @@ fields and drops them at its next save, after which its own reclaim
 would end spared sessions. Tests: 748 at this change (244 app + 265
 core + 217 sessions + 13 + 9).
 
+Then, the same day (same loop, two review rounds; one live check with
+the owner's leave, the rest code and scripts): **a rule for the state
+file's version, held by fixtures.** The rule (`docs/DESIGN.md` section
+3): `schemaVersion` is bumped whenever a released build could not
+decode the file, or would decode it and lose something whose loss is
+unsafe; a released build answers a newer file by reading it without
+loss or by refusing it by version, never by treating it as damaged.
+Applied at once: **the state file is schema 2**, with a first
+migration step from 1 that changes only the version. Two reasons,
+both read from the tags: 0.1.0 has a non-optional `Pane.sessionID`
+and so cannot decode the empty panes 0.1.1 and later save, and 0.1.1
+would drop `sparedSessionIDs` at its next save. So a state directory
+saved by a build from this change on is refused by 0.1.0 and 0.1.1
+("This version of Armadale is too old for your saved layout"); they
+leave state files and sessions alone, but before that alert they
+install their own helper copies in `bin/` and remove other versions'
+copies there (open items, Shipping). Fixtures: one saved state per
+release, written by that release's own code in a temporary worktree
+of its tag (`Packages/ArmadaleCore/Tests/ArmadaleCoreTests/Fixtures/`;
+generators, and how to add the next one, in `scripts/state-fixtures/`),
+with tests that the working tree reads them. From the other side,
+`scripts/check-state-compat.sh` gives every release tag a file written
+by the working tree and fails when one treats it as damaged, or reads
+it and would save it back with something lost that
+`scripts/state-fixtures/accepted-drops` does not list; with today's
+file set back to schema 1 it reports 0.1.0 as unparseable and 0.1.1
+as losing the spared list and its flag. It is not part of the gate
+(about 18 s, it builds the old versions): run it before a release and
+whenever the state file's shape changes (README, "Releasing"). On the
+way: every fatal launch (another copy holds the lock, a newer file, an
+unreadable file) now installs no helper, prepares no runtime and
+removes no stale temporary file, checked live once at schema 99 with
+decoy helper copies in a test directory (only the lock file changed;
+the control launch at schema 2 removed the decoys); and a JSON
+boolean is no longer taken for a version. `docs/DESIGN.md` sections 3,
+8, 11 and 13; README. Tests: 761 at this change (248 app + 274 core +
+217 sessions + 13 + 9).
+
 ## Next
 
 **Step 10, New Session (owner's request, October 24, 2026): done in
@@ -843,7 +882,9 @@ removed. The flag names were read from `claude 2.1.304 --help` and
 `codex-cli 0.163.0 --help` on October 24, 2026 (Codex has no
 `--full-auto` any more). The owner said not to care about files written
 by older builds (unreleased), so the state file stays schema 1 with
-additive decoding. Order: 10a model and removals, 10b dialog and
+additive decoding (0.1.0 had in fact been tagged the day before and
+cannot read an empty pane; schema 2 since November 14, 2026, Status
+above). Order: 10a model and removals, 10b dialog and
 Settings › Favorites, 10c the chooser; each through the implementer →
 reviewer loop. The owner gave the go-ahead for all of step 10 on October
 24, 2026 and asked only to be told when the Mac is needed for live UI
@@ -945,10 +986,10 @@ own, with a suggested order: "Architecture review" at the end of the
 open items below. A second pass on November 14, 2026 added three
 findings and put a new one first, a lock against two processes
 sharing one state directory: "Architecture review, second pass",
-after it. The lock, and the orphan reclaim and save scheduling
-changes, are done (November 14, 2026, Status above). The owner gave
-the go-ahead the same day for the rest in the suggested order: the
-schema rule, then the documents. Attaching restored sessions at
+after it. The lock, the orphan reclaim and save scheduling changes,
+and the schema rule are done (November 14, 2026, Status above). The
+owner gave the go-ahead the same day for the rest in the suggested
+order, which leaves the documents. Attaching restored sessions at
 launch, showing or re-adopting spared sessions, and a fork of the
 persistence helper still wait for owner decisions.
 
@@ -1148,6 +1189,22 @@ Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
 - No updater and no crash reporting (decided for v1, October 19, 2026).
+- Older builds on a newer state directory (November 14, 2026). Once a
+  build with schema 2 has saved a state directory, 0.1.0 and 0.1.1
+  refuse it by version, so going back to them means moving the state
+  files away first. Before their alert they install their own helper
+  copies in `bin/` and remove every other `zmx-*` and `ctty-exec-*`
+  copy there (read from both tags, not run). That is harmless while
+  every build bundles helper 0.8.1, since the later build puts its
+  copies back at its next launch; with a later helper version it would
+  remove copies that live sessions still need, and with both running
+  at once (0.1.x takes no lock) the later build cannot start sessions
+  until it is relaunched. A constraint for the next helper version
+  bump (DESIGN section 13).
+- The release checklist grew (README, "Releasing"): run
+  `scripts/check-state-compat.sh` before a release, and add the new
+  tag's fixture after it (`scripts/state-fixtures/README.md`). The
+  comparison step needs `/usr/bin/python3`, which Xcode provides.
 
 Architecture review (November 12, 2026)
 
@@ -1192,6 +1249,8 @@ decision on pane sizes and is a step of its own.
   next save. Rule to adopt: bump `schemaVersion` whenever a released
   build could not decode the file. No test reads a state file written
   by a released version; a fixture per release would hold the rule.
+  **Built November 14, 2026** (Status above): the rule, schema 2, a
+  fixture per release, and `scripts/check-state-compat.sh`.
 - **Save scheduling.** Every title change (`AppModel.setTitle`, OSC
   0/2) increments `changeCount`, and `StateSaver.schedule` restarts
   its 500 ms timer on every change with no longest wait, so programs

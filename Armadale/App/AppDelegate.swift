@@ -53,9 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// This process's lock on the state directory, held for its whole life
     /// (``StateLock``); `nil` when it could not be taken.
     private let stateLock: StateLock?
-    /// Another process holds the state directory's lock: this one loaded
-    /// nothing, runs no helper and only explains and quits.
-    private let isLockedOut: Bool
+    /// What this launch sets up (``LaunchPlan``). A fatal launch (another
+    /// process holds the state directory's lock, the state file is newer or
+    /// unreadable) runs no helper, prepares no runtime and only explains and
+    /// quits.
+    private let plan: LaunchPlan
 
     /// Menu bar mode (docs/DESIGN.md section 8, "Quitting with running
     /// sessions"): the status item while the app stays running with its
@@ -97,21 +99,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             FileHandle.standardError.write(Data((refusal.logLine + "\n").utf8))
         }
 
-        let loaded = refusal.map(Self.lockedOut) ?? Self.loadState(from: url)
+        let loaded = Self.launchState(refusal: refusal, stateURL: url)
         let state = loaded.state
-        self.isLockedOut = refusal != nil
+        let plan = LaunchPlan(loaded)
+        self.plan = plan
         self.stateURL = url
         self.mayReclaimOrphans = loaded.mayReclaimOrphans
         self.canSave = loaded.canSave
         self.loadReport = loaded.report
-        // Locked out: no themes folder read, no helpers installed, no
-        // runtime prepared, no hosts; nothing in the state directory is
-        // touched beyond the lock file's open.
-        self.settings = refusal == nil
-            ? AppSettings.shared
-            : AppSettings(preferences: .shared, themes: ThemeCatalog(directory: nil), surfaces: .standard)
+        let services = Self.launchServices(plan: plan, restoring: state.sessions)
+        let sessions = services.sessions
+        self.settings = services.settings
         self.model = AppModel(state: state, defaultWorkingDirectory: NSHomeDirectory())
-        let sessions = refusal == nil ? Self.makeSessionBackend(for: state.sessions) : Self.ephemeralBackend(failure: nil)
         self.zmxRuntime = sessions.runtime
         self.sessionSetupFailure = sessions.failure
         self.registry = SessionRegistry(
@@ -119,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             runtime: sessions.setup,
             restoredSessionIDs: Set(state.sessions.map(\.id)),
             settings: settings,
-            remote: refusal == nil ? Self.makeRemoteSupport(cttyExec: sessions.cttyExec) : nil)
+            remote: services.remote)
         let notifications = UserNotificationService()
         self.notifications = notifications
         self.attention = AttentionCenter(
@@ -137,6 +136,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         var canSave: Bool
         /// See ``AppDelegate/mayReclaimOrphans``.
         var mayReclaimOrphans: Bool
+    }
+
+    /// How much a launch sets up besides its windows (docs/DESIGN.md
+    /// section 8, "A fatal launch"). A fatal launch, whatever made it fatal
+    /// (``LoadReport/isFatal``: the lock is held by another process, the
+    /// state file is newer or cannot be read), uses nothing in the state
+    /// directory: no helper copies installed in `bin/` or other versions'
+    /// copies removed, no persistent runtime prepared (so no session listed
+    /// or probed, no log or exit file removed), no SSH support, no user
+    /// themes read.
+    struct LaunchPlan: Equatable {
+        var usesStateDirectory: Bool
+
+        init(_ loaded: LoadedState) {
+            usesStateDirectory = loaded.report?.isFatal != true
+        }
+    }
+
+    /// What a launch runs on: its settings, its local session backend and
+    /// its SSH support.
+    struct LaunchServices {
+        var settings: AppSettings
+        var sessions: SessionBackend
+        var remote: RemoteSessionSupport?
+    }
+
+    /// The services `plan` allows. A fatal plan gets settings with no themes
+    /// folder, the plain PTY backend and no SSH support, so nothing in the
+    /// state directory is touched beyond the lock file's open (and, when the
+    /// lock was taken, reading the state file): no helper installed or
+    /// removed, no runtime prepared. A normal plan gets
+    /// `sharedSettings()`, the persistent backend (``makeSessionBackend(for:environment:)``,
+    /// falling back to plain PTY sessions) and SSH support. Internal, with
+    /// `environment` and `sharedSettings` as parameters, for the tests.
+    static func launchServices(
+        plan: LaunchPlan,
+        restoring sessions: [Session],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        sharedSettings: () -> AppSettings = { AppSettings.shared }
+    ) -> LaunchServices {
+        guard plan.usesStateDirectory else {
+            return LaunchServices(
+                settings: AppSettings(preferences: .shared, themes: ThemeCatalog(directory: nil), surfaces: .standard),
+                sessions: ephemeralBackend(failure: nil),
+                remote: nil)
+        }
+        let backend = makeSessionBackend(for: sessions, environment: environment)
+        return LaunchServices(
+            settings: sharedSettings(),
+            sessions: backend,
+            remote: makeRemoteSupport(cttyExec: backend.cttyExec, environment: environment))
+    }
+
+    /// The persistent runtime the session registry asks for when it has none
+    /// (a later attempt after the launch's failed): `nil` for a fatal plan
+    /// (`makeBackend` is not called), with `ARMADALE_BACKEND=ephemeral`, or
+    /// when the attempt gives no persistent backend. Internal, with
+    /// `makeBackend` as a parameter, for the tests.
+    static func persistentRuntimeForRegistry(
+        plan: LaunchPlan,
+        sessions: [Session],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        makeBackend: ([Session], [String: String]) -> SessionBackend = { AppDelegate.makeSessionBackend(for: $0, environment: $1) }
+    ) -> SessionBackend? {
+        guard plan.usesStateDirectory, environment["ARMADALE_BACKEND"] != "ephemeral" else { return nil }
+        let backend = makeBackend(sessions, environment)
+        return backend.setup.isPersistent ? backend : nil
+    }
+
+    /// The state this launch starts from: nothing when another process
+    /// holds the lock (`refusal`), else `stateURL` loaded. Internal for the
+    /// tests.
+    static func launchState(refusal: InstanceLock.Refusal?, stateURL: URL) -> LoadedState {
+        refusal.map(Self.lockedOut) ?? Self.loadState(from: stateURL)
     }
 
     /// Another process owns the state directory: nothing is loaded, nothing
@@ -240,10 +313,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     private func wireRegistry() {
         registry.setUpPersistentRuntime = { [weak self] in
-            guard let self, !self.isLockedOut,
-                  ProcessInfo.processInfo.environment["ARMADALE_BACKEND"] != "ephemeral" else { return nil }
-            let sessions = Self.makeSessionBackend(for: self.model.sessions)
-            guard sessions.setup.isPersistent else { return nil }
+            guard let self,
+                  let sessions = Self.persistentRuntimeForRegistry(plan: self.plan, sessions: self.model.sessions)
+            else { return nil }
             self.zmxRuntime = sessions.runtime
             return sessions.setup
         }
@@ -335,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // MARK: Sessions
 
     /// What runs the app's (local) sessions, and how it was set up.
-    private struct SessionBackend {
+    struct SessionBackend {
         var setup: SessionRuntimeSetup
         var runtime: ZmxRuntime?
         var failure: String?
@@ -346,8 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// SSH hosts (docs/DESIGN.md section 6): the system's OpenSSH, with its
     /// shared connections' sockets in the runtime directory (or the `/tmp`
     /// fallback when that is too long for them).
-    private static func makeRemoteSupport(cttyExec: String?) -> RemoteSessionSupport {
-        let environment = ProcessInfo.processInfo.environment
+    private static func makeRemoteSupport(cttyExec: String?, environment: [String: String]) -> RemoteSessionSupport {
         let runtimeDirectory = ZmxRuntime.directory(forStateDirectory: StateLocation.directory(environment: environment))
         let transport = OpenSSHTransport(
             controlDirectory: OpenSSHTransport.controlDirectory(forRuntimeDirectory: runtimeDirectory),
@@ -370,8 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// state directory's `bin/`. If that cannot be set up the app still
     /// works, with sessions that end when it quits. `ARMADALE_BACKEND=ephemeral`
     /// selects those deliberately (tests, debugging).
-    private static func makeSessionBackend(for sessions: [Session]) -> SessionBackend {
-        let environment = ProcessInfo.processInfo.environment
+    static func makeSessionBackend(for sessions: [Session], environment: [String: String]) -> SessionBackend {
         let ephemeral = ephemeralBackend(failure:)
         if environment["ARMADALE_BACKEND"] == "ephemeral" {
             return ephemeral(nil)

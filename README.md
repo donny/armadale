@@ -491,6 +491,10 @@ To release:
    and by updaters, so a git commit hash cannot stand in for it; the
    commit a build came from is the one the release's suggested tag
    points at.
+   Run `scripts/check-state-compat.sh` too: every released version must
+   refuse the new `state.json` as newer, or read it and lose nothing at
+   its next save; never treat it as damaged (docs/DESIGN.md section 3 has
+   the rule).
 2. From a clean working tree, run `scripts/release.sh`. It refuses a tree
    with uncommitted or untracked changes unless given `--allow-dirty`,
    and a version whose tag `v<version>` already exists unless given
@@ -531,6 +535,8 @@ To release:
 
    The DMG must be the notarized one: Gatekeeper refuses a `--skip-notarize`
    build downloaded from the web.
+5. Once the tag exists, add its state fixture, written by the tagged
+   version's own code, as `scripts/state-fixtures/README.md` describes.
 
 To run the release build on this Mac, `scripts/install-release.sh` runs
 `scripts/release.sh` (passing on any options, such as `--skip-notarize`),
@@ -577,7 +583,7 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
-| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `fetch-dmgbuild.sh` and `dmgbuild-requirements.txt` (the pinned dmgbuild for the DMG), `dmg/settings.py` (the DMG's dmgbuild settings: contents, window, icon positions), `render-dmg-background.swift` (regenerates the DMG window's background, `dmg/background.png`, `dmg/background@2x.png` and `dmg/background.tiff`), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`); edit the scripts, not the generated files |
+| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `check-state-compat.sh` (every release tag refuses a state file the working tree wrote, or reads it without loss) and `state-fixtures/` (writes a state fixture with a release tag's own code; see its README), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `fetch-dmgbuild.sh` and `dmgbuild-requirements.txt` (the pinned dmgbuild for the DMG), `dmg/settings.py` (the DMG's dmgbuild settings: contents, window, icon positions), `render-dmg-background.swift` (regenerates the DMG window's background, `dmg/background.png`, `dmg/background@2x.png` and `dmg/background.tiff`), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`); edit the scripts, not the generated files |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |
 | `Vendor/dmgbuild/` | dmgbuild virtual environment for releases (`scripts/fetch-dmgbuild.sh`, git-ignored) |
 

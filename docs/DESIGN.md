@@ -464,7 +464,9 @@ persistence.
 ## 3. Persistence of layout: `StateStore`
 
 - File: `~/Library/Application Support/Armadale/state.json`, with
-  `schemaVersion` at the top and explicit migration steps per version.
+  `schemaVersion` at the top (2 since November 14, 2026) and explicit
+  migration steps per version (`Migrations.steps`, keyed by the version
+  they upgrade from).
 - Written atomically (temp file + rename), debounced 500 ms after any model
   change, and synchronously on quit. The debounce has a longest wait
   (`StateSaver.maximumDelay`, 2 s): counted from the first change not yet
@@ -479,28 +481,100 @@ persistence.
   and (October 24, 2026) favorites.
   A window's frame is always its normal (windowed) frame; `isFullScreen`
   says whether it was in full screen (section 8, "App lifecycle").
-- October 24, 2026, additive and still schema 1: a pane may have no
-  `sessionID` (an empty pane showing the New Session chooser; it is
-  restored as one, and nothing is started for it), `favorites` is a
-  top-level array (absent decodes as empty), and a session may carry
-  `options` (absent: none). Older files decode unchanged. A build from
-  before this change cannot read a file holding an empty pane; the owner
-  decided not to care, as Armadale has not been released. The repair
-  after every load (below) also turns a pane whose `sessionID` names a
-  session missing from the file into an empty pane, logged, so it shows
-  the chooser (step 10c; before, it was kept and showed a blank view).
-- A field added after a schema version shipped decodes with a default
-  when absent (`decodeIfPresent`), without a version bump, when the
-  default is right for every file written before it (`Profile.attentionIntegration`,
-  `WindowState.isFullScreen`); a change old files cannot be read as
-  gets a migration step.
+- **The version rule** (November 14, 2026). Released builds are real
+  readers of newer files (0.1.0 of October 23 and 0.1.1 of November 5,
+  2026 are out, and going back to one is allowed). A build that cannot
+  decode a file treats it as damaged: quarantine and a fresh start, the
+  layout gone and its sessions orphaned. A file with a higher
+  `schemaVersion` gets the safe refusal instead: an alert, with the
+  state files and sessions left alone (`.newerVersion`; what else a
+  refusing build does, which for 0.1.x is more, is in the next bullet). So `schemaVersion` is bumped whenever
+  a released build either could not decode the file, or would decode it
+  and lose something whose loss is unsafe (it ends sessions or loses
+  layout). A field a released build can ignore safely still needs no
+  bump: it decodes with a default when absent (`decodeIfPresent`), the
+  default is right for every older file, and a released build dropping
+  it harms nothing. A released build therefore answers a newer file in
+  one of two ways only, reading it or refusing it by version, never by
+  treating it as damaged. Every bump adds a step from the previous
+  version to `Migrations.steps`.
+- **What a refusing build does.** From November 14, 2026 a build that
+  refuses the file (newer or unreadable), like one locked out of the
+  directory, uses nothing in the state directory beyond opening the lock
+  file and reading the state files: `StateStore.load` removes stale
+  temporary files only when the outcome allows saving, and the launch
+  installs and removes no helper copy, prepares no runtime, lists no
+  session, reads no themes and sets up no SSH (section 8, "A fatal
+  launch"). 0.1.0 and 0.1.1 show their alert and leave the state files
+  and every session alone, but before the alert they do install their own
+  helper copies in `bin/` (`zmx-0.8.1`, `ctty-exec-<their version>`), remove
+  every other `zmx-*` and `ctty-exec-*` copy there (they pass no recorded
+  versions to the installer), prepare the runtime directory, remove stale
+  temporary state files and start the live probe. The newer build puts its
+  copies back at its next launch; section 13 has what this leaves for a
+  future helper version.
+- **Schema 2** (November 14, 2026) is a version-only step: `1 → 2` sets
+  `schemaVersion` and changes nothing else, because every shape schema 1
+  ever had is still decoded by the same additive decoding. Schema 1 grew
+  additively, each field decoding with a default when absent:
+  `Profile.attentionIntegration` (true) and `WindowState.isFullScreen`
+  (false) before 0.1.0; for 0.1.1 an optional `Pane.sessionID` (an empty
+  pane showing the New Session chooser, restored as one with nothing
+  started), top-level `favorites`, `Session.options` (October 24) and
+  `Pane.themeID` (October 30); then `sparedSessionIDs` and
+  `sessionListIncomplete` (below). Two of those break the rule: 0.1.0
+  cannot decode an empty pane (its `Pane.sessionID` is not optional), and
+  0.1.1 would drop the spared list at its next save, after which its own
+  orphan reclaim ends the spared sessions. At schema 2 both refuse the
+  file. Files written by 0.1.0 and 0.1.1 load through the step. The
+  repair after every load (below) also turns a pane whose `sessionID`
+  names a session missing from the file into an empty pane, logged, so
+  it shows the chooser (step 10c; before, it was kept and showed a blank
+  view).
+- **Fixtures** hold the rule from the reading side: one saved state per
+  released version, `Packages/ArmadaleCore/Tests/ArmadaleCoreTests/Fixtures/state-<version>.json`,
+  written by that version's own code. `scripts/state-fixtures/run.sh`
+  builds a small generator (`scripts/state-fixtures/v<version>.swift`)
+  against the tag's `ArmadaleCore` in a temporary `git worktree`; the
+  generator makes a state holding every kind of thing that version saves
+  through its `AppModel` and encodes it with its `StateStore`. One shape
+  is added that no version saves, a workspace with no window state, which
+  only older or hand-edited files hold; it is kept so that decoding it
+  stays covered.
+  `StateFixtureTests` checks that each fixture loads here at the current
+  version with no repairs and the generator's values, and round-trips,
+  and that a file one version ahead is refused with nothing moved or
+  written. A release adds its fixture once tagged
+  (`scripts/state-fixtures/README.md`).
+- **`scripts/check-state-compat.sh`** holds both halves of it from the
+  other side: the working tree writes a representative state
+  (`scripts/state-fixtures/current.swift`, which must keep up with what
+  the file holds) and every release tag's own `StateStore.load` reads a
+  copy. `newerVersion` passes; `unparseable` fails. `loaded` passes only
+  if what the tag would save keeps every key path of the file. That is
+  modelled as the tag's load followed by its repair (`repaired()`, which
+  each released app applies before its first save), encoded by the tag's
+  own `StateStore.encode`; anything the tag's `AppModel` changes at
+  launch or later is not modelled. The comparison is
+  `scripts/state-fixtures/compare.py` (key order, whitespace, the version
+  and keys the tag adds are not loss);
+  otherwise it prints the paths and fails, unless each is listed with its
+  reason in `scripts/state-fixtures/accepted-drops` (empty today).
+  `--as-schema N` hands the tags the same file with another version, to
+  show what the check catches. It builds every released version (about
+  20 s in all with two), so it is not part of the gate: run it before a
+  release and whenever the state file's shape changes. With the file set
+  back to schema 1 it answers `unparseable` for v0.1.0 and, for v0.1.1,
+  `loaded` losing `sessionListIncomplete` and `sparedSessionIDs`; at
+  schema 2, `newerVersion` for both.
 - Loading drops empty closed workspaces (no tab groups, window closed),
   the husks that closing a workspace's last tab group left before October
   23, 2026, even when that leaves none (the app then makes a fresh one).
   `StateStore.decode` applies `PersistedState.droppingEmptyClosedWorkspaces()`
   to every file it reads, the backup included, without a version bump:
-  such a workspace holds no tab groups and so no sessions, and files are
-  still readable by older builds; `StateStore.load` reports how many it
+  such a workspace holds no tab groups and so no sessions, and dropping
+  it changes no shape a released build reads (the version rule above
+  is about shapes); `StateStore.load` reports how many it
   dropped and the app logs it. The repair that follows every load
   (`PersistedState.repaired()`) drops tab groups left without tabs (moves
   kept them before October 23, 2026, and a repair can empty one) and then
@@ -531,14 +605,15 @@ persistence.
   the launch backup brings the layout back. A fresh start means removing
   all three.
 - Two top-level fields for the orphan reclaim (section 4, "Housekeeping"),
-  November 14, 2026, additive and still schema 1 (absent: none, false):
+  November 14, 2026, added in schema 1 (absent: none, false):
   `sparedSessionIDs`, sessions no saved session refers to that the
   reclaim must never end, running or not (sorted; the repair after every
   load keeps any ID that is also a session in the file out of it), and `sessionListIncomplete`, set
   while the saved sessions are not known to be everything Armadale
-  created. A released build (0.1.1 and earlier) ignores both and drops
-  them at its next save; its own reclaim then ends the spared sessions as
-  orphans at its next clean launch.
+  created. 0.1.1 would ignore both and drop them at its next save, and
+  its own reclaim would then end the spared sessions as orphans at its
+  next clean launch; that is one of the reasons for schema 2 (above), at
+  which 0.1.1 refuses the file instead.
 - **One process per state directory.** `StateLock` (`ArmadaleCore`) takes
   an exclusive, non-blocking `flock` on `armadale.lock` in the state
   directory (creating the directory if needed) and the app holds it for its
@@ -1813,7 +1888,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   lives on the pane record, it survives relaunch, a respawn (the session
   is replaced, the pane stays), a tab moved between groups or windows and
   a drag; a split's new pane starts on Default. It is saved only when set
-  (no schema bump; older files load unchanged). `AppSettings.terminalAppearance(for:paneThemeID:)`
+  (added in schema 1 without a bump; older files load unchanged). `AppSettings.terminalAppearance(for:paneThemeID:)`
   uses the pane's theme when the catalog knows it, and the Settings
   choice for the appearance when it is `nil` or unknown (a theme removed
   outside the app, a typo in the state file); removing an imported theme
@@ -2543,7 +2618,19 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   other app stayed frontmost. With `bringForward()` (same check, same day,
   Terminal frontmost) the locked-out copy was the frontmost app at 1, 3, 6
   and 10 s, its alert on the modal-panel layer (8), and SIGTERM with the
-  alert up ended it in 0.06 s. The normal launch's plain `NSApp.activate()`
+  alert up ended it in 0.06 s. Whatever made it fatal, the launch is
+  built the way the locked-out one is (`AppDelegate.LaunchPlan`, keyed
+  on `LoadReport.isFatal`; November 14, 2026, before that only the lock
+  refusal was): empty state, the plain PTY backend, no helper installed
+  or removed, no persistent runtime prepared, no remote support, no
+  themes folder read, nothing listed. `LaunchStateTests` check the three
+  fatal cases and a normal launch against a temporary directory. Live
+  (same day, Debug build, isolated directory): with `state.json` at
+  schema 99 and decoy `zmx-0.0.1` and `ctty-exec-0.0.0` copies in `bin/`,
+  the alert said format 99 against format 2, no helper process started,
+  and after SIGTERM every file had the same inode, size and modification
+  time except the lock file; the same launch at schema 2 removed both
+  decoys. The normal launch's plain `NSApp.activate()`
   was refused the same way (the first copy, started from the shell, stayed
   behind Terminal); it is unchanged for now. A reopen (Dock click, `open -a`) while the
   report is pending opens nothing (`AppDelegate.ignoresReopen`).
@@ -3282,6 +3369,8 @@ armadale/
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
 ├── Vendor/dmgbuild/                 dmgbuild virtual environment for releases (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
+│                                    check-state-compat.sh, state-fixtures/ (state fixture
+│                                    generators per release, run.sh, README; section 3),
 │                                    render-app-icon.swift, release.sh, install-release.sh,
 │                                    fetch-dmgbuild.sh, dmgbuild-requirements.txt,
 │                                    render-dmg-background.swift, dmg/ (settings.py and the
@@ -3420,6 +3509,11 @@ stapled DMG**.
   updaters; the commit a build came from is the one the release's
   suggested tag points at. A release is a commit; the tag is the
   owner's.
+- **State file** (November 14, 2026). Before a release,
+  `scripts/check-state-compat.sh` must pass: no released version answers
+  the new file `unparseable`, and none reads it and would lose a key path
+  not listed in `scripts/state-fixtures/accepted-drops`; once the tag exists, its state fixture is
+  added with the tagged code (section 3, `scripts/state-fixtures/README.md`).
 - **Identity change.** A Developer ID build has a different code
   identity (designated requirement) from the ad-hoc development build.
   Notification permission is kept per bundle identifier, so it carries
@@ -3663,7 +3757,8 @@ The build order is complete.
   deferred by the owner's decision. When it comes, the pane context menu
   needs another entry point while headers are hidden.
 - **New Session (step 10).** A state file holding an empty pane is not
-  readable by builds before it (accepted: unreleased). The Codex and Claude
+  readable by 0.1.0; schema 2 (section 3) makes 0.1.0 refuse such a file
+  by version instead of treating it as damaged. The Codex and Claude
   flag names are version facts and will rot; the chooser adds one more
   "pane without a terminal" state whose focus
   and first-responder behaviour must match the placeholder's (the Return
@@ -3684,6 +3779,25 @@ The build order is complete.
   an update that changes the helper version removes the copy that created
   them; they keep running, but listing and ending them with the newer
   copy is unverified and may time out.
+- **Old builds and a future helper version** (November 14, 2026, not
+  solved). 0.1.0 and 0.1.1, opened on a state directory a newer build
+  uses, refuse the newer file but first run their helper installer with
+  no recorded versions (section 3, "What a refusing build does"): it
+  removes every `zmx-<version>` copy in `bin/` other than their own
+  `zmx-0.8.1`. While the bundled helper stays 0.8.1 the newer build puts
+  its copies back at its next launch and nothing is lost. Once a newer
+  build ships another helper version, a 0.1.x launch would remove the
+  copies that live sessions of that version were started from: the
+  daemons keep running, but the newer build would have to restore its
+  own version's copy, and any older version's copy still referenced by a
+  session would be gone. A future helper bump has to account for this.
+  The same installer also removes every `ctty-exec-*` copy but its own,
+  so a newer build's `ctty-exec-<its version>` goes too (once the app
+  version differs from 0.1.x's). That matters when both run at once,
+  which nothing prevents because 0.1.x takes no lock: the newer build's
+  running exit recorders keep their open copy, but a session it starts
+  after that cannot run the missing copy until its next launch
+  reinstalls it (inferred from the installer and launch code, not seen).
 - **Replay fidelity.** Reattach replays a libghostty‑vt snapshot (verified
   for scrollback, colours and the alternate screen). SwiftTerm renders it as
   ordinary VT output. Anything odd shows up in step 3 and is the earliest

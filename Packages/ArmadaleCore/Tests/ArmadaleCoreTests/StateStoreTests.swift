@@ -247,6 +247,19 @@ struct StateStoreTests {
         #expect(FileManager.default.fileExists(atPath: unrelated.path))
     }
 
+    /// A refused load (newer or unreadable file) removes nothing, not even
+    /// a stale temporary file.
+    @Test func aRefusedLoadKeepsStaleTemporaryFiles() throws {
+        let dir = try TempDirectory()
+        try Data(#"{"schemaVersion": 99}"#.utf8).write(to: dir.stateFile)
+        let stale = dir.url.appendingPathComponent(".state.json.\(UUID().uuidString).tmp")
+        try Data("partial".utf8).write(to: stale)
+        guard case .newerVersion = StateStore.load(from: dir.stateFile) else {
+            Issue.record("expected .newerVersion"); return
+        }
+        #expect(FileManager.default.fileExists(atPath: stale.path))
+    }
+
     @Test func saveCreatesMissingDirectory() throws {
         let dir = try TempDirectory()
         let nested = dir.url.appendingPathComponent("a/b/state.json")
@@ -387,15 +400,46 @@ struct StateStoreTests {
 @Suite("Migrations")
 struct MigrationTests {
     @Test func currentVersionPassesThrough() throws {
-        let doc: Migrations.Document = ["schemaVersion": 1, "workspaces": []]
+        let doc: Migrations.Document = ["schemaVersion": PersistedState.currentSchemaVersion, "workspaces": []]
         let result = try Migrations.migrate(doc)
-        #expect(result["schemaVersion"] as? Int == 1)
+        #expect(NSDictionary(dictionary: result) == NSDictionary(dictionary: doc))
+        let data = Data(#"{"schemaVersion": 2, "workspaces": []}"#.utf8)
+        #expect(try Migrations.migrate(data: data) == data, "the current version is not re-serialized")
+    }
+
+    @Test func currentVersionIsTwo() {
+        #expect(PersistedState.currentSchemaVersion == 2)
+        #expect(PersistedState().schemaVersion == 2)
+    }
+
+    /// 1 → 2 changes nothing but the version: every schema-1 shape is still
+    /// decoded by the same additive decoding (DESIGN §3).
+    @Test func stepFromOneToTwoOnlyBumpsTheVersion() throws {
+        let doc: Migrations.Document = [
+            "schemaVersion": 1, "workspaces": [["id": "x"]], "sessions": [], "hosts": [], "profiles": [],
+            "favorites": [], "unknownKey": "kept",
+        ]
+        let result = try Migrations.migrate(doc)
+        #expect(result["schemaVersion"] as? Int == 2)
+        var expected = doc
+        expected["schemaVersion"] = 2
+        #expect(NSDictionary(dictionary: result) == NSDictionary(dictionary: expected))
     }
 
     @Test func legacyDocumentWithoutVersionIsRejected() throws {
         let legacy = Data(#"{"windows": [{"title": "old"}]}"#.utf8)
         #expect(throws: MigrationError.missingSchemaVersion) { try Migrations.migrate(data: legacy) }
         #expect(throws: MigrationError.missingSchemaVersion) { try StateStore.decode(legacy) }
+    }
+
+    /// `true` would bridge to 1 and load; a boolean is not a version.
+    @Test func booleanVersionIsAMissingVersion() {
+        for literal in ["true", "false"] {
+            let data = Data(#"{"schemaVersion": \#(literal), "workspaces": [], "sessions": [], "hosts": [], "profiles": []}"#.utf8)
+            #expect(throws: MigrationError.missingSchemaVersion) { try Migrations.migrate(data: data) }
+            #expect(throws: MigrationError.missingSchemaVersion) { try StateStore.decode(data) }
+        }
+        #expect(throws: MigrationError.missingSchemaVersion) { try Migrations.migrate(["schemaVersion": true]) }
     }
 
     @Test func versionZeroHasNoMigrationPath() {

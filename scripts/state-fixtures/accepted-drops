@@ -1,0 +1,10 @@
+# Key paths of state.json that a released version may drop or change
+# without a schemaVersion bump, because losing them is safe (docs/DESIGN.md
+# section 3: nothing that ends sessions or loses layout). Read by
+# scripts/check-state-compat.sh. One path per line, as the script prints it
+# (array indices as [*]), followed by the reason, for example:
+#
+#   workspaces[*].tabGroups[*].tabs[*].panes[*].themeID  a pane's theme; 0.1.0 shows the default
+#
+# A path listed here is accepted for every release. Empty today: at schema 2
+# every release refuses the working tree's file.

@@ -1,8 +1,11 @@
 /// Everything Armadale persists between launches. Scrollback and terminal
 /// state are not included; the session daemon owns those.
 public struct PersistedState: Codable, Sendable, Hashable {
-    /// The schema version this build reads and writes.
-    public static let currentSchemaVersion = 1
+    /// The schema version this build reads and writes. Files of an older
+    /// version are upgraded by ``Migrations``; a newer one is refused
+    /// (DESIGN §3 has the rule for when it is bumped). 2 since November
+    /// 14, 2026 (``Migrations/steps``).
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var workspaces: [Workspace]
@@ -10,20 +13,21 @@ public struct PersistedState: Codable, Sendable, Hashable {
     public var hosts: [Host]
     public var profiles: [Profile]
     /// Saved session recipes, in the order the user keeps them. Added on
-    /// October 24, 2026 without a schema bump: absent decodes as none.
+    /// October 24, 2026, in schema 1: absent decodes as none.
     public var favorites: [Favorite]
     /// Live local sessions that no saved session refers to and that the
     /// launch's orphan reclaim must leave running: they were found at a
     /// launch whose saved sessions were not known to be complete (DESIGN
     /// §4, "Housekeeping"). Sorted; never also in `sessions`. Added on
-    /// November 14, 2026 without a schema bump: absent decodes as none.
+    /// November 14, 2026, in schema 1 (absent decodes as none); 0.1.1
+    /// would drop it, one reason for schema 2.
     public var sparedSessionIDs: [SessionID]
     /// The saved sessions are not known to be everything Armadale created:
     /// set at a launch whose state did not load cleanly (missing,
     /// unreadable, recovered from a backup), cleared once the sessions
     /// running at that launch are recorded in `sparedSessionIDs`. While it
-    /// is set the orphan reclaim ends nothing. Added on November 14, 2026
-    /// without a schema bump: absent decodes as false.
+    /// is set the orphan reclaim ends nothing. Added on November 14, 2026,
+    /// in schema 1: absent decodes as false.
     public var sessionListIncomplete: Bool
 
     public init(

@@ -168,15 +168,24 @@ public enum StateStore {
     /// its backups (``Backup``, in order) as described in ``LoadResult``.
     /// Nothing is moved until the outcome is known: a newer-version or
     /// unreadable file anywhere in the chain stops the load with every file
-    /// in place. Also removes temporary files left by an interrupted save.
+    /// in place. Once the outcome allows saving, also removes temporary
+    /// files left by an interrupted save (a refused load removes nothing).
     /// Empty closed workspaces are dropped (``decode(_:)``);
     /// `droppedEmptyWorkspaces` is called with their number when the state
     /// returned had any, for the log.
     public static func load(
         from url: URL, fileManager: FileManager = .default, droppedEmptyWorkspaces: (Int) -> Void = { _ in }
     ) -> LoadResult {
-        removeStaleTemporaryFiles(for: url, fileManager: fileManager)
+        let result = loadChain(from: url, fileManager: fileManager, droppedEmptyWorkspaces: droppedEmptyWorkspaces)
+        if result.allowsSaving {
+            removeStaleTemporaryFiles(for: url, fileManager: fileManager)
+        }
+        return result
+    }
 
+    private static func loadChain(
+        from url: URL, fileManager: FileManager, droppedEmptyWorkspaces: (Int) -> Void
+    ) -> LoadResult {
         let primaryProblem: String
         // Damaged files met so far, quarantined only once a usable file
         // (or none at all) has been found.

@@ -22,6 +22,9 @@ let package = Package(
         .testTarget(
             name: "ArmadaleCoreTests",
             dependencies: ["ArmadaleCore"],
+            // One state file per released version, written by that version
+            // (scripts/state-fixtures/README.md).
+            resources: [.copy("Fixtures")],
             swiftSettings: strictSettings
         ),
     ],

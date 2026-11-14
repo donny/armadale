@@ -38,10 +38,32 @@ public enum Migrations {
 
     /// Registered steps keyed by the version they upgrade *from*.
     ///
-    /// Version 1 is the first schema; there is nothing to migrate yet. The
-    /// first schema change adds `1: { … }` here and bumps
-    /// ``PersistedState/currentSchemaVersion`` to 2.
-    public static let steps: [Int: Step] = [:]
+    /// When the version is bumped (the rule is in DESIGN §3: whenever a
+    /// released build could not decode the file, or would decode it and
+    /// lose something whose loss is unsafe), a step from the previous
+    /// version is added here.
+    ///
+    /// - 1 → 2 (November 14, 2026) changes nothing but the version. Every
+    ///   shape schema 1 ever had is still decoded by the same additive
+    ///   decoding; the bump is there so released builds refuse the newer
+    ///   file instead of misreading it: 0.1.0 cannot decode an empty pane,
+    ///   and 0.1.1 would drop the orphan reclaim's spared sessions.
+    public static let steps: [Int: Step] = [
+        1: { document in
+            var document = document
+            document["schemaVersion"] = 2
+            return document
+        },
+    ]
+
+    /// The document's integer `schemaVersion`, or `nil`. A JSON boolean is
+    /// not a version, although `JSONSerialization` would bridge `true` to 1.
+    static func schemaVersion(of document: Document) -> Int? {
+        guard let value = document["schemaVersion"],
+              CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID()
+        else { return nil }
+        return value as? Int
+    }
 
     /// Upgrades `document` to `targetVersion` using `steps`.
     ///
@@ -53,7 +75,7 @@ public enum Migrations {
         to targetVersion: Int = PersistedState.currentSchemaVersion,
         steps: [Int: Step] = Migrations.steps
     ) throws -> Document {
-        guard let version = document["schemaVersion"] as? Int else {
+        guard let version = schemaVersion(of: document) else {
             throw MigrationError.missingSchemaVersion
         }
         if version > targetVersion { throw MigrationError.newerVersion(version) }
@@ -65,7 +87,7 @@ public enum Migrations {
                 throw MigrationError.unsupportedVersion(currentVersion)
             }
             current = try step(current)
-            guard let next = current["schemaVersion"] as? Int, next == currentVersion + 1 else {
+            guard let next = schemaVersion(of: current), next == currentVersion + 1 else {
                 throw MigrationError.stepDidNotAdvance(from: currentVersion)
             }
             currentVersion = next
@@ -82,7 +104,7 @@ public enum Migrations {
         guard let document = try JSONSerialization.jsonObject(with: data) as? Document else {
             throw MigrationError.notAnObject
         }
-        if document["schemaVersion"] as? Int == targetVersion { return data }
+        if schemaVersion(of: document) == targetVersion { return data }
         let migrated = try migrate(document, to: targetVersion, steps: steps)
         return try JSONSerialization.data(withJSONObject: migrated, options: [.sortedKeys])
     }
