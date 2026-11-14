@@ -864,7 +864,10 @@ open item, not started.
 
 An architecture review on November 12, 2026 added candidates of its
 own, with a suggested order: "Architecture review" at the end of the
-open items below. None is started.
+open items below. A second pass on November 14, 2026 added three
+findings and put a new one first, a lock against two processes
+sharing one state directory: "Architecture review, second pass",
+after it. None is started.
 
 ## Open items carried forward
 
@@ -1094,6 +1097,83 @@ decision on pane sizes and is a step of its own.
   two `Logger`s, although NSLog is `<private>` in `log show` on macOS
   27 (10c, above); the load-sensitive flood tests run beside four
   other test bundles in the gate.
+
+Architecture review, second pass (November 14, 2026)
+
+The findings above were read against the code again and stand. Three
+are new and three add to ones above. Again from reading only: nothing
+was built or run, none is reproduced live, and none is started.
+Suggested order now: the instance lock first (small, and it closes one
+way into the orphan reclaim), then the orphan reclaim and the save
+scheduling, the schema rule and the documents as above; attaching
+restored sessions at launch stays a step of its own.
+- **New: nothing stops two Armadale processes sharing one state
+  directory.** There is no lock (no `flock`, no
+  `LSMultipleInstancesProhibited`), `StateLocation.directory` falls
+  back to the real `~/Library/Application Support/Armadale` whenever
+  `ARMADALE_STATE_DIR` is unset, and the scheme's Run action in
+  `project.yml` sets no environment, so isolation rests on AGENTS.md's
+  rule alone. A test build started without the variable while the
+  installed app runs loads the same `state.json` and attaches to the
+  same sessions; each process then saves its own model over the
+  other's (`StateStore.save`, last writer wins), a pane closed in one
+  ends a session the other shows, and a session created in the process
+  whose save loses is unreferenced at the next clean launch, where
+  `OrphanReclaimer` ends it. Possible: an exclusive `flock` on a file
+  in the state directory, taken in `AppDelegate.init` before
+  `StateStore.load` and held for the life of the process (a second
+  process explains and quits, or activates the first), and an
+  `ARMADALE_STATE_DIR` in the scheme's Run environment. Test builds
+  with their own state directory are unaffected.
+- **New: the status of a session never shown is the launch probe's
+  answer, and is never refreshed.** For a restored session without a
+  controller, `SessionRegistry.status(of:)` answers from `liveAtLaunch`
+  (local) or `remoteLive` (hosts), which are set when the launch probe
+  answers, after a successful `retryPersistence`, and for a host by
+  Respawn All Ended's listing. A session that ends in a tab not
+  visited since the launch therefore stays `.running`: in its tab's
+  and the sidebar's glyph, and, through `CloseRisk.mayBeRunning`, in
+  `runningSessionCount()`, which is what the quit question and the
+  status item's menu show. It is corrected when the tab is first
+  shown. Same cause as "Restored sessions in tabs not shown yet are
+  not attached", and attaching them at launch removes it.
+- **New: `docs/DESIGN.md`'s status paragraph is out of date.** Line 7
+  still says "Status (October 19, 2026). All nine steps", before step
+  10 and both releases (v0.1.0, v0.1.1). Small by itself; an example
+  for "The documents" above.
+- **Adds to "Restored sessions in tabs not shown yet are not
+  attached".** A controller exists only inside a pane view
+  (`SessionRegistry.panes` is `[SessionID: PaneView]`, and
+  `controller(for:)` reads it from there), which is why nothing can
+  be attached before it is shown, and why `status(of:)`, `isEnded`,
+  `riskItem`, `close`, `endAllSessions`, `sessionsRunning(after:)`,
+  `respawn` and `closeRestoredSessionsThatEndedCleanly` each have a
+  second path for a session never shown. A registry that holds the
+  controllers itself, with the pane view made when a pane is first
+  shown, makes the attach at launch possible and lets those paths go.
+  `SessionRegistry` (868 lines) and `AppDelegate` (955) are best split
+  in that step, not before.
+- **Adds to "Orphan reclaim".** It is the only code that ends sessions
+  the user did not ask to end, and it does so by set difference
+  against one file. Instead of only widening the hold-back, the rule
+  could change: ask before ending ("N sessions are running that no
+  pane shows"), or write a small record per local session beside its
+  socket at create (the `Session` value) so that unreferenced live
+  sessions can be offered back as panes after a lost state file. A
+  daemon left running costs a few megabytes; an agent ended by mistake
+  can cost hours of its work. DESIGN section 1's "never adopts
+  sessions created elsewhere" would still hold (these are Armadale's
+  own). Owner decision; hosts are a separate question, since several
+  Macs may share a host's `~/.armadale`.
+- **Adds to "Save scheduling".** Besides a longest wait, the title and
+  the working directory (`AppModel.setTitle`, `setWorkingDirectory`)
+  could stay out of what schedules a save and be written with the next
+  structural change and at quit: the persistence helper replays both
+  on attach, so the saved copies matter only for sessions that are not
+  attached. `AppModel` is one `@Observable` object and
+  `displayTitle(for:)` reads `sessions`, so every title change also
+  re-evaluates the sidebar and tab bar views that show titles, in
+  every window; not measured.
 
 ## Investigations (October 19, 2026), decisions pending
 
