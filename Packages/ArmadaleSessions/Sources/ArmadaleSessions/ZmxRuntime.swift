@@ -121,6 +121,33 @@ public struct ZmxRuntime: Sendable, Hashable {
         directory + "/" + Self.sessionName(for: id)
     }
 
+    /// Armadale sessions whose socket exists in the runtime directory,
+    /// whether or not a listing names them: a stopped daemon is left out of
+    /// a listing that still succeeds (checked November 14, 2026). A stale
+    /// socket of an ended session counts too.
+    public func sessionsWithSockets() -> Set<SessionID> {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return [] }
+        var result = Set<SessionID>()
+        for name in names {
+            guard let id = Self.sessionID(fromName: name) else { continue }
+            var info = stat()
+            if lstat(directory + "/" + name, &info) == 0, (info.st_mode & S_IFMT) == S_IFSOCK {
+                result.insert(id)
+            }
+        }
+        return result
+    }
+
+    /// What the launch housekeeping treats as alive, so their logs and exit
+    /// files are kept: sessions the listing named that were not just ended,
+    /// and every session whose socket exists (a stopped daemon is left out
+    /// of a listing that still succeeds).
+    public static func aliveForHousekeeping(
+        listed: Set<SessionID>, ended: Set<SessionID>, sockets: Set<SessionID>
+    ) -> Set<SessionID> {
+        listed.subtracting(ended).union(sockets)
+    }
+
     // MARK: Logs
 
     /// zmx's log directory, `<runtime>/logs`.

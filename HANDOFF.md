@@ -776,6 +776,48 @@ normal launch started from a shell does not come forward (open items,
 Hierarchy and UI). Tests: 711 at this change (236 app + 247 core + 206
 sessions + 13 + 9).
 
+Then, the same day (same loop, three fix rounds, five live passes, all
+without input): **reclaim and save safety**, the review's orphan
+reclaim and save scheduling findings. The state file gained two
+fields, still schema 1: `sparedSessionIDs`, sessions the orphan
+reclaim must never end, and `sessionListIncomplete`, set whenever a
+launch did not read `state.json` as written (a first launch, a missing
+or unreadable file, a recovery from a backup) and cleared once that
+launch has recorded what was running. A launch that may not reclaim
+ends nothing and spares every live session no saved session names,
+and every session whose socket exists in the runtime directory: the
+helper's listing leaves out a daemon that does not answer within about
+a second and still succeeds (measured with `kill -STOP`: exit 0 after
+1.06 s, nothing printed). The list never shrinks by itself. A launch
+that read a complete file ends only what is listed, unnamed and not
+spared, as before. Spared sessions are invisible: no pane shows them
+and End Sessions and Quit leaves them alone (open items, Session
+layer). The launch housekeeping keeps the logs and exit files of
+sessions that are listed or have a socket. `StateSaver` keeps its
+500 ms debounce and has a longest wait of 2 s from the first unwritten
+change; a retry pending after a failed write keeps its own time.
+`state.json.launch.bak` is the file a launch read successfully, copied
+before that launch's first save and tried after `state.json` and
+`state.json.bak`; the recovery alert names the backup it used, and a
+fresh start now means removing all three files. `docs/DESIGN.md`
+sections 3, 4, 8 and 13; README. Checked live on test builds in
+`/tmp/armadale-reclaim`: unreadable `state.json` and `.bak` with a
+running session (spared, alive after the next clean launch, still
+listed as spared after it was ended by hand); a hand-written file
+carrying the flag with nothing spared; a file without the new fields
+(the stray session ended, as before); SIGKILL at eight moments of an
+unclean launch; a stopped daemon the listing left out (spared by its
+socket, its log kept, counted as running); a first launch and a
+recovery leaving a good launch backup untouched, three unreadable
+files, a newer-version launch backup (fatal, nothing moved); the alert
+texts read on screen; `scripts/check-quit.sh`. Not staged live: a
+failing disk under a stream of changes (the retry timing has unit
+tests only; one attempt with a read-only state directory produced no
+save attempt at all, not looked into). Known limit: 0.1.1 ignores both
+fields and drops them at its next save, after which its own reclaim
+would end spared sessions. Tests: 748 at this change (244 app + 265
+core + 217 sessions + 13 + 9).
+
 ## Next
 
 **Step 10, New Session (owner's request, October 24, 2026): done in
@@ -903,11 +945,12 @@ own, with a suggested order: "Architecture review" at the end of the
 open items below. A second pass on November 14, 2026 added three
 findings and put a new one first, a lock against two processes
 sharing one state directory: "Architecture review, second pass",
-after it. The lock is done (November 14, 2026, Status above). The
-owner gave the go-ahead the same day for the rest in the suggested
-order: the orphan reclaim and the save scheduling, the schema rule,
-the documents. Attaching restored sessions at launch and a fork of
-the persistence helper still wait for owner decisions.
+after it. The lock, and the orphan reclaim and save scheduling
+changes, are done (November 14, 2026, Status above). The owner gave
+the go-ahead the same day for the rest in the suggested order: the
+schema rule, then the documents. Attaching restored sessions at
+launch, showing or re-adopting spared sessions, and a fork of the
+persistence helper still wait for owner decisions.
 
 ## Open items carried forward
 
@@ -961,6 +1004,41 @@ Session layer
   session-controller tests.
 - One unexplained rendering glitch: a Claude Code prompt once showed a
   colour code as literal text (`185;249m`) after a replay. Not reproduced.
+- Spared sessions (November 14, 2026) are invisible and never end by
+  themselves: sessions that were running when a launch could not read
+  its state file as written stay in `sparedSessionIDs`, no pane shows
+  them, and End Sessions and Quit leaves them alone. The `state` log
+  line of each launch gives their number and how many still run. By
+  hand: `ZMX_DIR=<state directory>/run <state directory>/bin/zmx-0.8.1
+  ls`, and `kill a-<id>` to end one. Showing them, or offering them
+  back as panes (which needs a record of what each one runs), is an
+  owner decision. Their helper version is not recorded, so after the
+  bundled helper changes the old copy is removed and listing or ending
+  them with the new one may time out (DESIGN section 13). In a run on
+  the plain PTY fallback the flag stays set, so the reclaim is held
+  back until a run with the persistent runtime (intended).
+- The helper's listing leaves out a daemon that does not answer within
+  about a second and still succeeds (November 14, 2026, `kill -STOP`).
+  The reclaim no longer depends on it for what it spares, but the rest
+  of the app does (from the code, not staged in the app): restore at
+  launch shows such a session as Session Ended with no status, a
+  Respawn there starts a new session while the old daemon keeps
+  running unreferenced, and `exists()` after a client goes away and
+  Respawn All Ended on hosts use the same listing.
+- A clean launch of an unchanged state file still writes `state.json`
+  once or twice in its first seconds, with the same content (seen
+  November 14, 2026; not the reclaim, which saves only when it changed
+  something; window-state recording after the window opens is
+  suspected, not looked into).
+- Quarantine names resolve to the second
+  (`state.json.corrupt-<seconds>`): a second failure in the same
+  second cannot be moved aside and stays in place (older, not
+  triggered).
+- The `/tmp/armadale-<uid>` fallback for the runtime directory is
+  shared by every state directory whose socket paths would be too
+  long, so an allowed reclaim in one would end the other's sessions
+  (inferred from the code, not reproduced; it needs two long paths,
+  and test directories under `/tmp` are short).
 
 Hierarchy and UI
 - One extra SIGWINCH reaches each pane after relaunch (harmless at a
@@ -1101,7 +1179,9 @@ decision on pane sizes and is a step of its own.
   recovery. The quarantined `state.json.corrupt-<time>` is kept, but
   the sessions it names are gone by then. Possible: save with the
   state that its references are incomplete, and reclaim only sessions
-  created after that.
+  created after that. **Built November 14, 2026** (Status above): the
+  flag is `sessionListIncomplete`, and the sessions found are spared
+  for good instead of being told apart by age.
 - **No rule for an older build reading a newer file.** The schema is
   still 1 with additive decoding (`Migrations.steps` is empty), which
   DESIGN section 3 justifies for a new build reading old files. Since
@@ -1121,6 +1201,8 @@ decision on pane sizes and is a step of its own.
   (`onRuntimeVersionRecorded` saves at once). `state.json.bak` is
   replaced by every save (`StateStore.rotateBackup`), so two saves of
   a bad state leave no good copy; a backup kept once per launch would.
+  **Built November 14, 2026** (Status above): a longest wait of 2 s,
+  and `state.json.launch.bak` beside the per-save backup.
 - **The persistence helper's workarounds.** Create's double attach,
   attach-only through `/usr/bin/true`, telling the cases apart by a
   client's first bytes within 2 s, the RIS filter, the flood reattach
@@ -1144,7 +1226,12 @@ decision on pane sizes and is a step of its own.
   need `scripts/check-quit.sh`; about 20 `NSLog` calls remain beside
   two `Logger`s, although NSLog is `<private>` in `log show` on macOS
   27 (10c, above); the load-sensitive flood tests run beside four
-  other test bundles in the gate.
+  other test bundles in the gate. Seen in review on November 14, 2026:
+  a clean `xcodebuild … build-for-testing` into a fresh DerivedData
+  fails with "Unable to resolve module dependency: 'Armadale'" at
+  `ArmadaleAppTests/SidebarShownPathTests.swift:4` (`@testable import
+  Armadale`), while the gate's `build test` passes from a fresh
+  DerivedData; older, not looked into.
 
 Architecture review, second pass (November 14, 2026)
 
@@ -1213,7 +1300,10 @@ restored sessions at launch stays a step of its own.
   can cost hours of its work. DESIGN section 1's "never adopts
   sessions created elsewhere" would still hold (these are Armadale's
   own). Owner decision; hosts are a separate question, since several
-  Macs may share a host's `~/.armadale`.
+  Macs may share a host's `~/.armadale`. **Partly built November 14,
+  2026** (Status above): the reclaim now spares what it cannot account
+  for, but nothing shows the spared sessions or offers them back; that
+  part is still the owner's decision (open items, Session layer).
 - **Adds to "Save scheduling".** Besides a longest wait, the title and
   the working directory (`AppModel.setTitle`, `setWorkingDirectory`)
   could stay out of what schedules a save and be written with the next
@@ -1222,7 +1312,8 @@ restored sessions at launch stays a step of its own.
   attached. `AppModel` is one `@Observable` object and
   `displayTitle(for:)` reads `sessions`, so every title change also
   re-evaluates the sidebar and tab bar views that show titles, in
-  every window; not measured.
+  every window; not measured. Not built: the longest wait (Status
+  above) bounds the delay, and titles still schedule saves.
 
 ## Investigations (October 19, 2026), decisions pending
 

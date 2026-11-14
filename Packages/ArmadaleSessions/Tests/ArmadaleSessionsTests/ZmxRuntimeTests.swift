@@ -61,6 +61,87 @@ struct ZmxRuntimeTests {
             == [SessionID(raw: "abcdefghijklmnop"), SessionID(raw: "qrstuvwxyz234567")])
     }
 
+    /// Sockets named like Armadale sessions count; plain files, foreign
+    /// names and directories do not.
+    @Test func sessionsWithSocketsListsArmadaleSockets() throws {
+        let directory = "/tmp/arm-sock-\(getpid())-\(Int.random(in: 0..<100_000))"
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let runtime = ZmxRuntime(directory: directory)
+        let sock = SessionID.generate(), file = SessionID.generate()
+        var descriptors: [Int32] = []
+        defer { descriptors.forEach { close($0) } }
+        for name in ["a-\(sock.raw)", "work"] {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            #expect(fd >= 0)
+            descriptors.append(fd)
+            var address = sockaddr_un()
+            address.sun_family = sa_family_t(AF_UNIX)
+            let path = directory + "/" + name
+            withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+                for (index, byte) in path.utf8.enumerated() { buffer[index] = byte }
+            }
+            let bound = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            #expect(bound == 0)
+        }
+        FileManager.default.createFile(atPath: directory + "/a-\(file.raw)", contents: Data())
+        try FileManager.default.createDirectory(atPath: directory + "/logs", withIntermediateDirectories: true)
+        #expect(runtime.sessionsWithSockets() == [sock])
+        #expect(ZmxRuntime(directory: directory + "/missing").sessionsWithSockets().isEmpty)
+    }
+
+    /// Binds a Unix socket at `path`; returns its descriptor (close it).
+    private func bindSocket(at path: String) -> Int32 {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            for (index, byte) in path.utf8.enumerated() { buffer[index] = byte }
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(fd >= 0 && bound == 0)
+        return fd
+    }
+
+    /// The launch housekeeping keeps the log and exit file of a session the
+    /// listing left out whose socket exists (a stopped daemon), and of one
+    /// listed and not ended; a session with neither, or one just ended
+    /// without a socket, loses both.
+    @Test func housekeepingKeepsFilesOfSessionsWithASocket() throws {
+        let directory = "/tmp/arm-hk-\(getpid())-\(Int.random(in: 0..<100_000))"
+        let runtime = ZmxRuntime(directory: directory)
+        try FileManager.default.createDirectory(atPath: runtime.logDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let stopped = SessionID.generate(), listed = SessionID.generate()
+        let gone = SessionID.generate(), ended = SessionID.generate()
+        let fd = bindSocket(at: runtime.socketPath(for: stopped))
+        defer { close(fd) }
+        for id in [stopped, listed, gone, ended] {
+            FileManager.default.createFile(atPath: runtime.logDirectory + "/a-\(id.raw).log", contents: Data("x".utf8))
+            FileManager.default.createFile(atPath: runtime.exitFilePath(for: id), contents: Data("0".utf8))
+        }
+        let sockets = runtime.sessionsWithSockets()
+        #expect(sockets == [stopped])
+        let alive = ZmxRuntime.aliveForHousekeeping(listed: [listed, ended], ended: [ended], sockets: sockets)
+        #expect(alive == [stopped, listed])
+        let logs = Set(runtime.collectGarbageLogs(live: alive, referenced: []).map { ($0 as NSString).lastPathComponent })
+        let exits = Set(runtime.collectGarbageExitStatuses(live: alive, referenced: []).map { ($0 as NSString).lastPathComponent })
+        #expect(logs == ["a-\(gone.raw).log", "a-\(ended.raw).log"])
+        #expect(exits == [gone, ended].map { (runtime.exitFilePath(for: $0) as NSString).lastPathComponent }.reduce(into: Set()) { $0.insert($1) })
+        for id in [stopped, listed] {
+            #expect(FileManager.default.fileExists(atPath: runtime.logDirectory + "/a-\(id.raw).log"))
+            #expect(FileManager.default.fileExists(atPath: runtime.exitFilePath(for: id)))
+        }
+    }
+
     @Test func logGarbageCollectionKeepsLiveReferencedAndForeignFiles() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "armadale-logs-\(UUID().uuidString)").path
         defer { try? FileManager.default.removeItem(atPath: directory) }

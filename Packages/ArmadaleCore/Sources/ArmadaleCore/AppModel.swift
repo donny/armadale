@@ -33,6 +33,13 @@ public final class AppModel {
     public private(set) var profiles: [Profile]
     /// Saved session recipes, in the user's order (Settings › Favorites).
     public private(set) var favorites: [Favorite]
+    /// Live sessions the orphan reclaim leaves running
+    /// (``PersistedState/sparedSessionIDs``). Not shown anywhere yet.
+    public private(set) var sparedSessionIDs: [SessionID]
+    /// The saved sessions are not known to be complete
+    /// (``PersistedState/sessionListIncomplete``); the orphan reclaim ends
+    /// nothing while it is set.
+    public private(set) var sessionListIncomplete: Bool
 
     /// Incremented by every intent that changes persisted state.
     public private(set) var changeCount = 0
@@ -62,13 +69,17 @@ public final class AppModel {
         }
         self.profiles = profiles
         self.favorites = state.favorites
+        let known = Set(state.sessions.map(\.id))
+        self.sparedSessionIDs = Set(state.sparedSessionIDs).subtracting(known).sorted()
+        self.sessionListIncomplete = state.sessionListIncomplete
         self.defaultWorkingDirectory = defaultWorkingDirectory
     }
 
     /// A snapshot suitable for ``StateStore``.
     public var persistedState: PersistedState {
         PersistedState(
-            workspaces: workspaces, sessions: sessions, hosts: hosts, profiles: profiles, favorites: favorites)
+            workspaces: workspaces, sessions: sessions, hosts: hosts, profiles: profiles, favorites: favorites,
+            sparedSessionIDs: sparedSessionIDs, sessionListIncomplete: sessionListIncomplete)
     }
 
     // MARK: Lookup
@@ -678,6 +689,23 @@ public final class AppModel {
         else { return }
         sessions[index].runtimeVersion = version
         didChange()
+    }
+
+    /// Records the outcome of the launch's orphan reclaim (DESIGN §4,
+    /// "Housekeeping"): the live sessions it leaves running, and that the
+    /// saved sessions are now complete (the flag is cleared). IDs of
+    /// sessions in the model are left out, so a spared session is never
+    /// also a session here. Changes the model only when something differs,
+    /// and returns whether it did.
+    @discardableResult
+    public func recordOrphanReclaim(spared: Set<SessionID>) -> Bool {
+        let known = Set(sessions.map(\.id))
+        let list = spared.subtracting(known).sorted()
+        guard list != sparedSessionIDs || sessionListIncomplete else { return false }
+        sparedSessionIDs = list
+        sessionListIncomplete = false
+        didChange()
+        return true
     }
 
     /// Every session shown in `workspace`'s panes, in tab order.

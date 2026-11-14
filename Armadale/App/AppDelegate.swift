@@ -43,11 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var sessionSetupFailure: String?
     /// The persistent runtime, for log housekeeping.
     private var zmxRuntime: ZmxRuntime?
-    /// The state file loaded as written (or there was none yet). Only then
-    /// are the saved sessions a complete list of what Armadale created.
-    /// Loading drops closed workspaces with no tab groups (``StateStore``);
-    /// they hold no sessions, so the list stays complete.
-    private let stateLoadedCleanly: Bool
+    /// `state.json` itself was read and does not say its sessions are
+    /// incomplete: only then are the saved sessions a complete list of what
+    /// Armadale created, and only then may the launch's orphan reclaim end
+    /// sessions (``OrphanReclaimer``). Loading drops closed workspaces with
+    /// no tab groups (``StateStore``); they hold no sessions, so the list
+    /// stays complete.
+    private let mayReclaimOrphans: Bool
     /// This process's lock on the state directory, held for its whole life
     /// (``StateLock``); `nil` when it could not be taken.
     private let stateLock: StateLock?
@@ -99,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let state = loaded.state
         self.isLockedOut = refusal != nil
         self.stateURL = url
-        self.stateLoadedCleanly = loaded.loadedCleanly
+        self.mayReclaimOrphans = loaded.mayReclaimOrphans
         self.canSave = loaded.canSave
         self.loadReport = loaded.report
         // Locked out: no themes folder read, no helpers installed, no
@@ -129,11 +131,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     /// The state as loaded (and repaired), and what to make of it.
-    private struct LoadedState {
+    struct LoadedState {
         var state: PersistedState
         var report: LoadReport?
         var canSave: Bool
-        var loadedCleanly: Bool
+        /// See ``AppDelegate/mayReclaimOrphans``.
+        var mayReclaimOrphans: Bool
     }
 
     /// Another process owns the state directory: nothing is loaded, nothing
@@ -144,10 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             report: LoadReport(
                 message: refusal.message, details: refusal.details, isFatal: true, bringForward: refusal.otherPID),
             canSave: false,
-            loadedCleanly: false)
+            mayReclaimOrphans: false)
     }
 
-    private static func loadState(from url: URL) -> LoadedState {
+    /// Loads `url` with ``StateStore``, repairs it, keeps it as the launch
+    /// backup when `state.json` itself was read, and marks the saved
+    /// sessions incomplete when it was not (docs/DESIGN.md sections 3 and
+    /// 4). Internal so the tests can run it against a temporary directory.
+    static func loadState(from url: URL) -> LoadedState {
         var droppedWorkspaces = 0
         let result = StateStore.load(from: url) { droppedWorkspaces = $0 }
         var state = result.state ?? .empty
@@ -156,10 +163,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         switch result {
         case .loaded:
             break
-        case .unparseable(let problem, let recovered, let quarantined):
+        case .unparseable(let fullProblem, let recovered, let backup, let quarantined):
+            // The problem is a sentence of its own ("…correct format."): one
+            // period less, so it can sit inside another.
+            let problem = Self.withoutFinalPeriod(fullProblem)
             let kept = quarantined.isEmpty
                 ? ""
-                : " The unreadable file was kept at: \(quarantined.map(\.path).joined(separator: ", "))."
+                : quarantined.count == 1
+                    ? " The unreadable file was kept at: \(quarantined[0].path)."
+                    : " The unreadable files were kept at: \(quarantined.map(\.path).joined(separator: ", "))."
+            let which = switch backup {
+            case .launch: "the backup kept at an earlier launch (\(StateStore.launchBackupURL(for: url).lastPathComponent))"
+            case .previousSave, nil: "the previous backup (\(StateStore.backupURL(for: url).lastPathComponent))"
+            }
             report = recovered == nil
                 ? LoadReport(
                     message: "Armadale could not read its saved layout",
@@ -167,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     isFatal: false)
                 : LoadReport(
                     message: "Armadale restored its layout from a backup",
-                    details: "The saved layout could not be read (\(problem)), so the previous backup was used.\(kept)",
+                    details: "The saved layout could not be read (\(problem)), so \(which) was used.\(kept)",
                     isFatal: false)
         case .newerVersion(let version, let file):
             report = LoadReport(
@@ -179,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case .ioError(let message, let file):
             report = LoadReport(
                 message: "Armadale could not read its saved layout",
-                details: "\(file.path) could not be read: \(message). The file has not been changed. "
+                details: "\(file.path) could not be read: \(Self.withoutFinalPeriod(message)). The file has not been changed. "
                     + "Check its permissions and open Armadale again.",
                 isFatal: true)
         }
@@ -193,12 +209,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             stateLog.notice("Armadale: repaired saved layout: \(issues.joined(separator: "; "), privacy: .public)")
             state = repaired
         }
-        // Orphan reclaim needs a state file that existed and loaded: with no
-        // file at all (first launch, or a file the user removed) the references
-        // are unknown, and running sessions must not be killed.
-        let loadedCleanly: Bool
-        if case .loaded(_, isFirstLaunch: false) = result { loadedCleanly = true } else { loadedCleanly = false }
-        return LoadedState(state: state, report: report, canSave: result.allowsSaving, loadedCleanly: loadedCleanly)
+        // Orphan reclaim needs `state.json` itself, read as written and not
+        // marked incomplete: with no file at all (first launch, or a file the
+        // user removed), a damaged one or a backup, the references are
+        // unknown, and running sessions must not be ended. Such a launch
+        // marks its state incomplete, so a file saved before the live probe
+        // answers holds the reclaim back at the next launch too.
+        let readStateFile = result.readStateFile
+        let mayReclaim = readStateFile && !state.sessionListIncomplete
+        if readStateFile {
+            // Before the first save: a copy this build could read, kept
+            // however many saves follow (docs/DESIGN.md section 3).
+            do {
+                try StateStore.keepLaunchBackup(of: url)
+            } catch {
+                stateLog.error("Armadale: could not keep the launch backup: \(String(describing: error), privacy: .public)")
+            }
+        } else if result.allowsSaving, !state.sessionListIncomplete {
+            state.sessionListIncomplete = true
+            stateLog.notice("Armadale: the saved layout was not read as written; no running session will be ended until the running ones are recorded")
+        }
+        return LoadedState(
+            state: state, report: report, canSave: result.allowsSaving, mayReclaimOrphans: mayReclaim)
+    }
+
+    /// `text` without one trailing period, for a sentence built around it.
+    static func withoutFinalPeriod(_ text: String) -> String {
+        text.hasSuffix(".") ? String(text.dropLast()) : text
     }
 
     private func wireRegistry() {
@@ -380,28 +417,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     /// Launch housekeeping once the live probe has answered: ends live
-    /// sessions no saved session refers to (only when the state loaded
-    /// cleanly; see ``OrphanReclaimer``), then removes the runtime's log
-    /// and exit files of sessions that are neither alive nor in the model.
+    /// sessions no saved session refers to, unless they are spared, or
+    /// spares them all when the saved sessions are not known to be complete
+    /// (``OrphanReclaimer``), records the spared ones and, when that
+    /// changed the model, saves at once;
+    /// then removes the runtime's log and exit files of sessions that are
+    /// neither alive (listed and not just ended, or with a socket:
+    /// ``ZmxRuntime/aliveForHousekeeping(listed:ended:sockets:)``) nor in
+    /// the model. Without the runtime or the probe's answer nothing is
+    /// recorded, and the state stays marked incomplete.
     private func collectGarbageAfterProbe() {
         guard let runtime = zmxRuntime else { return }
         let model = model
         let probe = registry.liveProbe
         let backend = registry.backend
-        let stateLoadedCleanly = stateLoadedCleanly
-        Task {
+        let mayReclaim = mayReclaimOrphans
+        Task { [weak self] in
             guard let live = await probe.value else { return }
+            // Sessions whose socket exists, listed or not (a stopped daemon
+            // is not listed). Held back, they are spared too; on every
+            // launch they count as running and keep their files.
+            let sockets = runtime.sessionsWithSockets()
+            let outcome = await OrphanReclaimer.reclaim(
+                live: live, present: sockets, model: model, mayReclaim: mayReclaim, backend: backend)
+            if outcome.changedModel { self?.saveNow() }
+            let killed = outcome.ended
             let referenced = Set(model.sessions.map(\.id))
-            let killed = await OrphanReclaimer.reclaim(
-                live: live, referenced: referenced, stateLoadedCleanly: stateLoadedCleanly, backend: backend)
-            if !killed.isEmpty {
-                stateLog.notice("Armadale: ended \(killed.count, privacy: .public) session(s) that no pane refers to any more")
-            }
-            let removed = runtime.collectGarbageLogs(live: live.subtracting(killed), referenced: referenced)
+            stateLog.notice(
+                "Armadale: launch reclaim \(mayReclaim ? "allowed" : "held back", privacy: .public): \(live.count, privacy: .public) live session(s), ended \(killed.count, privacy: .public) that no saved session refers to, \(outcome.spared.count, privacy: .public) recorded as spared (\(outcome.sparedRunning, privacy: .public) running)")
+            let alive = ZmxRuntime.aliveForHousekeeping(listed: live, ended: Set(killed), sockets: sockets)
+            let removed = runtime.collectGarbageLogs(live: alive, referenced: referenced)
             if !removed.isEmpty {
                 stateLog.notice("Armadale: removed \(removed.count, privacy: .public) log file(s) of ended sessions")
             }
-            let exitFiles = runtime.collectGarbageExitStatuses(live: live.subtracting(killed), referenced: referenced)
+            let exitFiles = runtime.collectGarbageExitStatuses(live: alive, referenced: referenced)
             if !exitFiles.isEmpty {
                 stateLog.notice("Armadale: removed \(exitFiles.count, privacy: .public) exit file(s) of ended sessions")
             }

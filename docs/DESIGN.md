@@ -466,7 +466,15 @@ persistence.
 - File: `~/Library/Application Support/Armadale/state.json`, with
   `schemaVersion` at the top and explicit migration steps per version.
 - Written atomically (temp file + rename), debounced 500 ms after any model
-  change, and synchronously on quit.
+  change, and synchronously on quit. The debounce has a longest wait
+  (`StateSaver.maximumDelay`, 2 s): counted from the first change not yet
+  written, a later change never moves the write past it, so a steady stream
+  of changes (programs setting their titles, which count as changes) cannot
+  put a save off. Every write attempt starts the count again. After a
+  failed write the backoff (1 s, 2 s, … 30 s) decides the next attempt: a
+  change meanwhile replaces the pending snapshot but leaves the retry's
+  timer alone, so the attempt comes at the backoff's time, neither earlier
+  nor later; a flush (quit, an immediate save) still writes at once.
 - Stores workspaces, selections, window frames, sessions, hosts, profiles
   and (October 24, 2026) favorites.
   A window's frame is always its normal (windowed) frame; `isFullScreen`
@@ -503,9 +511,34 @@ persistence.
   the husks.
 - Does **not** store scrollback or terminal state; the session daemon holds
   that.
-- A backup of the previous file is kept as `state.json.bak`; a parse failure
-  on launch falls back to it and reports the problem rather than starting
-  empty.
+- Two backups. `state.json.bak` is the file before the latest save (each
+  save hard-links the old file there before its rename). `state.json.launch.bak`
+  is the file as the latest launch that read `state.json` itself found it:
+  before its first save such a launch copies `state.json` (a clone on
+  APFS; a copy rather than a link, so a write into `state.json` in place
+  cannot reach it) to a temporary name and renames it over the launch
+  backup, so a copy this build could read survives any number of saves of
+  a state it cannot read back. A first launch and a recovery keep none.
+  Loading tries `state.json`, then `state.json.bak`, then
+  `state.json.launch.bak`; the first that reads is used, and the launch
+  alert says which backup it was. Nothing is moved until the outcome is
+  known: damaged files met on the way are then quarantined
+  (`<name>.corrupt-<time>`), and a newer-format or unreadable (I/O) file
+  anywhere in the chain stops the launch with every file untouched,
+  including a launch backup that cannot be read while the other two are
+  missing. With none usable the app starts fresh and says so. Removing
+  `state.json` and `state.json.bak` alone no longer gives a fresh start:
+  the launch backup brings the layout back. A fresh start means removing
+  all three.
+- Two top-level fields for the orphan reclaim (section 4, "Housekeeping"),
+  November 14, 2026, additive and still schema 1 (absent: none, false):
+  `sparedSessionIDs`, sessions no saved session refers to that the
+  reclaim must never end, running or not (sorted; the repair after every
+  load keeps any ID that is also a session in the file out of it), and `sessionListIncomplete`, set
+  while the saved sessions are not known to be everything Armadale
+  created. A released build (0.1.1 and earlier) ignores both and drops
+  them at its next save; its own reclaim then ends the spared sessions as
+  orphans at its next clean launch.
 - **One process per state directory.** `StateLock` (`ArmadaleCore`) takes
   an exclusive, non-blocking `flock` on `armadale.lock` in the state
   directory (creating the directory if needed) and the app holds it for its
@@ -930,8 +963,11 @@ as `ctty-exec --unset ZMX_DIR --unset ZMX_NO_DETACH_KEY --unset ZMX_SESSION
 
 zmx writes one log per daemon to `ZMX_DIR/logs/<name>.log` plus a shared
 `zmx.log`, at debug level, each truncated at 2 MB but never deleted. At
-launch Armadale removes log files whose session ID is neither live nor
-referenced by the model, and during a run it removes a session's log as
+launch Armadale removes log files whose session ID is neither alive nor
+referenced by the model, where alive means listed by the probe and not
+just ended by the reclaim, or with a socket in the runtime directory
+(`ZmxRuntime.aliveForHousekeeping`: a stopped daemon is left out of a
+listing that still succeeds, below), and during a run it removes a session's log as
 soon as it kills or retires the session. Exit files (`<runtime>/a-<id>.exit`,
 and a recorder's leftover `.exit.tmp`) are treated the same way: removed
 when the session is closed or retired, and at launch when their session is
@@ -944,10 +980,52 @@ sessions in its runtime directory that no saved session refers to (for
 example one whose pane was closed while the runtime was unavailable).
 Armadale only ever manages sessions it created, and this keeps to that:
 the runtime directory is private to the app, and only `a-<id>` names are
-listed. It is done only when an existing state file loaded cleanly; with
-no state file at all (a first launch, or a file the user removed), or after
-a damaged, recovered or newer-format one, the references are unknown and
-nothing is killed (`OrphanReclaimer`).
+listed. It never ends a session it cannot account for (`OrphanReclaimer`):
+
+- A launch whose state did not load cleanly (no `state.json`, a first
+  launch included; a damaged one; a recovery from either backup) starts
+  its model with `sessionListIncomplete` set, and a file that loads
+  cleanly but carries the flag counts as not clean. Such a launch ends
+  nothing: `OrphanReclaimer.Plan` adds to the spared list every session no
+  saved session refers to that is listed, or whose socket exists in the
+  runtime directory (`ZmxRuntime.sessionsWithSockets()`): a stopped daemon
+  (`kill -STOP`) is left out of a listing that still succeeds (checked
+  November 14, 2026: `ls --short` exited 0 in about 1 s and printed
+  nothing for it).
+- A clean launch ends the listed sessions that are neither referenced nor
+  spared. The spared list never shrinks by itself: it means "sessions the
+  reclaim must never end, running or not", so a spared session one
+  listing missed is not ended when a later listing shows it again. Ended
+  sessions stay on it (a few bytes each).
+- A kill that fails is left out of what was ended, is not spared because
+  of it, and is tried again at the next launch that may reclaim.
+- Either way the result goes through `AppModel.recordOrphanReclaim(spared:)`,
+  which records the spared list and clears the flag; when that changed
+  the model the app saves at once (otherwise there is nothing to save).
+  The flag is saved set until then, so a file written by the unclean run
+  before the probe answered (after the debounce, at most 2 s after its
+  first change, or at quit) still holds the reclaim back at the next
+  launch. If the probe fails or the persistent runtime is unavailable,
+  nothing is recorded and the flag stays set.
+- When the probe answers, one `state` log line says whether the reclaim
+  was allowed or held back, how many sessions were live, how many it
+  ended that no saved session refers to, and how many are recorded as
+  spared and how many of those are running (listed, or with a socket). There is no such line when
+  the probe fails or the runtime is unavailable.
+
+Spared sessions are not shown anywhere yet; they keep running until their
+programs exit. End Sessions and Quit leaves them alone: it ends the
+sessions in the model, and the spared ones exist because a layout was
+lost, so ending them silently would be the loss this rule prevents. The
+log and exit file housekeeping above keeps the files of a spared session
+while it is listed or its socket exists; one with neither has ended, and
+its files are collected. A
+spared session has no recorded runtime version: if the bundled helper's
+version changes, `HelperInstaller.install(referencedZmxVersions:)` removes
+the older helper copy (it only knows the model's sessions); the running
+daemon is not affected (its executable stays open), and listing and
+ending go through the current copy, which is not verified across helper
+versions (section 13, "zmx maturity").
 
 ---
 
@@ -2469,11 +2547,17 @@ Owner's request: a new pane never starts a local shell by itself. It asks.
   was refused the same way (the first copy, started from the shell, stayed
   behind Terminal); it is unchanged for now. A reopen (Dock click, `open -a`) while the
   report is pending opens nothing (`AppDelegate.ignoresReopen`).
-- `NSApplicationDelegate` loads `StateStore`, builds `AppModel`, probes each
+- `NSApplicationDelegate` loads `StateStore` (after the lock; a launch
+  that read `state.json` itself then keeps it as the launch backup, and any
+  other non-fatal load marks the state `sessionListIncomplete`, section
+  3), builds `AppModel`, probes each
   backend's live sessions once, then opens every workspace whose window was
   open at last quit (else the first workspace; with none at all, a fresh
   one: `AppModel.ensureWorkspacesToOpen()`) and attaches its visible
-  panes first, the rest lazily when their tab is first shown.
+  panes first, the rest lazily when their tab is first shown. When the
+  local probe answers, the orphan reclaim runs, its result is recorded in
+  the model and saved at once, and the log and exit files are collected
+  (section 4, "Housekeeping").
 - A plain quit never kills sessions (with sessions running, the quit asks
   first; see "Quitting with running sessions" below; only *End Sessions
   and Quit* ends them). `applicationShouldTerminate` hangs every
@@ -3596,6 +3680,10 @@ The build order is complete.
   created them (recorded on the `Session`), and only retires an old copy
   when no session references it. Newer‑client‑against‑older‑daemon calls
   time out rather than fail fast, so control commands carry a timeout.
+  Spared sessions (section 4, "Housekeeping") have no recorded version, so
+  an update that changes the helper version removes the copy that created
+  them; they keep running, but listing and ending them with the newer
+  copy is unverified and may time out.
 - **Replay fidelity.** Reattach replays a libghostty‑vt snapshot (verified
   for scrollback, colours and the alternate screen). SwiftTerm renders it as
   ordinary VT output. Anything odd shows up in step 3 and is the earliest

@@ -247,7 +247,7 @@ the test process without the prefix.
 
 | Variable | Effect |
 |---|---|
-| `ARMADALE_STATE_DIR=/dir` | State directory: `state.json`, `armadale.lock`, `bin/` (helper copies) and `run/` (sessions). Use a short path (such as `/tmp/armadale-dev`) so socket paths stay under the limit. Only one Armadale process can use a state directory at a time (see below). |
+| `ARMADALE_STATE_DIR=/dir` | State directory: `state.json` with its backups `state.json.bak` (before the latest save) and `state.json.launch.bak` (as the latest clean launch read it; to start fresh, remove all three; one that cannot be read at all, or was written by a newer Armadale, stops the launch wherever it is in that order), `armadale.lock`, `bin/` (helper copies) and `run/` (sessions). Use a short path (such as `/tmp/armadale-dev`) so socket paths stay under the limit. Only one Armadale process can use a state directory at a time (see below). |
 | `ARMADALE_BACKEND=ephemeral` | Plain PTY sessions that end when the app quits (tests, debugging). |
 | `ARMADALE_ZMX=/path/to/zmx` | zmx binary to bundle-install and test with, instead of the app's `Contents/Helpers/zmx` or `Vendor/zmx`. |
 | `ARMADALE_CTTY_EXEC=/path/to/ctty-exec` | `ctty-exec` to use (see below). |

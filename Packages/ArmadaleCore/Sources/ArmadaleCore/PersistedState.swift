@@ -12,6 +12,19 @@ public struct PersistedState: Codable, Sendable, Hashable {
     /// Saved session recipes, in the order the user keeps them. Added on
     /// October 24, 2026 without a schema bump: absent decodes as none.
     public var favorites: [Favorite]
+    /// Live local sessions that no saved session refers to and that the
+    /// launch's orphan reclaim must leave running: they were found at a
+    /// launch whose saved sessions were not known to be complete (DESIGN
+    /// §4, "Housekeeping"). Sorted; never also in `sessions`. Added on
+    /// November 14, 2026 without a schema bump: absent decodes as none.
+    public var sparedSessionIDs: [SessionID]
+    /// The saved sessions are not known to be everything Armadale created:
+    /// set at a launch whose state did not load cleanly (missing,
+    /// unreadable, recovered from a backup), cleared once the sessions
+    /// running at that launch are recorded in `sparedSessionIDs`. While it
+    /// is set the orphan reclaim ends nothing. Added on November 14, 2026
+    /// without a schema bump: absent decodes as false.
+    public var sessionListIncomplete: Bool
 
     public init(
         schemaVersion: Int = PersistedState.currentSchemaVersion,
@@ -19,7 +32,9 @@ public struct PersistedState: Codable, Sendable, Hashable {
         sessions: [Session] = [],
         hosts: [Host] = [],
         profiles: [Profile] = Profile.builtIns,
-        favorites: [Favorite] = []
+        favorites: [Favorite] = [],
+        sparedSessionIDs: [SessionID] = [],
+        sessionListIncomplete: Bool = false
     ) {
         self.schemaVersion = schemaVersion
         self.workspaces = workspaces
@@ -27,10 +42,12 @@ public struct PersistedState: Codable, Sendable, Hashable {
         self.hosts = hosts
         self.profiles = profiles
         self.favorites = favorites
+        self.sparedSessionIDs = sparedSessionIDs
+        self.sessionListIncomplete = sessionListIncomplete
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, workspaces, sessions, hosts, profiles, favorites
+        case schemaVersion, workspaces, sessions, hosts, profiles, favorites, sparedSessionIDs, sessionListIncomplete
     }
 
     public init(from decoder: any Decoder) throws {
@@ -41,6 +58,8 @@ public struct PersistedState: Codable, Sendable, Hashable {
         hosts = try container.decode([Host].self, forKey: .hosts)
         profiles = try container.decode([Profile].self, forKey: .profiles)
         favorites = try container.decodeIfPresent([Favorite].self, forKey: .favorites) ?? []
+        sparedSessionIDs = try container.decodeIfPresent([SessionID].self, forKey: .sparedSessionIDs) ?? []
+        sessionListIncomplete = try container.decodeIfPresent(Bool.self, forKey: .sessionListIncomplete) ?? false
     }
 
     /// A first-launch state: no workspaces, the built-in profiles.
@@ -97,6 +116,8 @@ extension PersistedState {
     ///   already, but a repair can empty one more): a tab group is never
     ///   kept without tabs, nor a workspace without tab groups (DESIGN §1).
     /// - Built-in profiles and other profile references are left alone.
+    /// - `sparedSessionIDs` is sorted without repeats and names no session
+    ///   in `sessions`.
     public func repaired() -> (state: PersistedState, issues: [String]) {
         var issues: [String] = []
         var state = self
@@ -176,6 +197,14 @@ extension PersistedState {
             repairedWorkspaces.append(workspace)
         }
         state.workspaces = repairedWorkspaces
+
+        // Spared sessions: sorted, unique, and never a session in the model
+        // (a session the model knows is referenced, not spared).
+        let spared = Set(sparedSessionIDs).subtracting(seenSessions).sorted()
+        if spared != sparedSessionIDs {
+            issues.append("Tidied the list of spared sessions")
+            state.sparedSessionIDs = spared
+        }
         return (state, issues)
     }
 

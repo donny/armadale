@@ -141,8 +141,12 @@ private actor FakeBackend: PersistenceBackend {
 
     func exists(_ id: SessionID) async throws -> Bool { alive.contains(id) }
     func liveSessions() async throws -> Set<SessionID> { [] }
+    /// Sessions whose kill throws.
+    var failingKills: Set<SessionID> = []
+    func setFailingKills(_ ids: Set<SessionID>) { failingKills = ids }
     func kill(_ id: SessionID) async throws {
         if let killDelay { try await Task.sleep(for: killDelay) }
+        if failingKills.contains(id) { throw BackendError.runtimeFailure("kill failed") }
         killed.append(id)
         // Like a real backend: killing a session ends its process.
         for (index, entry) in created.enumerated() where entry.session.id == id {
@@ -830,32 +834,183 @@ struct SessionControllerTests {
 
 /// Launch housekeeping: live sessions that no saved session refers to.
 @Suite("OrphanReclaimer")
+@MainActor
 struct OrphanReclaimerTests {
-    let referenced = SessionID.generate()
-    let orphan = SessionID.generate()
+    let a = SessionID.generate()
+    let b = SessionID.generate()
+    let c = SessionID.generate()
+    let d = SessionID.generate()
+    typealias Plan = OrphanReclaimer.Plan
 
-    @Test func killsUnreferencedLiveSessionsWhenStateLoadedCleanly() async {
-        let backend = FakeBackend()
-        let killed = await OrphanReclaimer.reclaim(
-            live: [referenced, orphan], referenced: [referenced, SessionID.generate()],
-            stateLoadedCleanly: true, backend: backend)
-        #expect(killed == [orphan])
-        #expect(await backend.killed == [orphan])
+    private func session(_ id: SessionID) -> Session {
+        Session(id: id, profileID: Profile.shell.id, launch: LaunchSpec(program: "zsh"), workingDirectory: "/tmp")
     }
 
-    @Test func killsNothingWhenTheStateDidNotLoadCleanly() async {
+    // MARK: The plan
+
+    @Test func mayReclaimEndsUnreferencedUnsparedLiveSessions() {
+        let plan = Plan(live: [a, b, c], referenced: [a, d], spared: [b], mayReclaim: true)
+        #expect(plan.toEnd == [c])
+        #expect(plan.spared == [b])
+    }
+
+    @Test func mayReclaimKeepsSparedSessionsThatAreNotListed() {
+        let plan = Plan(live: [a], referenced: [], spared: [a, b], mayReclaim: true)
+        #expect(plan.toEnd.isEmpty)
+        #expect(plan.spared == [a, b], "the list never shrinks by itself")
+    }
+
+    @Test func heldBackEndsNothingAndAddsEveryUnreferencedLiveSession() {
+        let plan = Plan(live: [a, b, c], referenced: [a], spared: [d, c], mayReclaim: false)
+        #expect(plan.toEnd.isEmpty)
+        #expect(plan.spared == [b, c, d])
+    }
+
+    @Test func heldBackAlsoSparesSessionsWithASocketTheListingMissed() {
+        let plan = Plan(live: [a], referenced: [c], spared: [], present: [a, b, c], mayReclaim: false)
+        #expect(plan.spared == [a, b], "b has a socket but was not listed; c is referenced")
+        let allowed = Plan(live: [a], referenced: [c], spared: [], present: [a, b, c], mayReclaim: true)
+        #expect(allowed.toEnd == [a] && allowed.spared.isEmpty, "allowed: sockets play no part")
+    }
+
+    @Test func aReferencedSessionIsNeverSpared() {
+        #expect(Plan(live: [a], referenced: [a], spared: [a], mayReclaim: true).spared.isEmpty)
+        #expect(Plan(live: [a], referenced: [a], spared: [a], mayReclaim: false).spared.isEmpty)
+    }
+
+    @Test func emptyCases() {
+        for may in [true, false] {
+            let none = Plan(live: [], referenced: [], spared: [], mayReclaim: may)
+            #expect(none.toEnd.isEmpty && none.spared.isEmpty)
+            let nothingLive = Plan(live: [], referenced: [a], spared: [b], mayReclaim: may)
+            #expect(nothingLive.toEnd.isEmpty && nothingLive.spared == [b])
+            let allReferenced = Plan(live: [a], referenced: [a], spared: [], mayReclaim: may)
+            #expect(allReferenced.toEnd.isEmpty && allReferenced.spared.isEmpty)
+        }
+        #expect(OrphanReclaimer.orphans(live: [], referenced: [a]).isEmpty)
+    }
+
+    // MARK: Applying it
+
+    @Test func heldBackRecordsSparedAndClearsTheFlag() async {
         let backend = FakeBackend()
-        let killed = await OrphanReclaimer.reclaim(
-            live: [referenced, orphan], referenced: [referenced], stateLoadedCleanly: false, backend: backend)
-        #expect(killed.isEmpty)
+        let model = AppModel(state: PersistedState(sessionListIncomplete: true), defaultWorkingDirectory: "/tmp")
+        let before = model.changeCount
+        let outcome = await OrphanReclaimer.reclaim(live: [a, b], model: model, mayReclaim: false, backend: backend)
+        #expect(outcome.ended.isEmpty)
         #expect(await backend.killed.isEmpty)
+        #expect(Set(model.sparedSessionIDs) == [a, b])
+        #expect(outcome.spared == model.sparedSessionIDs)
+        #expect(outcome.sparedRunning == 2)
+        #expect(!model.sessionListIncomplete)
+        #expect(outcome.changedModel)
+        #expect(model.changeCount != before, "a change, so the app saves at once")
     }
 
-    @Test func nothingToDo() async {
+    /// A spared session that is not listed but has a socket (a stopped
+    /// daemon) counts as running, allowed or held back.
+    @Test func aSparedSessionWithASocketCountsAsRunning() async {
+        for may in [true, false] {
+            let model = AppModel(state: PersistedState(sparedSessionIDs: [a, b]), defaultWorkingDirectory: "/tmp")
+            let outcome = await OrphanReclaimer.reclaim(
+                live: [], present: [a], model: model, mayReclaim: may, backend: FakeBackend())
+            #expect(Set(outcome.spared) == [a, b])
+            #expect(outcome.sparedRunning == 1)
+            #expect(outcome.ended.isEmpty)
+        }
+    }
+
+    @Test func anUnchangedRecordIsNoChange() async {
+        let model = AppModel(state: PersistedState(sparedSessionIDs: [a]), defaultWorkingDirectory: "/tmp")
+        let before = model.changeCount
+        let outcome = await OrphanReclaimer.reclaim(live: [a], model: model, mayReclaim: true, backend: FakeBackend())
+        #expect(!outcome.changedModel)
+        #expect(model.changeCount == before, "nothing to save")
+    }
+
+    /// A kill that fails: left out of what was ended, not spared because
+    /// of it, and tried again at the next launch that may reclaim.
+    @Test func aFailedKillIsTriedAgainAtTheNextLaunch() async {
+        let model = AppModel(state: PersistedState(), defaultWorkingDirectory: "/tmp")
         let backend = FakeBackend()
-        #expect(await OrphanReclaimer.reclaim(
-            live: [referenced], referenced: [referenced], stateLoadedCleanly: true, backend: backend).isEmpty)
-        #expect(OrphanReclaimer.orphans(live: [], referenced: [referenced]).isEmpty)
+        await backend.setFailingKills([c])
+        let first = await OrphanReclaimer.reclaim(live: [c, d], model: model, mayReclaim: true, backend: backend)
+        #expect(first.ended == [d])
+        #expect(first.spared.isEmpty)
+        #expect(model.sparedSessionIDs.isEmpty)
+
+        let next = AppModel(state: model.persistedState, defaultWorkingDirectory: "/tmp")
+        let backend2 = FakeBackend()
+        let second = await OrphanReclaimer.reclaim(live: [c], model: next, mayReclaim: true, backend: backend2)
+        #expect(second.ended == [c])
+        #expect(await backend2.killed == [c])
+    }
+
+    /// The four launches: unclean, clean with a new referenced session, a
+    /// spared session ending by itself, and a clean launch with a new orphan.
+    @Test func sequenceAcrossLaunches() async {
+        // 1. Unclean launch (the app marks the state incomplete): a and b
+        //    are running, nothing refers to them.
+        var state = PersistedState(sessionListIncomplete: true)
+        var model = AppModel(state: state, defaultWorkingDirectory: "/tmp")
+        var backend = FakeBackend()
+        var outcome = await OrphanReclaimer.reclaim(
+            live: [a, b], model: model, mayReclaim: !state.sessionListIncomplete, backend: backend)
+        #expect(outcome.ended.isEmpty && Set(outcome.spared) == [a, b])
+        #expect(!model.sessionListIncomplete)
+        state = model.persistedState
+
+        // 2. A clean launch of that state, c now in a pane.
+        state.sessions = [session(c)]
+        model = AppModel(state: state, defaultWorkingDirectory: "/tmp")
+        backend = FakeBackend()
+        outcome = await OrphanReclaimer.reclaim(
+            live: [a, b, c], model: model, mayReclaim: !state.sessionListIncomplete, backend: backend)
+        #expect(outcome.ended.isEmpty)
+        #expect(await backend.killed.isEmpty)
+        #expect(Set(outcome.spared) == [a, b])
+        state = model.persistedState
+
+        // 3. Later a is not listed (ended, or missed) and c was closed: the
+        //    spared list does not shrink, so a is never ended if it shows up.
+        state.sessions = []
+        model = AppModel(state: state, defaultWorkingDirectory: "/tmp")
+        backend = FakeBackend()
+        outcome = await OrphanReclaimer.reclaim(
+            live: [b], model: model, mayReclaim: !state.sessionListIncomplete, backend: backend)
+        #expect(outcome.ended.isEmpty)
+        #expect(Set(outcome.spared) == [a, b])
+        #expect(outcome.sparedRunning == 1)
+        #expect(!outcome.changedModel)
+        state = model.persistedState
+        #expect(Set(state.sparedSessionIDs) == [a, b])
+
+        // 4. A clean launch with d running, neither referenced nor spared.
+        model = AppModel(state: state, defaultWorkingDirectory: "/tmp")
+        backend = FakeBackend()
+        outcome = await OrphanReclaimer.reclaim(
+            live: [a, b, d], model: model, mayReclaim: !state.sessionListIncomplete, backend: backend)
+        #expect(outcome.ended == [d], "a is listed again and stays spared")
+        #expect(await backend.killed == [d])
+        #expect(Set(outcome.spared) == [a, b])
+    }
+
+    /// An unclean run saved before the live probe answered: the file has
+    /// the flag and nothing spared, loads cleanly, and still holds the
+    /// reclaim back.
+    @Test func aStateSavedBeforeTheProbeAnsweredHoldsTheReclaimBack() async throws {
+        let unclean = AppModel(state: PersistedState(sessionListIncomplete: true), defaultWorkingDirectory: "/tmp")
+        let saved = try StateStore.decode(StateStore.encode(unclean.persistedState))
+        #expect(saved.sessionListIncomplete && saved.sparedSessionIDs.isEmpty)
+
+        let model = AppModel(state: saved, defaultWorkingDirectory: "/tmp")
+        let backend = FakeBackend()
+        let outcome = await OrphanReclaimer.reclaim(
+            live: [a, b], model: model, mayReclaim: !saved.sessionListIncomplete, backend: backend)
+        #expect(outcome.ended.isEmpty)
+        #expect(await backend.killed.isEmpty)
+        #expect(Set(outcome.spared) == [a, b])
+        #expect(!model.sessionListIncomplete)
     }
 }
 

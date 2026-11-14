@@ -150,7 +150,7 @@ struct StateStoreTests {
         try Data("{ not json".utf8).write(to: dir.stateFile)
         var reported: [Int] = []
         let result = StateStore.load(from: dir.stateFile) { reported.append($0) }
-        guard case .unparseable(_, let recovered, _) = result else {
+        guard case .unparseable(_, let recovered, _, _) = result else {
             Issue.record("expected .unparseable, got \(result)"); return
         }
         #expect(recovered?.workspaces.map(\.id) == [kept])
@@ -276,7 +276,7 @@ struct StateStoreTests {
         try Data("{ not json".utf8).write(to: dir.stateFile)
 
         let result = StateStore.load(from: dir.stateFile)
-        guard case .unparseable(let problem, let recovered, let quarantined) = result else {
+        guard case .unparseable(let problem, let recovered, _, let quarantined) = result else {
             Issue.record("expected .unparseable, got \(result)"); return
         }
         #expect(!problem.isEmpty)
@@ -296,7 +296,7 @@ struct StateStoreTests {
         try StateStore.save(named("one"), to: dir.stateFile)
         try StateStore.save(named("two"), to: dir.stateFile)
         try FileManager.default.removeItem(at: dir.stateFile)
-        guard case .unparseable(_, let recovered, let quarantined) = StateStore.load(from: dir.stateFile) else {
+        guard case .unparseable(_, let recovered, _, let quarantined) = StateStore.load(from: dir.stateFile) else {
             Issue.record("expected .unparseable"); return
         }
         #expect(recovered?.workspaces.map(\.name) == ["one"])
@@ -307,7 +307,7 @@ struct StateStoreTests {
         let dir = try TempDirectory()
         try Data("garbage".utf8).write(to: dir.stateFile)
         try Data("garbage".utf8).write(to: StateStore.backupURL(for: dir.stateFile))
-        guard case .unparseable(_, let recovered, let quarantined) = StateStore.load(from: dir.stateFile) else {
+        guard case .unparseable(_, let recovered, _, let quarantined) = StateStore.load(from: dir.stateFile) else {
             Issue.record("expected .unparseable"); return
         }
         #expect(recovered == nil)
@@ -319,7 +319,7 @@ struct StateStoreTests {
     @Test func corruptPrimaryWithoutBackupIsQuarantined() throws {
         let dir = try TempDirectory()
         try Data("garbage".utf8).write(to: dir.stateFile)
-        guard case .unparseable(_, let recovered, let quarantined) = StateStore.load(from: dir.stateFile) else {
+        guard case .unparseable(_, let recovered, _, let quarantined) = StateStore.load(from: dir.stateFile) else {
             Issue.record("expected .unparseable"); return
         }
         #expect(recovered == nil)
