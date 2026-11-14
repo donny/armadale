@@ -1,6 +1,7 @@
 import ArmadaleCore
 import Darwin
 import Foundation
+import Synchronization
 import Testing
 @testable import ArmadaleSessions
 
@@ -95,6 +96,149 @@ final class LocalZmxBackendTests {
         try await backend.kill(session.id)
         await replay.waitForEnd()
         #expect(try await backend.liveSessions().isEmpty)
+    }
+
+    /// The daemon of a session, the parent of the program `zmx ls` names.
+    private func daemonPID(of id: SessionID) throws -> pid_t {
+        let line = try #require(sandbox.zmxSync(["ls"]).output.split(separator: "\n").first { $0.contains(id.raw) })
+        let field = try #require(line.split(whereSeparator: { $0 == "\t" || $0 == " " }).first { $0.hasPrefix("pid=") })
+        let child = try #require(pid_t(field.dropFirst(4)))
+        var info = proc_bsdinfo()
+        #expect(proc_pidinfo(child, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) > 0)
+        return pid_t(info.pbi_ppid)
+    }
+
+    /// A stopped daemon (it does not answer, so the listing leaves it out)
+    /// still exists: a client that goes away is resolved as detached, never
+    /// ended. Running again, it attaches and replays; killed, it is gone.
+    @Test func aStoppedDaemonIsNeverResolvedAsEnded() async throws {
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(ZmxSandbox.prompt) }
+        let line = marker("before-stop")
+        handle.write(Array("echo \(line)\r".utf8))
+        await output.wait { $0.contains(line + "\n") }
+        await handle.terminate()
+        await output.waitForEnd()
+        let daemon = try daemonPID(of: session.id)
+        #expect(Darwin.kill(daemon, SIGSTOP) == 0)
+        defer { Darwin.kill(daemon, SIGCONT) }
+        #expect(try await backend.liveSessions().contains(session.id) == false, "the listing leaves it out")
+        #expect(try await backend.exists(session.id), "its socket says it is alive")
+        var attached = session
+        attached.runtimeVersion = ZmxVersion.current
+        #expect(await backend.resolveExit(of: attached) == .detached)
+        // A client attached while it is stopped, then dropped: still not ended.
+        let stuck = try await backend.attach(attached, size: size)
+        await stuck.terminate()
+        #expect(await backend.resolveExit(of: attached) == .detached)
+
+        #expect(Darwin.kill(daemon, SIGCONT) == 0)
+        try await Task.sleep(for: .milliseconds(300))
+        let again = try await backend.attach(attached, size: size)
+        let replay = OutputCollector(again.output)
+        await replay.wait { $0.contains(line + "\n") }
+        try await backend.kill(session.id)
+        await replay.waitForEnd()
+        #expect(try await backend.exists(session.id) == false)
+        #expect(await backend.resolveExit(of: attached) == .ended(exitStatus: nil))
+    }
+
+    /// A backend like the sandbox's, changed by `change`.
+    private func backend(_ change: (inout LocalZmxBackend.Configuration) -> Void) -> LocalZmxBackend {
+        var configuration = sandbox.backend.configuration
+        change(&configuration)
+        return LocalZmxBackend(configuration: configuration)
+    }
+
+    /// A session created and left with no client, its daemon stopped.
+    private func stoppedSession() async throws -> (Session, pid_t) {
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(ZmxSandbox.prompt) }
+        await handle.terminate()
+        await output.waitForEnd()
+        let daemon = try daemonPID(of: session.id)
+        #expect(Darwin.kill(daemon, SIGSTOP) == 0)
+        var attached = session
+        attached.runtimeVersion = ZmxVersion.current
+        return (attached, daemon)
+    }
+
+    /// The attach path where the client gives up without the attach marker
+    /// decides "gone" by the same rule as `exists`: a stopped daemon's
+    /// session is not killed and not reported missing. Forced with a zmx
+    /// wrapper whose `attach` exits at once without output (every other
+    /// command runs the real helper), against a session whose daemon is
+    /// stopped.
+    @Test func anAttachThatGivesUpNeverKillsAStoppedDaemonsSession() async throws {
+        let (session, daemon) = try await stoppedSession()
+        defer { Darwin.kill(daemon, SIGCONT) }
+        let log = sandbox.directory + "/wrapper.log"
+        let wrapper = sandbox.directory + "/zmx-wrapper"
+        try """
+        #!/bin/sh
+        echo "$1" >> \(log)
+        case "$1" in attach) exit 1;; esac
+        exec \(sandbox.zmx) "$@"
+        """.write(toFile: wrapper, atomically: true, encoding: .utf8)
+        #expect(chmod(wrapper, 0o755) == 0)
+        let giving = backend { $0.executables = ZmxExecutables(path: wrapper) }
+        await #expect(throws: BackendError.runtimeFailure("The session is running but could not be reattached.")) {
+            _ = try await giving.attach(session, size: size)
+        }
+        let commands = ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n")
+        #expect(commands.contains("attach"), "the forced path ran")
+        #expect(!commands.contains("kill"), "no kill: \(commands)")
+    }
+
+    /// A session with an exit record has ended, whatever its socket says
+    /// (a daemon tearing down after its program exited).
+    @Test func anExitRecordEndsASessionWhoseSocketRemains() async throws {
+        let (session, daemon) = try await stoppedSession()
+        defer {
+            Darwin.kill(daemon, SIGCONT)
+            sandbox.runtime.removeExitStatus(for: session.id)
+        }
+        #expect(try await backend.exists(session.id), "stopped, no record: alive")
+        try "0\n".write(toFile: sandbox.runtime.exitFilePath(for: session.id), atomically: true, encoding: .utf8)
+        #expect(sandbox.runtime.hasSocket(for: session.id))
+        #expect(try await backend.exists(session.id) == false)
+        #expect(await backend.resolveExit(of: session) == .ended(exitStatus: .exited(0)))
+    }
+
+    /// A kill the daemon never answers is reported (one log line in the
+    /// app), not swallowed silently; nothing is killed by pid.
+    @Test func aKillAStoppedDaemonNeverAnswersIsReported() async throws {
+        let (session, daemon) = try await stoppedSession()
+        defer { Darwin.kill(daemon, SIGCONT) }
+        let reported = Mutex<[SessionID]>([])
+        let quick = backend {
+            $0.commandTimeout = .seconds(1)
+            $0.onUnansweredKill = { id, _ in reported.withLock { $0.append(id) } }
+        }
+        await #expect(throws: (any Error).self) { try await quick.kill(session.id) }
+        #expect(reported.withLock { $0 } == [session.id])
+        #expect(Darwin.kill(daemon, 0) == 0, "still running: nothing killed by pid")
+    }
+
+    /// A killed daemon's socket stays until a listing removes it: `exists`
+    /// lists first, so the session is gone.
+    @Test func aKilledDaemonIsGoneDespiteItsLeftoverSocket() async throws {
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(ZmxSandbox.prompt) }
+        await handle.terminate()
+        await output.waitForEnd()
+        let daemon = try daemonPID(of: session.id)
+        #expect(Darwin.kill(daemon, SIGKILL) == 0)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(sandbox.runtime.hasSocket(for: session.id), "left behind")
+        #expect(try await backend.exists(session.id) == false)
+        #expect(!sandbox.runtime.hasSocket(for: session.id), "the listing removed it")
     }
 
     @Test func attachToAMissingSessionThrowsAndLeavesNothing() async throws {

@@ -122,6 +122,8 @@ extension PersistedState {
     /// - Built-in profiles and other profile references are left alone.
     /// - `sparedSessionIDs` is sorted without repeats and names no session
     ///   in `sessions`.
+    /// - A session's `gridSize` is plausible
+    ///   (``SessionGridSize/isPlausible``) or dropped.
     public func repaired() -> (state: PersistedState, issues: [String]) {
         var issues: [String] = []
         var state = self
@@ -133,6 +135,14 @@ extension PersistedState {
                 return false
             }
             return true
+        }
+        // A grid size that is zero, negative or absurdly large is damage: the
+        // session is attached at its laid-out size when first shown instead.
+        for index in state.sessions.indices {
+            if let size = state.sessions[index].gridSize, !size.isPlausible {
+                issues.append("Dropped the implausible grid size \(size) of session \(state.sessions[index].id)")
+                state.sessions[index].gridSize = nil
+            }
         }
 
         var seenFavorites = Set<FavoriteID>()

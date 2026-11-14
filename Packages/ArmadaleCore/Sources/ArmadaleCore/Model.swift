@@ -219,6 +219,14 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
     /// (``AppModel/launchForRespawn(of:)``). `nil` for sessions saved
     /// before October 24, 2026, which respawn from their profile alone.
     public var options: SessionOptions?
+    /// The grid size last applied to the program's terminal while Armadale
+    /// was attached (the size given to the create or attach, then every
+    /// resize), so a later launch can attach a session whose pane is not
+    /// on screen without resizing its program (DESIGN §3, §4 "Restore at
+    /// launch"). The session's own size, not one computed from a layout.
+    /// `nil` until it has been attached once by a build that records it;
+    /// absent in older files.
+    public var gridSize: SessionGridSize?
 
     public init(
         id: SessionID = .generate(),
@@ -229,7 +237,8 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
         title: String = "",
         createdAt: Date = Date(),
         runtimeVersion: String? = nil,
-        options: SessionOptions? = nil
+        options: SessionOptions? = nil,
+        gridSize: SessionGridSize? = nil
     ) {
         self.id = id
         self.location = location
@@ -240,7 +249,33 @@ public struct Session: Identifiable, Codable, Sendable, Hashable {
         self.createdAt = createdAt
         self.runtimeVersion = runtimeVersion
         self.options = options
+        self.gridSize = gridSize
     }
+}
+
+/// A terminal grid in cells: what a session's program was last sized to
+/// (``Session/gridSize``).
+public struct SessionGridSize: Codable, Sendable, Hashable, CustomStringConvertible {
+    public var columns: Int
+    public var rows: Int
+
+    public init(columns: Int, rows: Int) {
+        self.columns = columns
+        self.rows = rows
+    }
+
+    /// The largest grid kept: wider or taller than any screen can show at
+    /// the smallest font (6 pt), so anything beyond it is damage.
+    public static let maximumColumns = 4000
+    public static let maximumRows = 2000
+
+    /// At least one cell each way and at most ``maximumColumns`` ×
+    /// ``maximumRows``; the repair after every load drops anything else.
+    public var isPlausible: Bool {
+        (1...Self.maximumColumns).contains(columns) && (1...Self.maximumRows).contains(rows)
+    }
+
+    public var description: String { "\(columns)x\(rows)" }
 }
 
 /// What the New Session dialog adds to a profile for one session (DESIGN

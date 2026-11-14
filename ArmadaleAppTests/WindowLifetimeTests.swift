@@ -73,7 +73,10 @@ struct WindowLifetimeTests {
         model.fillEmptyPanes()
         let newSession = try #require(model.sessionIDs(ofTab: tab).first)
         try await Task.sleep(for: .milliseconds(200))
-        #expect(registry.controller(for: newSession) == nil, "nothing showed the new tab")
+        // The registry owns a controller for every session (DESIGN §8), but
+        // no pane view was made: nothing showed the new tab.
+        #expect(registry.controller(for: newSession) != nil)
+        #expect(registry.paneViews.view(for: newSession) == nil, "nothing showed the new tab")
 
         #expect(await eventually { weakController == nil }, "WorkspaceWindowController deinit")
         #expect(await eventually { weakContent == nil }, "ContentViewController deinit")
@@ -256,6 +259,7 @@ struct RegistryCloseRiskTests {
         #expect(registry.closeRisk(of: [session]).mayBeRunning, "unknown yet: may be running")
 
         _ = await registry.liveProbe.value
+        registry.startLaunchPass()
         for _ in 0..<20 where registry.status(of: session) == .pending {
             try await Task.sleep(for: .milliseconds(20))
         }

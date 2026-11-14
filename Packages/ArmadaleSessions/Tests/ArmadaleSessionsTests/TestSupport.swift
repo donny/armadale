@@ -249,6 +249,11 @@ final class RecordingSurface: TerminalSurface {
     let view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
     weak var delegate: (any TerminalSurfaceDelegate)?
     var gridSize = GridSize(columns: 100, rows: 30, cellWidth: 7, cellHeight: 14)
+    func setGridSize(columns: Int, rows: Int) {
+        guard columns != gridSize.columns || rows != gridSize.rows else { return }
+        gridSize = GridSize(columns: columns, rows: rows, cellWidth: 7, cellHeight: 14)
+        delegate?.surface(self, didResize: gridSize)
+    }
     var fed: [UInt8] = []
     var scrollbackClears = 0
     /// Makes every feed this slow, like a renderer that cannot keep up.

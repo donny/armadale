@@ -17,12 +17,14 @@ reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
 License and https://armadale.dev is live. Since the build order the
 sidebar, the tab bar and the panes (now cards with a header and a pane
 menu) were reworked, a clean exit closes its pane, menu bar mode and the
-quit alert activate the app again, and on November 14, 2026 the first
+quit alert activate the app again, and on November 14, 2026 the
 findings of an architecture review were built: one Armadale process per
-state directory, a safer orphan reclaim and save schedule, and state
-file schema 2. The last gate run: 761 tests, zero warnings. What each
-change was, how it was checked and what was found on the way is in
-`docs/HISTORY.md`.
+state directory, a safer orphan reclaim and save schedule, state file
+schema 2, and restored sessions attached at launch. That last change is
+reviewed and tested but **not checked live**: the Mac was not free
+("From finished changes" below has the list). The last gate run: 834
+tests, zero warnings. What each change was, how it was checked and what
+was found on the way is in `docs/HISTORY.md`.
 
 | Step | Commit | What it added |
 |---|---|---|
@@ -104,22 +106,32 @@ are in `docs/HISTORY.md`):
 - November 14, 2026: the documents split: `docs/DESIGN.md` holds the
   contract, `docs/HISTORY.md` the change log and each section's
   history, and this file where things stand (fe20ea1).
+- November 14, 2026: restored sessions are attached at launch; the
+  session registry owns the controllers and is split into five files.
 
 ## Next
 
-Nothing is in progress. The owner gave the go-ahead on November 14,
-2026 for the architecture review's items in the suggested order
-("Architecture review" and its second pass, at the end of the open
-items), and they are done: the lock, the orphan reclaim and save
-scheduling changes, the schema rule, and the documents (this file cut
-to where things stand, its change log and the history of each
-`docs/DESIGN.md` section moved to `docs/HISTORY.md`). What comes next
-waits for the owner.
+The owner gave the go-ahead on November 14, 2026 for the architecture
+review's items in the suggested order ("Architecture review" and its
+second pass, at the end of the open items), and then for attaching
+restored sessions at launch, with a decision on each of its four
+questions (`docs/HISTORY.md`, the last entry of Part 1). All are built.
+Two things are left of that last step:
+- **Its live checks.** No app was launched for it: the owner had not
+  said the Mac was free. The list is under "From finished changes"
+  below. Until they are done, treat the change as tested by the gate
+  only.
+- **The `AppDelegate` split**, a purely mechanical change the review
+  asked for in the same step ("Architecture review", Smaller). It
+  follows as its own commit.
 
 Waiting for owner decisions:
-- **Attaching restored sessions at launch**, a step of its own: it
-  needs an owner decision on pane sizes ("Restored sessions in tabs not
-  shown yet are not attached" and what the second pass adds to it).
+- **When the Mac is free** for the live checks above (with "Claude
+  Code" switched on under Accessibility; "State of this Mac that
+  matters").
+- **The limit of six sessions per host that the launch holds** (open
+  items, Remote): the coordinator's decision, made without a test
+  host; the owner may overrule it once it is checked on one.
 - **Showing or re-adopting spared sessions** (open items, Session
   layer, and "Adds to Orphan reclaim").
 - **A fork of the persistence helper** ("The persistence helper's
@@ -204,12 +216,34 @@ Session layer
   back until a run with the persistent runtime (intended).
 - The helper's listing leaves out a daemon that does not answer within
   about a second and still succeeds (November 14, 2026, `kill -STOP`).
-  The reclaim no longer depends on it for what it spares, but the rest
-  of the app does (from the code, not staged in the app): restore at
-  launch shows such a session as Session Ended with no status, a
-  Respawn there starts a new session while the old daemon keeps
-  running unreferenced, and `exists()` after a client goes away and
-  Respawn All Ended on hosts use the same listing.
+  Locally nothing depends on the listing alone any more (the same
+  day, `docs/DESIGN.md` section 4): a session is alive when it is
+  listed, or when its socket is still there after the listing and it
+  has no exit record. On hosts the listing is still all there is: a
+  remote daemon it leaves out is marked ended, at launch now for panes
+  not shown too, and Respawn All Ended there starts a new session
+  while the old daemon keeps running unreferenced (from the code; no
+  test host).
+- A local session whose daemon never answers (stopped, deadlocked) is
+  never ended: at launch it is attached and shows nothing until the
+  daemon answers; closing its pane sends a kill that fails or times
+  out, and the daemon keeps running with no pane. One line in the log
+  (category `sessions`) names it. Nothing kills it by pid (November
+  14, 2026; unit-tested against the real helper, not staged in the
+  app).
+- A restored session without a saved size is not attached until its
+  pane is shown once (the owner's decision, November 14, 2026: no
+  program is resized on a guess). That is every session saved by 0.1.1
+  or earlier, once each. Until then it is as before the change: no
+  attention from it, and its glyph and its place in the quit
+  question's count are the launch listing's answer, never refreshed.
+  The same holds for a host's sessions beyond the limit of six (Remote)
+  and for a host that needs a sign-in.
+- Not measured (November 14, 2026): what a fleet of busy agents costs
+  the main actor now that sessions in tabs never visited are attached
+  and parse their output too, as visited ones always did. Memory was
+  measured in a test harness only: about 1.3 MB per attached session
+  in the app's process and a 2.4 MB client each.
 - A clean launch of an unchanged state file still writes `state.json`
   once or twice in its first seconds, with the same content (seen
   November 14, 2026; not the reclaim, which saves only when it changed
@@ -230,8 +264,23 @@ Session layer
   save attempt at all, not looked into).
 
 Hierarchy and UI
-- One extra SIGWINCH reaches each pane after relaunch (harmless at a
-  prompt; full-screen programs redraw once).
+- One SIGWINCH reaches a full-screen program at every attach, a
+  relaunch included, whatever the size: the persistence helper sends
+  it to a program on the alternate screen (measured November 14, 2026
+  through the real helper; a program at a prompt attached at its own
+  size gets none). It cannot be removed on Armadale's side. The one
+  path of Armadale's own that could add a resize at a prompt, a size
+  sent again after connecting with only its pixel size changed, is
+  gone. Not looked at in the app.
+- A font or size change while a session is attached and its pane has
+  not been shown in this run can give two resizes when the pane is
+  first shown (the font applied on entering the window, then the
+  layout). Accepted (November 14, 2026).
+- The pixel size a program is told can stay stale for a session
+  attached while its pane was not shown and first shown on a screen of
+  another scale, until its grid next changes: sending the pixels alone
+  would cost the program a SIGWINCH. Accepted (November 14, 2026); it
+  matters only to programs that draw by pixel.
 - Full screen (October 20 and 23, 2026): every toggle goes through
   `FullScreenSerializer`, one at a time. The stall trigger is narrower
   than before (closes, refused toggles and reported failures all end
@@ -287,6 +336,23 @@ Remote
 - fish as a remote login shell is untested and likely mis-parses the nested
   quoting; sh, bash, zsh and tcsh are tested.
 - Agent forwarding (`-A`) is not supported; Windows hosts get plain shells.
+- How many sessions one connection to a host can carry was never
+  checked (November 14, 2026; no test host). Every client of a host
+  shares one connection and sshd allows 10 sessions on one by default.
+  From reading the code, past that the kill, the listing and new panes
+  on that connection are refused too, and a refused kill is swallowed,
+  so a closed pane's session would keep running on the host. Since the
+  launch now attaches sessions in panes not shown, it holds at most
+  six of a host's sessions (the coordinator's decision; the owner may
+  overrule it); the rest wait until their pane is shown, and a pane the
+  user shows always starts, so ten shown panes on one host reach the
+  limit as they did before. To check on a host: nine or more restored
+  sessions, what the tenth client does, and that closing a pane still
+  ends its session there.
+- A pane on a host that was shown once and is now in another tab may
+  still start a sign-in by itself when an automatic retry finds the
+  host back and asking for a password; only sessions never shown in
+  the run are held back from that (November 14, 2026).
 
 Agents
 - Claude Code's own idle signal arrives 60 s after it finishes; immediate
@@ -416,6 +482,49 @@ From finished changes: not checked live, and found and not fixed
   reconnect ordering of the show sequence.
 - Help › Acknowledgements (November 5 and 9, 2026). Minor: a reopened
   window keeps its scroll position.
+- Restored sessions attached at launch (November 14, 2026). **Nothing
+  was checked live** (the Mac was not free): it is tested by the gate,
+  through the real helper in the package tests, and by three review
+  rounds. To do on a test build with its own state directory:
+  - Attention from a tab not visited. Three tabs; in one that is not
+    selected run `sleep 20; printf '\a'`; quit and relaunch before it
+    rings: ◐ on that tab, the Dock badge and a notification, without
+    visiting it. Again with `printf '\e]777;notify;T;B\a'`. And none
+    from the replay alone: a relaunch with idle tabs raises nothing.
+  - The glyph and the count. In a tab not selected a program that dies
+    after the relaunch (`sleep 20; kill -9 $$`): its tab goes to ○
+    without being visited, and the quit question's and the status
+    menu's count drop by one. A clean `exit` there closes its tab.
+  - The size. In a tab not selected run `trap 'echo WINCH $(stty
+    size)' WINCH; while :; do sleep 1; done`, quit and relaunch: no new
+    line. Show the tab with the window unchanged: none. Resize the
+    window from another tab, then show it: one. With vim there
+    instead: one redraw per attach (the helper's).
+  - The order. Twelve tabs, the selected one last in the sidebar: its
+    pane is attached first, at its laid-out size.
+  - A state file from 0.1.1 (no sizes): the tabs not shown have no
+    client until shown; after one quit they have sizes.
+  - A stopped daemon (`kill -STOP` of the daemon, the parent of the
+    pid the helper's listing prints), then a relaunch: the pane is not
+    Session Ended; after `kill -CONT` it fills in. Ending its client
+    while it is stopped gives Disconnected, never ended. Closing its
+    pane leaves one line in the log.
+  - Respawn All Ended after the tabs were visited and the window
+    resized: every terminal fills its card and `stty size` agrees.
+  - The saved sizes. A live resize writes `state.json` once, after it
+    settles. A resize and then a quit within half a second keeps the
+    new `gridSize`, for ⌘Q, SIGTERM, End Sessions and Quit and the
+    quit from menu bar mode. `scripts/check-quit.sh`.
+  - About twenty attached sessions in the app: memory, and CPU while
+    they print.
+  - A font size change, and a renderer change, while sessions are
+    attached in tabs not shown.
+  - On a host (none on the Mac used): the limit of six and what lies
+    past sshd's ten (Remote, above); a host that needs a password at
+    launch starts no client in a pane not shown until one tab signs
+    in, then the rest attach; a host unreachable at launch and back
+    asking for a password leaves those panes Disconnected with ssh's
+    message, and showing one reconnects it.
 
 Architecture review (November 12, 2026)
 
@@ -426,18 +535,11 @@ reclaim, the save scheduling and the schema rule were built on November
 (`docs/HISTORY.md`). The owner then kept the rule that every agent
 reads all of `docs/DESIGN.md` and this file before changing code, which
 closes the finding on the documents. Attaching restored sessions at
-launch needs an owner decision on pane sizes and is a step of its own.
-- **Restored sessions in tabs not shown yet are not attached.**
-  `SessionRegistry.startIfNeeded` is called only for the panes of a
-  window's selected tab (`ContentViewController.show`) and by
-  `retryPersistence`, as DESIGN section 8 "App lifecycle" says ("the
-  rest lazily when their tab is first shown"). Until then a restored
-  session has no client, so its bell or OSC 9 / 777 never reaches
-  `AttentionCenter`: no ◐, no badge, no notification, for an agent
-  that finished in a tab not visited since the relaunch. Attaching
-  every live restored session after launch needs a size before the
-  pane is laid out (an attach at another size resizes the program);
-  saving each pane's last grid size would give one.
+launch was built the same day, after the owner's decisions; that
+finding and the two of the second pass that went with it are quoted
+in `docs/HISTORY.md` (the last entry of Part 1), and what the change
+leaves open is under Session layer, Hierarchy and UI, and Remote
+above.
 - **The persistence helper's workarounds.** Create's double attach,
   attach-only through `/usr/bin/true`, telling the cases apart by a
   client's first bytes within 2 s, the RIS filter, the flood reattach
@@ -468,32 +570,11 @@ Architecture review, second pass (November 14, 2026)
 The findings above were read against the code again and stand. Three
 are new and three add to ones above. Again from reading only: none is
 reproduced live. The first new one, the instance lock, was built on
-November 14, 2026 (`docs/HISTORY.md`); attaching restored sessions at
-launch stays a step of its own.
-- **New: the status of a session never shown is the launch probe's
-  answer, and is never refreshed.** For a restored session without a
-  controller, `SessionRegistry.status(of:)` answers from `liveAtLaunch`
-  (local) or `remoteLive` (hosts), which are set when the launch probe
-  answers, after a successful `retryPersistence`, and for a host by
-  Respawn All Ended's listing. A session that ends in a tab not
-  visited since the launch therefore stays `.running`: in its tab's
-  and the sidebar's glyph, and, through `CloseRisk.mayBeRunning`, in
-  `runningSessionCount()`, which is what the quit question and the
-  status item's menu show. It is corrected when the tab is first
-  shown. Same cause as "Restored sessions in tabs not shown yet are
-  not attached", and attaching them at launch removes it.
-- **Adds to "Restored sessions in tabs not shown yet are not
-  attached".** A controller exists only inside a pane view
-  (`SessionRegistry.panes` is `[SessionID: PaneView]`, and
-  `controller(for:)` reads it from there), which is why nothing can
-  be attached before it is shown, and why `status(of:)`, `isEnded`,
-  `riskItem`, `close`, `endAllSessions`, `sessionsRunning(after:)`,
-  `respawn` and `closeRestoredSessionsThatEndedCleanly` each have a
-  second path for a session never shown. A registry that holds the
-  controllers itself, with the pane view made when a pane is first
-  shown, makes the attach at launch possible and lets those paths go.
-  `SessionRegistry` (868 lines) and `AppDelegate` (955) are best split
-  in that step, not before.
+November 14, 2026, and so were the two on sessions never shown (the
+stale status, and the controllers kept inside pane views), with
+attaching restored sessions at launch (`docs/HISTORY.md`). Of the
+split that finding asked for, `SessionRegistry` is done and
+`AppDelegate` is next ("Next" above).
 - **Adds to "Orphan reclaim".** It is the only code that ends sessions
   the user did not ask to end, and it does so by set difference
   against one file. Instead of only widening the hold-back, the rule

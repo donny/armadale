@@ -1,6 +1,11 @@
 import ArmadaleCore
 import Darwin
 import Foundation
+import os
+
+/// Sessions the persistence helper could not end (`subsystem
+/// com.tinylittleapps.armadale`, category `sessions`).
+private let sessionsLog = Logger(subsystem: "com.tinylittleapps.armadale", category: "sessions")
 
 /// Persistent local sessions: one zmx daemon per session, in Armadale's
 /// private runtime directory (docs/DESIGN.md section 4).
@@ -33,6 +38,15 @@ public actor LocalZmxBackend: PersistenceBackend {
         /// so the daemon has processed its first message (which is what
         /// makes it replay the screen to the next client).
         public var firstClientGrace: Duration = .milliseconds(150)
+        /// Called when a kill failed or was not answered (it timed out) and
+        /// the session's socket is still there afterwards: its daemon may
+        /// still be running with no pane (stopped, deadlocked). Nothing is
+        /// killed by pid; by default one log line names the session and
+        /// the error.
+        public var onUnansweredKill: @Sendable (SessionID, BackendError?) -> Void = { id, error in
+            let reason = error.map(LocalZmxBackend.loggableDescription) ?? "unknown error"
+            sessionsLog.error("Armadale: ending session \(id.raw, privacy: .public) failed or was not answered (\(reason, privacy: .public)), and its socket is still there")
+        }
 
         public init(runtime: ZmxRuntime, executables: ZmxExecutables, cttyExec: String?, resolver: LaunchResolver) {
             self.runtime = runtime
@@ -89,6 +103,15 @@ public actor LocalZmxBackend: PersistenceBackend {
         return ZmxClient(process: client, runtimeVersion: version)
     }
 
+    /// Listed, or, after the listing, with its socket still in the runtime
+    /// directory and no exit record (``ZmxRuntime/isAliveWithoutListing(_:)``):
+    /// the helper's listing leaves out a daemon that does not answer within
+    /// about a second (a stopped one) and still succeeds, and removes a
+    /// dead daemon's socket itself; a program that ended has left its
+    /// record before its daemon goes (docs/DESIGN.md section 4). Such a
+    /// session is never resolved as ended, so it is never shown as ended,
+    /// closed by the clean-exit rule or respawned over. The same rule
+    /// decides "gone" inside create and attach.
     public func exists(_ id: SessionID) async throws -> Bool {
         try await driver.exists(id)
     }
@@ -99,14 +122,33 @@ public actor LocalZmxBackend: PersistenceBackend {
 
     /// Kills the session. A session that no longer exists is not an error.
     public func kill(_ id: SessionID) async throws {
-        try await driver.kill(id, version: versions[id])
+        do {
+            try await driver.kill(id, version: versions[id])
+        } catch {
+            if configuration.runtime.hasSocket(for: id) { configuration.onUnansweredKill(id, error as? BackendError) }
+            throw error
+        }
+    }
+
+    /// An error's kind, safe for a public log line: never its text, which
+    /// may hold a path under the user's home.
+    nonisolated static func loggableDescription(_ error: BackendError) -> String {
+        switch error {
+        case .runtimeFailure: "the helper's kill failed or timed out"
+        case .notPersistent: "not persistent"
+        case .noSuchSession: "no such session"
+        case .historyUnavailable: "history unavailable"
+        case .unreachable: "unreachable"
+        case .authenticationFailed: "authentication failed"
+        }
     }
 
     public func history(_ id: SessionID) async throws -> Data {
         try await driver.history(id, version: versions[id])
     }
 
-    /// Ended if the session is no longer listed, with the status its
+    /// Ended if the session is gone (``exists(_:)``: not listed and no
+    /// socket left), with the status its
     /// recorder wrote (`<runtime>/a-<id>.exit`) if there is one; detached
     /// if it is listed (only the client went away) or if listing fails.
     /// The recorder writes the file before it exits, and the daemon ends
@@ -183,6 +225,10 @@ struct LocalZmxEndpoint: ZmxEndpoint {
         } catch {
             throw BackendError.runtimeFailure(String(describing: error))
         }
+    }
+
+    func isAliveWithoutListing(_ id: SessionID) -> Bool {
+        configuration.runtime.isAliveWithoutListing(id)
     }
 
     private func cttyExecPath() throws -> String {

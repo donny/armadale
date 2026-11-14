@@ -67,6 +67,8 @@ enum Generate {
             in: shellPane, request: SessionRequest(profileID: Profile.shell.id, workingDirectory: "~/src/armadale"))!
         model.setTitle("vim Package.swift", for: shell)
         model.setRuntimeVersion("0.8.1", for: shell)
+        // The grid size last applied to its program (November 14, 2026).
+        model.setGridSizes([shell: SessionGridSize(columns: 132, rows: 43)])
         let agentPane = model.splitPane(shellPane, axis: .horizontal)!
         let agent = model.startSession(in: agentPane, request: SessionRequest(
             profileID: Profile.claudeCode.id, workingDirectory: "~/src/armadale",

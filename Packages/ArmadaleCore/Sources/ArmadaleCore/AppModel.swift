@@ -692,6 +692,25 @@ public final class AppModel {
         didChange()
     }
 
+    /// Records the grid sizes last applied to sessions' programs
+    /// (``Session/gridSize``), all in one change: the app collects them
+    /// until a pane's size has settled, so a live window resize is one
+    /// model change (and one save), not one per step. Implausible sizes
+    /// (``SessionGridSize/isPlausible``) and unknown sessions are ignored;
+    /// nothing changes when every size is already recorded. Returns whether
+    /// it changed the model.
+    @discardableResult
+    public func setGridSizes(_ sizes: [SessionID: SessionGridSize]) -> Bool {
+        var changed = false
+        for (id, size) in sizes where size.isPlausible {
+            guard let index = sessions.firstIndex(where: { $0.id == id }), sessions[index].gridSize != size else { continue }
+            sessions[index].gridSize = size
+            changed = true
+        }
+        if changed { didChange() }
+        return changed
+    }
+
     /// Records the outcome of the launch's orphan reclaim (DESIGN §4,
     /// "Housekeeping"): the live sessions it leaves running, and that the
     /// saved sessions are now complete (the flag is cleared). IDs of
@@ -717,11 +736,15 @@ public final class AppModel {
 
     /// Replaces session `old` with `new` (a respawn): every pane bound to
     /// `old` is rebound to `new`, and `old` is retired. Does nothing if `old`
-    /// is unknown or `new`'s ID is already in use.
+    /// is unknown or `new`'s ID is already in use. The fresh session takes
+    /// over `old`'s grid size unless it has its own: it runs in the same
+    /// pane, at the same size (``Session/gridSize``).
     public func replaceSession(_ old: SessionID, with new: Session) {
         guard let index = sessions.firstIndex(where: { $0.id == old }),
               !sessions.contains(where: { $0.id == new.id })
         else { return }
+        var new = new
+        if new.gridSize == nil { new.gridSize = sessions[index].gridSize }
         sessions[index] = new
         onSessionsRemoved?([old])
         for w in workspaces.indices {

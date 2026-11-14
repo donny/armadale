@@ -42,7 +42,10 @@ What works today:
 - **Persistence.** Sessions outlive Armadale (see [Quitting and the menu
   bar](#quitting-and-the-menu-bar)); a relaunch
   restores windows, layouts and selections and reattaches every visible
-  pane, replaying its screen and scrollback. A session that ends cleanly
+  pane, replaying its screen and scrollback; sessions in tabs not on
+  screen are reattached in the background at the size they had, a few at
+  a time, so an agent finishing there still raises attention (a session
+  saved by an older version waits until its tab is shown once). A session that ends cleanly
   (any program exiting with status 0, or the shell leaving by `exit` or
   ^D, whatever status it reports) closes its pane, as Close Pane would,
   even the only pane left in its workspace, which then goes with its

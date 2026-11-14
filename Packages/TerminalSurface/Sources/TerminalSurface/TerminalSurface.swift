@@ -17,6 +17,14 @@ public protocol TerminalSurface: AnyObject {
     var delegate: (any TerminalSurfaceDelegate)? { get set }
     /// Current grid size in cells and cell size in points.
     var gridSize: GridSize { get }
+    /// Sizes the grid to `columns` × `rows` cells, in a window or not, by
+    /// giving `view` the size that holds exactly that grid at the current
+    /// font (so a later layout at the same size changes nothing). Reported
+    /// through ``TerminalSurfaceDelegate/surface(_:didResize:)`` like any
+    /// other change, only when the grid differs. Used to attach a session
+    /// whose pane is not on screen at the size its program already has
+    /// (DESIGN §4, "Restore at launch").
+    func setGridSize(columns: Int, rows: Int)
     /// Feeds process output to the screen.
     func feed(_ bytes: ArraySlice<UInt8>)
     /// Applies font, colours and cursor.

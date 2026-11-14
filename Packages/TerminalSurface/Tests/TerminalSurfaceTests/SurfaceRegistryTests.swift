@@ -8,6 +8,7 @@ private final class StubSurface: TerminalSurface {
     let view = NSView()
     weak var delegate: (any TerminalSurfaceDelegate)?
     var gridSize = GridSize(columns: 80, rows: 24)
+    func setGridSize(columns: Int, rows: Int) { gridSize = GridSize(columns: columns, rows: rows) }
     private(set) var applied: [TerminalAppearance] = []
 
     init(kind: String, appearance: TerminalAppearance) {

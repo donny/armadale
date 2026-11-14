@@ -11,10 +11,17 @@ import TerminalSurface
 /// ``paneMenu()`` is its context menu (``PaneMenu``), opened from the
 /// header only.
 ///
-/// A `PaneView` belongs to its ``SessionController`` for the session's whole
-/// life (the registry keeps both) and is only ever reparented, so a
-/// container can host any number of them and move them around without
-/// losing terminal state.
+/// A `PaneView` is made around its ``SessionController`` when the pane is
+/// first shown (the controller may have been attached long before, at the
+/// session's saved size) and belongs to it for the session's whole life
+/// (the registry keeps both); it is only ever reparented, so a container
+/// can host any number of them and move them around without losing
+/// terminal state.
+///
+/// It never changes the terminal's grid by itself: it starts at the size
+/// that holds the terminal view as it is, so a session attached at its
+/// saved size gets no resize until the pane is laid out, and none then if
+/// the laid-out grid is the same (DESIGN §8).
 @MainActor
 final class PaneView: NSView {
     let controller: SessionController
@@ -79,14 +86,27 @@ final class PaneView: NSView {
     /// (``surfaceWasReplaced(_:)``) clears the record first.
     private var appliedAppearance: (surface: ObjectIdentifier, appearance: TerminalAppearance)?
 
-    init(controller: SessionController, settings: AppSettings, rendererID: String, theme: PaneThemeBinding = .detached) {
+    /// `rendererID` is the renderer of the surface the controller holds,
+    /// `pendingRendererID` that of a replacement it will install at its
+    /// next connect, if any.
+    init(
+        controller: SessionController, settings: AppSettings, rendererID: String, pendingRendererID: String? = nil,
+        theme: PaneThemeBinding = .detached
+    ) {
         self.controller = controller
         self.settings = settings
         self.theme = theme
         self.rendererID = rendererID
-        super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        self.pendingRendererID = pendingRendererID
+        // The card around the terminal view as it is, so placing it inside
+        // the padding keeps its size, and so its grid.
+        let terminal = controller.surface.view
+        let insets = PaneCardStyle.terminalInsets
+        super.init(frame: NSRect(
+            x: 0, y: 0, width: terminal.frame.width + insets.left + insets.right,
+            height: terminal.frame.height + insets.top + insets.bottom))
         wantsLayer = true
-        addTerminalView(controller.surface.view)
+        addTerminalView(terminal)
         header.frame = PaneCardStyle.headerFrame(in: bounds)
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusTerminal() }
@@ -106,10 +126,33 @@ final class PaneView: NSView {
     }
 
     /// Puts a terminal view at the bottom of the pane, inside the padding.
+    /// Its frame follows the pane's in ``resizeSubviews(withOldSize:)``,
+    /// computed rather than autoresized, so a terminal whose grid was set
+    /// while the pane was not on screen is never left out of step.
     private func addTerminalView(_ terminal: NSView) {
+        terminal.autoresizingMask = []
         terminal.frame = terminalFrame
-        terminal.autoresizingMask = [.width, .height]
         addSubview(terminal, positioned: .below, relativeTo: subviews.first)
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        placeTerminal()
+    }
+
+    /// AppKit calls ``resizeSubviews(withOldSize:)`` only when the pane's
+    /// size changes; a terminal whose grid was changed from outside inside
+    /// an unchanged card is put back when the pane is laid out or enters a
+    /// window, so a mismatch never lasts.
+    override func layout() {
+        super.layout()
+        placeTerminal()
+    }
+
+    /// The terminal at ``terminalFrame``, the only grid it may have.
+    private func placeTerminal() {
+        let terminal = controller.surface.view
+        if terminal.superview === self, terminal.frame != terminalFrame { terminal.frame = terminalFrame }
     }
 
     /// The renderer changed: the surface is replaced by one from `rendererID`
@@ -235,7 +278,10 @@ final class PaneView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil { applyAppearance() }
+        if window != nil {
+            placeTerminal()
+            applyAppearance()
+        }
     }
 
     private func applyAppearance() {

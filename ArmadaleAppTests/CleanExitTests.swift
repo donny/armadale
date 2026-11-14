@@ -206,9 +206,12 @@ struct CleanExitTests {
         #expect(Set(model.sessionIDs(in: workspace)) == [killed, unrecorded, notPersistent, kept])
     }
 
-    /// Remote restored sessions are closed when their host's first listing
-    /// arrives: gone, never shown, and recorded as a clean exit.
-    @Test func restoredRemoteSessionsThatExitedCleanlyAreClosedWhenTheHostAnswers() async throws {
+    /// Remote restored sessions found gone when their host's first listing
+    /// arrives are marked ended through their controllers, with the exit
+    /// statuses read in one call: a clean exit closes its pane, others keep
+    /// the placeholder, whether or not the pane was ever shown. (The
+    /// listing itself is in `RemoteRegistryTests`.)
+    @Test func restoredRemoteSessionsThatExitedCleanlyAreClosedWhenMarkedEnded() async throws {
         let model = AppModel(defaultWorkingDirectory: "/")
         let workspace = model.newWorkspace(name: "W")
         model.fillEmptyPanes()
@@ -221,19 +224,30 @@ struct CleanExitTests {
             model.setRuntimeVersion("0.8.1", for: id)
             remote.append(id)
         }
-        let (clean, live, shown, failed) = (remote[0], remote[1], remote[2], remote[3])
+        // `alive` is gone by its listing but its controller is attached
+        // meanwhile: a controller that is not detached is never marked.
+        let (clean, alive, shown, failed) = (remote[0], remote[1], remote[2], remote[3])
         let (registry, settings) = makeRegistry(model, restored: Set(remote))
         defer { settings.removeTestDefaults() }
         _ = registry.paneView(for: shown)
-        let backend = RecordingBackend(recorded: [clean: 0, live: 0, shown: 0, failed: .signaled(2)])
+        let backend = RecordingBackend(recorded: [clean: 0, alive: 0, shown: 0, failed: .signaled(2)])
+        // No remote support in these tests: the controllers start out
+        // unavailable; give them the recording backend.
+        let gone = try [clean, shown, failed].map { try #require(registry.controller(for: $0)) }
+        let busy = try #require(registry.controller(for: alive))
+        for controller in gone + [busy] {
+            controller.useBackend(backend, makeOutputFilter: { IdentityOutputFilter() })
+        }
+        busy.markUnavailable(reason: "busy") // anything but detached
 
-        await registry.closeRestoredSessionsThatEndedCleanly(on: host, backend: backend, live: [live])
+        await registry.markEnded(gone + [busy])
         #expect(model.session(clean) == nil)
-        #expect(model.session(live) != nil, "still running on the host")
-        #expect(model.session(shown) != nil, "a shown pane goes through its controller")
+        #expect(model.session(shown) == nil, "shown or not, the same rule")
+        #expect(model.session(alive) != nil, "not detached: left alone")
+        #expect(busy.state == .unavailable(reason: "busy"))
         #expect(model.session(failed) != nil)
-        // The shown pane (unavailable here: no remote support in tests) is not asked about.
-        #expect(await backend.asked == [clean, failed])
+        #expect(registry.controller(for: failed)?.state == .ended(exitCode: .signaled(2)))
+        #expect(await backend.asked == [clean, alive, shown, failed], "one call for all of them")
     }
 
     /// A host's first listing can empty a workspace: its only pane, a
@@ -254,9 +268,10 @@ struct CleanExitTests {
         model.setRuntimeVersion("0.8.1", for: remote)
         let (registry, settings) = makeRegistry(model, restored: [remote])
         defer { settings.removeTestDefaults() }
+        let controller = try #require(registry.controller(for: remote))
+        controller.useBackend(RecordingBackend(recorded: [remote: 0]), makeOutputFilter: { IdentityOutputFilter() })
 
-        await registry.closeRestoredSessionsThatEndedCleanly(
-            on: host, backend: RecordingBackend(recorded: [remote: 0]), live: [])
+        await registry.markEnded([controller])
         #expect(model.session(remote) == nil)
         #expect(model.workspace(workspace) == nil)
         #expect(model.workspaces.map(\.id) == [other])

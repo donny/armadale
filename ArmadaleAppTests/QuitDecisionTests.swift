@@ -261,7 +261,7 @@ struct RegistryQuitTests {
         let ended = await registry.endAllSessions()
         #expect(restored.isSubset(of: ended))
         // Covered and never shown: gone, whatever the launch probe said.
-        #expect(registry.sessionsRunning(after: ended).isEmpty)
+        #expect(registry.sessionsStillRunning().isEmpty)
         let killed = await backend.killed
         #expect(restored.isSubset(of: Set(killed)), "every restored session killed: \(killed)")
         #expect(await backend.alive.isEmpty)
@@ -290,7 +290,7 @@ struct RegistryQuitTests {
         // A pass that covered only one session leaves the other running.
         let ended = await registry.endAllSessions(only: [first])
         #expect(ended == [first])
-        let remaining = registry.sessionsRunning(after: ended)
+        let remaining = registry.sessionsStillRunning()
         #expect(remaining == restored.subtracting([first]))
         await registry.endAllSessions(only: remaining)
         #expect(Set(await backend.killed) == restored)

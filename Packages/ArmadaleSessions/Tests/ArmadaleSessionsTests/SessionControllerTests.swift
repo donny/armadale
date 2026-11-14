@@ -13,6 +13,11 @@ private final class FakeSurface: TerminalSurface {
     let view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
     weak var delegate: (any TerminalSurfaceDelegate)?
     var gridSize = GridSize(columns: 100, rows: 30, cellWidth: 7, cellHeight: 14)
+    func setGridSize(columns: Int, rows: Int) {
+        guard columns != gridSize.columns || rows != gridSize.rows else { return }
+        gridSize = GridSize(columns: columns, rows: rows, cellWidth: 7, cellHeight: 14)
+        delegate?.surface(self, didResize: gridSize)
+    }
     var fed: [UInt8] = []
     var scrollbackClears = 0
     var text: String { String(decoding: fed, as: UTF8.self) }
@@ -93,6 +98,7 @@ private actor FakeBackend: PersistenceBackend {
     var killDelay: Duration?
     var attachDelay: Duration?
     private var concurrentAttaches = 0
+    private(set) var attachAttempts = 0
     private(set) var maxConcurrentAttaches = 0
 
     func setCreateError(_ error: (any Error)?) { createError = error }
@@ -122,6 +128,7 @@ private actor FakeBackend: PersistenceBackend {
 
     func attach(_ session: Session, size: PTYSize) async throws -> any ProcessHandle {
         guard canAttach else { throw BackendError.notPersistent(reason: nil) }
+        attachAttempts += 1
         concurrentAttaches += 1
         maxConcurrentAttaches = max(maxConcurrentAttaches, concurrentAttaches)
         defer { concurrentAttaches -= 1 }
@@ -165,6 +172,7 @@ private final class RecordingDelegate: SessionControllerDelegate {
     var replacements: [(SessionID, Session)] = []
     var respawnLaunch: LaunchSpec?
     var replacedSurfaces: [ObjectIdentifier] = []
+    var appliedSizes: [PTYSize] = []
 
     func sessionController(_ controller: SessionController, didChangeState state: SessionState) { states.append(state) }
     func sessionController(_ controller: SessionController, didSetTitle title: String) { titles.append(title) }
@@ -181,6 +189,7 @@ private final class RecordingDelegate: SessionControllerDelegate {
     func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {
         replacedSurfaces.append(ObjectIdentifier(old))
     }
+    func sessionController(_ controller: SessionController, didApplySize size: PTYSize) { appliedSizes.append(size) }
 }
 
 /// Holds back everything until the end of the stream.
@@ -238,8 +247,11 @@ struct SessionControllerTests {
 
     @Test func startCreatesWithSurfaceSizeAndPumpsOutput() async throws {
         let controller = makeController()
-        #expect(surface.delegate === controller)
+        // The surface is made when first needed, here by the connect.
+        #expect(!controller.hasSurface)
         await controller.start(.create)
+        #expect(controller.hasSurface)
+        #expect(surface.delegate === controller)
         #expect(controller.state == .attached)
         #expect(controller.isRunning)
         let created = try #require(await backend.created.first)
@@ -1091,6 +1103,45 @@ struct SessionControllerReconnectTests {
         #expect(await backend.attached.count == 1)
     }
 
+    /// The preflight asked before every automatic retry: wait keeps to the
+    /// schedule without connecting, stop ends the retries with its reason,
+    /// connect connects.
+    @Test func theRetryPreflightDecidesWhetherARetryConnects() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        var answers: [SessionController.RetryPreflight] = [.wait, .wait, .stop(reason: "needs a password")]
+        var asked = 0
+        controller.retryPreflight = {
+            asked += 1
+            return answers.isEmpty ? .connect : answers.removeFirst()
+        }
+        await controller.start(.attach)
+        #expect(await backend.attachAttempts == 1)
+        await eventually { !controller.isReconnecting }
+        #expect(asked == 3)
+        #expect(await backend.attachAttempts == 1, "no retry connected")
+        #expect(controller.state == .disconnected(reason: "needs a password"))
+        #expect(controller.failure == "needs a password")
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(asked == 3, "stopped for good")
+
+        // Reconnect is the user's: it connects whatever the preflight says.
+        await backend.setAttachError(nil)
+        await controller.reconnect()
+        #expect(controller.state == .attached)
+    }
+
+    @Test func aRetryPreflightThatSaysConnectConnects() async throws {
+        await backend.setCanAttach(true)
+        await backend.setAttachError(BackendError.unreachable("down"))
+        let controller = makeController()
+        controller.retryPreflight = { .connect }
+        await controller.start(.attach)
+        await backend.setAttachError(nil)
+        await eventually { controller.state == .attached }
+    }
+
     @Test func retriesStopWhenTheBudgetRunsOut() async throws {
         await backend.setCanAttach(true)
         await backend.setAttachError(BackendError.unreachable("down"))
@@ -1254,3 +1305,83 @@ struct SessionControllerReconnectTests {
         #expect(!controller.isReconnecting)
     }
 }
+
+/// The lazy surface and the sizes given to the PTY (docs/DESIGN.md
+/// sections 5 and 7).
+extension SessionControllerTests {
+    // MARK: Lazy surface and applied sizes
+
+    /// A session that is never attached or shown costs no terminal.
+    @Test func markingEndedOrUnavailableMakesNoSurface() {
+        let ended = makeController()
+        ended.markEnded(exitCode: 3)
+        #expect(!ended.hasSurface)
+        let unavailable = makeController()
+        unavailable.markUnavailable(reason: "none")
+        #expect(!unavailable.hasSurface)
+    }
+
+    /// A renderer change before the surface was ever made just changes what
+    /// the first one is made with: no replacement is reported.
+    @Test func aRendererChangeBeforeTheFirstSurfaceReplacesNothing() async throws {
+        let controller = makeController()
+        let other = FakeSurface()
+        controller.replaceSurfaceOnNextAttach { other }
+        await controller.start(.create)
+        #expect(controller.surface === other)
+        #expect(delegate.replacedSurfaces.isEmpty)
+        #expect(other.delegate === controller)
+    }
+
+    /// The size given at the connect is reported, then every resize that
+    /// changes the grid; a pixel size alone is never sent.
+    @Test func appliedSizesAreReportedAndPixelOnlyChangesAreNotSent() async throws {
+        let controller = makeController()
+        await controller.start(.create)
+        let handle = try await handle()
+        let created = try #require(await backend.created.first?.size)
+        #expect(handle.resizes.isEmpty, "the connect's size stands")
+        #expect(delegate.appliedSizes == [created])
+        #expect(controller.appliedSize == created)
+        // Same grid, other cell size (pixels): nothing goes to the PTY.
+        surface.gridSize = GridSize(columns: 100, rows: 30, cellWidth: 8, cellHeight: 16)
+        surface.delegate?.surface(surface, didResize: surface.gridSize)
+        #expect(handle.resizes.isEmpty)
+        #expect(delegate.appliedSizes.count == 1)
+        surface.gridSize = GridSize(columns: 90, rows: 30, cellWidth: 8, cellHeight: 16)
+        surface.delegate?.surface(surface, didResize: surface.gridSize)
+        #expect(handle.resizes.map { "\($0.columns)x\($0.rows)" } == ["90x30"])
+        #expect(delegate.appliedSizes.map { "\($0.columns)x\($0.rows)" } == ["100x30", "90x30"])
+        handle.exit(0)
+        handle.finishOutput()
+        await eventually { controller.state.isEnded }
+        #expect(controller.appliedSize == nil)
+    }
+
+    /// A surface given its grid before the attach (a session attached at
+    /// its saved size while its pane is not shown) attaches at that grid.
+    @Test func aGridSetBeforeTheAttachIsTheAttachSize() async throws {
+        await backend.setCanAttach(true)
+        let controller = makeController()
+        controller.surface.setGridSize(columns: 57, rows: 19)
+        await controller.start(.attach)
+        let attached = try #require(await backend.created.first?.size)
+        #expect(attached.columns == 57 && attached.rows == 19)
+        #expect(try await handle().resizes.isEmpty)
+    }
+
+    /// A grid change while the connect is under way is sent once attached.
+    @Test func aResizeDuringTheConnectIsSentOnce() async throws {
+        await backend.setCreateDelay(.milliseconds(100))
+        let controller = makeController()
+        let start = Task { await controller.start(.create) }
+        try await Task.sleep(for: .milliseconds(20))
+        surface.gridSize = GridSize(columns: 120, rows: 40, cellWidth: 7, cellHeight: 14)
+        surface.delegate?.surface(surface, didResize: surface.gridSize)
+        await start.value
+        let handle = try await handle()
+        #expect(handle.resizes.map { "\($0.columns)x\($0.rows)" } == ["120x40"])
+        #expect(delegate.appliedSizes.map { "\($0.columns)x\($0.rows)" } == ["120x40"])
+    }
+}
+

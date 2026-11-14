@@ -26,10 +26,15 @@ protocol ZmxEndpoint: Sendable {
     /// means, if the endpoint can tell (ssh's exit status 255: the host
     /// could not be reached); `nil` leaves it to the protocol.
     func failure(ofExitedClient status: Int32?, output: [UInt8]) -> BackendError?
+    /// Whether a session the listing left out is alive all the same, asked
+    /// right after that listing (on this Mac: its socket remains and it has
+    /// no exit record; a host has no such fallback).
+    func isAliveWithoutListing(_ id: SessionID) -> Bool
 }
 
 extension ZmxEndpoint {
     func failure(ofExitedClient status: Int32?, output: [UInt8]) -> BackendError? { nil }
+    func isAliveWithoutListing(_ id: SessionID) -> Bool { false }
 }
 
 /// The zmx session protocol of docs/DESIGN.md section 4, over an endpoint:
@@ -142,8 +147,14 @@ struct ZmxSessionDriver<Endpoint: ZmxEndpoint>: Sendable {
         }
     }
 
+    /// Listed, or alive by the endpoint's own rule right after the listing
+    /// (``ZmxEndpoint/isAliveWithoutListing(_:)``). Every "is it gone"
+    /// decision of the protocol goes through here (``isGone(_:)`` in create
+    /// and attach included), so none kills or ends a session that rule
+    /// keeps alive.
     func exists(_ id: SessionID) async throws -> Bool {
-        try await liveSessions().contains(id)
+        if try await liveSessions().contains(id) { return true }
+        return endpoint.isAliveWithoutListing(id)
     }
 
     func liveSessions() async throws -> Set<SessionID> {

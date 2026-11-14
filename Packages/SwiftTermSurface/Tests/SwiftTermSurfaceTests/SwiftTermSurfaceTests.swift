@@ -199,3 +199,78 @@ struct SwiftTermSurfaceTests {
         #expect(surface.cursorStyleParameter == 4, "a changed preference applies")
     }
 }
+
+/// Counts the grid sizes a surface reports.
+@MainActor
+private final class ResizeLog: TerminalSurfaceDelegate {
+    var sizes: [GridSize] = []
+    func surface(_ surface: any TerminalSurface, didInput bytes: [UInt8]) {}
+    func surface(_ surface: any TerminalSurface, didResize size: GridSize) { sizes.append(size) }
+    func surface(_ surface: any TerminalSurface, didSetTitle title: String) {}
+    func surface(_ surface: any TerminalSurface, didChangeDirectory url: URL) {}
+    func surfaceDidRingBell(_ surface: any TerminalSurface) {}
+    func surface(_ surface: any TerminalSurface, didRequestClipboard op: ClipboardOp) {}
+    func surface(_ surface: any TerminalSurface, didReceiveNotification title: String, body: String) {}
+    func surface(_ surface: any TerminalSurface, didActivateLink link: String) {}
+}
+
+/// ``SwiftTermSurface/setGridSize(columns:rows:)``: a surface that is in no
+/// window is given a grid before its session is attached (DESIGN §5), and a
+/// later layout at the same size must not change it.
+@Suite("SwiftTermSurface grid size outside a window")
+@MainActor
+struct SwiftTermSurfaceGridTests {
+    @Test(arguments: [(80, 24), (132, 43), (57, 19), (240, 70), (2, 1)])
+    func theGridIsSetOutsideAWindow(columns: Int, rows: Int) {
+        let surface = SwiftTermSurface()
+        let log = ResizeLog()
+        surface.delegate = log
+        #expect(surface.view.window == nil)
+        surface.setGridSize(columns: columns, rows: rows)
+        #expect(surface.gridSize.columns == columns)
+        #expect(surface.gridSize.rows == rows)
+        #expect(log.sizes.map(\.description) == ["\(columns)x\(rows)"], "reported once")
+        // The view holds exactly that grid: within one cell of it.
+        let size = surface.gridSize
+        #expect(Double(surface.view.frame.width) >= Double(columns) * size.cellWidth)
+        #expect(Double(surface.view.frame.width) < Double(columns + 1) * size.cellWidth)
+        #expect(Double(surface.view.frame.height) >= Double(rows) * size.cellHeight)
+        #expect(Double(surface.view.frame.height) < Double(rows + 1) * size.cellHeight)
+        // The same grid again changes and reports nothing.
+        surface.setGridSize(columns: columns, rows: rows)
+        #expect(log.sizes.count == 1)
+    }
+
+    @Test func nonsenseIsIgnored() {
+        let surface = SwiftTermSurface()
+        let before = surface.gridSize
+        for (columns, rows) in [(0, 24), (80, 0), (-1, -1)] {
+            surface.setGridSize(columns: columns, rows: rows)
+        }
+        #expect(surface.gridSize == before)
+    }
+
+    /// The grid survives entering a window at the frame it was given, and
+    /// a frame of another size reports exactly one change.
+    @Test func enteringAWindowAtTheSameSizeKeepsTheGrid() {
+        let surface = SwiftTermSurface()
+        surface.setGridSize(columns: 100, rows: 30)
+        let log = ResizeLog()
+        surface.delegate = log
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1400, height: 900))
+        window.contentView = content
+        let frame = surface.view.frame
+        content.addSubview(surface.view)
+        surface.view.frame = NSRect(origin: NSPoint(x: 10, y: 10), size: frame.size)
+        content.layoutSubtreeIfNeeded()
+        #expect(surface.gridSize.columns == 100 && surface.gridSize.rows == 30)
+        #expect(log.sizes.isEmpty, "no resize: \(log.sizes)")
+        surface.view.setFrameSize(NSSize(width: frame.width + surface.gridSize.cellWidth * 5, height: frame.height))
+        #expect(log.sizes.map(\.description) == ["105x30"])
+    }
+}

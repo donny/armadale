@@ -12,6 +12,7 @@ final class StubRendererSurface: TerminalSurface {
     let view = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
     weak var delegate: (any TerminalSurfaceDelegate)?
     var gridSize = GridSize(columns: 80, rows: 24, cellWidth: 7, cellHeight: 14)
+    func setGridSize(columns: Int, rows: Int) { gridSize = GridSize(columns: columns, rows: rows, cellWidth: 7, cellHeight: 14) }
     private(set) var appearance: TerminalAppearance
 
     init(appearance: TerminalAppearance) {

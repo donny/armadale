@@ -22,6 +22,7 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
 
     var view: NSView { inner.view }
     var gridSize: GridSize { inner.gridSize }
+    func setGridSize(columns: Int, rows: Int) { inner.setGridSize(columns: columns, rows: rows) }
     func feed(_ bytes: ArraySlice<UInt8>) { inner.feed(bytes) }
     /// The appearances applied, in order.
     private(set) var applied: [TerminalAppearance] = []

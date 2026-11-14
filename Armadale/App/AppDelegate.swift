@@ -20,7 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var settingsWindowController: SettingsWindowController?
     private var shortcutsWindowController: ShortcutsWindowController?
     private var acknowledgementsWindowController: AcknowledgementsWindowController?
-    /// Session controllers for every pane shown so far.
+    /// A session controller for every session in the model, and the pane
+    /// views of those shown so far.
     private let registry: SessionRegistry
     /// Which sessions need attention; the Dock badge and notifications.
     private let attention: AttentionCenter
@@ -462,7 +463,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 uniquingKeysWith: { _, last in last })
             Task { await backend.noteRuntimeVersions(versions) }
             return SessionBackend(
-                setup: SessionRuntimeSetup(backend: backend, makeOutputFilter: { ZmxOutputFilter() }, isPersistent: true),
+                setup: SessionRuntimeSetup(
+                    backend: backend, makeOutputFilter: { ZmxOutputFilter() }, isPersistent: true,
+                    socketSessions: { runtime.sessionsAliveWithoutListing() }),
                 runtime: runtime, failure: nil, cttyExec: installed.cttyExec.path)
         } catch {
             NSLog("Armadale: persistent sessions unavailable: %@", String(describing: error))
@@ -561,6 +564,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         for id in model.ensureWorkspacesToOpen() {
             openWindow(for: id, restoringFullScreen: true)
         }
+        // After the windows: their panes on screen start at their laid-out
+        // size; every other restored session follows (DESIGN §4).
+        registry.startLaunchPass()
 
         saver.onWriteFailure = { [weak self] error, _ in
             self?.reportSaveFailure(error)
@@ -659,6 +665,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func applicationWillTerminate(_ notification: Notification) {
         persistenceTask?.cancel()
         guard canSave else { return }
+        // Sizes applied in the last half second, not yet in the model.
+        registry.flushGridSizes()
         for controller in windowControllers.values {
             model.updateWindowState(controller.captureWindowState(isOpen: true), for: controller.workspaceID)
         }
@@ -1070,8 +1078,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         isEndingSessions = true
         menuBarItem?.showEnding()
         Task { [weak self, registry] in
-            let ended = await registry.endAllSessions()
-            let appeared = registry.sessionsRunning(after: ended)
+            await registry.endAllSessions()
+            let appeared = registry.sessionsStillRunning()
             if !appeared.isEmpty {
                 NSLog("Armadale: %d session(s) started while ending sessions; ending them too", appeared.count)
                 await registry.endAllSessions(only: appeared)

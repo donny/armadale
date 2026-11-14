@@ -1,6 +1,7 @@
 import ArmadaleCore
 
-/// What to do with a pane's session when it is first shown.
+/// What to do with a session when it is started: when its pane is first
+/// shown, or when the launch attaches it (``LaunchAttachPlan``).
 public enum RestoreAction: Sendable, Hashable {
     /// A session new in this run: create it.
     case create
@@ -13,8 +14,8 @@ public enum RestoreAction: Sendable, Hashable {
     case markUnavailable
 }
 
-/// Decides how restored sessions are brought up, and which may be replaced
-/// by Respawn All Ended. Pure, so it can be tested without the app.
+/// Decides how restored sessions are brought up. Pure, so it can be tested
+/// without the app.
 public struct RestorePolicy: Sendable, Hashable {
     /// Whether the backend in use keeps sessions across launches. `false`
     /// when Armadale fell back to plain PTY sessions because the persistent
@@ -33,18 +34,12 @@ public struct RestorePolicy: Sendable, Hashable {
 
     /// - Parameters:
     ///   - restored: the session was recorded by an earlier run.
-    ///   - live: the backend's live sessions at launch; `nil` if unknown.
+    ///   - live: the backend's live sessions at launch (locally: listed, or
+    ///     with a socket); `nil` if unknown.
     public func action(for session: Session, restored: Bool, live: Set<SessionID>?) -> RestoreAction {
         guard restored else { return .create }
         if !backendIsPersistent, Self.isPersistent(session) { return .markUnavailable }
         if let live, !live.contains(session.id) { return .markEnded }
         return .attach
-    }
-
-    /// Whether Respawn All Ended may replace a restored session whose pane
-    /// has not been shown yet: only one known to be gone, never one that is
-    /// unavailable (it may still be running).
-    public func mayRespawnUnshown(_ session: Session, restored: Bool, live: Set<SessionID>?) -> Bool {
-        restored && live != nil && action(for: session, restored: restored, live: live) == .markEnded
     }
 }

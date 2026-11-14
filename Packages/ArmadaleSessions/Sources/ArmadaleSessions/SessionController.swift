@@ -47,6 +47,11 @@ public protocol SessionControllerDelegate: AnyObject {
     /// The controller's surface was replaced (``SessionController/replaceSurfaceOnNextAttach(_:)``):
     /// show `controller.surface.view` instead of `old.view`.
     func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface)
+    /// A grid size was given to the attached client's PTY: the size of a
+    /// create or attach, then every resize that changed the columns or
+    /// rows (``SessionController/appliedSize``). The app records it as the
+    /// session's last size (``Session/gridSize``).
+    func sessionController(_ controller: SessionController, didApplySize size: PTYSize)
 }
 
 extension SessionControllerDelegate {
@@ -63,6 +68,7 @@ extension SessionControllerDelegate {
         nil
     }
     public func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {}
+    public func sessionController(_ controller: SessionController, didApplySize size: PTYSize) {}
 }
 
 /// The per-session glue between a backend's ``ProcessHandle`` and a
@@ -79,7 +85,10 @@ extension SessionControllerDelegate {
 /// ``reconnect()`` to try again.
 ///
 /// The controller owns the surface for the session's whole life; views that
-/// show it reparent `surface.view` and never recreate it. The one exception
+/// show it reparent `surface.view` and never recreate it. The surface is
+/// made the first time anything asks for it (a pane showing the session, a
+/// connect): a session that is never attached or shown (an ended one in a
+/// tab nobody opens) costs no terminal. The one exception
 /// is a renderer change: ``replaceSurfaceOnNextAttach(_:)`` swaps the
 /// surface the next time the controller connects (a respawn, a reconnect,
 /// an automatic reattach), never under a live terminal.
@@ -111,7 +120,24 @@ public final class SessionController {
     /// immediate reattach.
     @ObservationIgnored public var reconnectSchedule: ReconnectSchedule?
 
-    @ObservationIgnored public private(set) var surface: any TerminalSurface
+    /// The session's terminal, made on first use (``hasSurface``).
+    public var surface: any TerminalSurface {
+        if let made = madeSurface { return made }
+        let made = makeSurface()
+        made.delegate = self
+        madeSurface = made
+        return made
+    }
+    /// Whether ``surface`` has been made yet.
+    public var hasSurface: Bool { madeSurface != nil }
+    @ObservationIgnored private var madeSurface: (any TerminalSurface)?
+    @ObservationIgnored private var makeSurface: @MainActor () -> any TerminalSurface
+    /// The PTY size last given to the attached client, `nil` while none is
+    /// attached. Only a change of columns or rows is sent on: a different
+    /// pixel size alone (another backing scale) would reach the program as
+    /// a SIGWINCH for nothing (measured with the helper: the window size
+    /// it compares includes the pixels).
+    @ObservationIgnored public private(set) var appliedSize: PTYSize?
     /// Makes the surface that replaces ``surface`` at the next connect.
     @ObservationIgnored private var pendingSurface: (@MainActor () -> any TerminalSurface)?
     @ObservationIgnored public weak var delegate: (any SessionControllerDelegate)?
@@ -188,17 +214,18 @@ public final class SessionController {
     @ObservationIgnored public var attachGracePeriod: Duration = .seconds(1)
     @ObservationIgnored var footprintSampleInterval: Duration = .milliseconds(500)
 
+    /// `makeSurface` is called the first time the surface is needed
+    /// (``surface``), not here.
     public init(
         session: Session,
         backend: any PersistenceBackend,
-        makeSurface: @MainActor () -> any TerminalSurface,
+        makeSurface: @escaping @MainActor () -> any TerminalSurface,
         makeOutputFilter: @escaping @MainActor () -> any OutputFilter = { IdentityOutputFilter() }
     ) {
         self.session = session
         self.backend = backend
         self.makeOutputFilter = makeOutputFilter
-        self.surface = makeSurface()
-        surface.delegate = self
+        self.makeSurface = makeSurface
     }
 
     /// Replaces the surface the next time the controller connects (attach,
@@ -215,10 +242,16 @@ public final class SessionController {
     private func installPendingSurface() {
         guard let make = pendingSurface else { return }
         pendingSurface = nil
-        let old = surface
+        // Never made: the new renderer simply makes the first one.
+        guard let old = madeSurface else {
+            makeSurface = make
+            return
+        }
         old.delegate = nil
-        surface = make()
-        surface.delegate = self
+        let replacement = make()
+        replacement.delegate = self
+        madeSurface = replacement
+        makeSurface = make
         delegate?.sessionController(self, didReplaceSurface: old)
     }
 
@@ -297,6 +330,22 @@ public final class SessionController {
         isReconnectPaused = false
         if state.isDisconnected, retriesAutomatically { scheduleAutomaticReconnect() }
     }
+
+    /// What an automatic retry should do, asked before it connects.
+    public enum RetryPreflight: Sendable, Hashable {
+        /// Connect now.
+        case connect
+        /// Not now: keep to the schedule.
+        case wait
+        /// Stop retrying by itself and stay disconnected with this reason
+        /// (Reconnect still tries).
+        case stop(reason: String)
+    }
+
+    /// Asked before every automatic retry connects, when set: the app uses
+    /// it so a session whose pane was never shown never starts an
+    /// interactive sign-in by itself (docs/DESIGN.md section 6).
+    @ObservationIgnored public var retryPreflight: (@MainActor () async -> RetryPreflight)?
 
     /// Whether the last disconnect may be retried by itself (not after a
     /// refused sign-in or key, which only the user can fix).
@@ -495,8 +544,16 @@ public final class SessionController {
         let attachedAt = ContinuousClock.now
         var binding = Binding(generation: generation, handle: handle, attachedAt: attachedAt)
         filter = makeOutputFilter()
-        // The surface may have been resized while connecting.
-        handle.resize(currentPTYSize())
+        // The surface may have been resized while connecting: only a new
+        // grid is sent on (a different pixel size alone, say the window's
+        // backing scale against the main screen's, is not).
+        let now = currentPTYSize()
+        if now.columns != size.columns || now.rows != size.rows {
+            handle.resize(now)
+            appliedSize = now
+        } else {
+            appliedSize = size
+        }
         binding.outputTask = Task { [weak self] in
             for await batch in handle.output {
                 guard let self, self.generation == generation else { return }
@@ -549,6 +606,7 @@ public final class SessionController {
         }
         self.binding = binding
         setState(.attached)
+        if let appliedSize { delegate?.sessionController(self, didApplySize: appliedSize) }
     }
 
     private func endIfFinished(_ generation: Int) {
@@ -574,6 +632,7 @@ public final class SessionController {
             // out): nothing to resolve, and no retry until the user asks.
             binding?.cancelTasks()
             binding = nil
+            appliedSize = nil
             failure = reason
             stopRetrying()
             setState(.disconnected(reason: reason))
@@ -627,6 +686,7 @@ public final class SessionController {
     private func end(exitCode: ProgramExit?) {
         binding?.cancelTasks()
         binding = nil
+        appliedSize = nil
         finishFilter()
         setState(.ended(exitCode: exitCode))
     }
@@ -634,6 +694,7 @@ public final class SessionController {
     private func disconnect(reason: String) {
         binding?.cancelTasks()
         binding = nil
+        appliedSize = nil
         finishFilter()
         setState(.disconnected(reason: reason))
         scheduleAutomaticReconnect()
@@ -655,6 +716,23 @@ public final class SessionController {
                 try? await Task.sleep(for: delay)
                 guard !Task.isCancelled, let controller = self, controller.state.isDisconnected, !controller.isClosed
                 else { break }
+                if let preflight = controller.retryPreflight {
+                    let verdict = await preflight()
+                    guard !Task.isCancelled, controller.state.isDisconnected, !controller.isClosed else { break }
+                    switch verdict {
+                    case .connect: break
+                    case .wait:
+                        attempt += 1
+                        continue
+                    case .stop(let reason):
+                        controller.failure = reason
+                        controller.retriesAutomatically = false
+                        controller.setState(.disconnected(reason: reason))
+                        controller.reconnectTask = nil
+                        controller.isReconnecting = false
+                        return
+                    }
+                }
                 await controller.bind(controller.retryMode, quietly: true)
                 guard !Task.isCancelled else { return }
                 if !controller.state.isDisconnected { break }
@@ -694,6 +772,7 @@ public final class SessionController {
         binding?.cancelTasks()
         binding = nil
         filter = nil
+        appliedSize = nil
     }
 
     /// Detaches from the current process. With `killing`, the session is
@@ -737,7 +816,12 @@ extension SessionController: TerminalSurfaceDelegate {
     }
 
     public func surface(_ surface: any TerminalSurface, didResize size: GridSize) {
-        binding?.handle.resize(currentPTYSize())
+        guard let handle = binding?.handle else { return }
+        let new = currentPTYSize()
+        guard new.columns != appliedSize?.columns || new.rows != appliedSize?.rows else { return }
+        handle.resize(new)
+        appliedSize = new
+        delegate?.sessionController(self, didApplySize: new)
     }
 
     public func surface(_ surface: any TerminalSurface, didSetTitle title: String) {

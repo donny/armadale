@@ -32,37 +32,61 @@ struct SessionRuntimeSetup {
     /// Sessions outlive the app (the zmx backend). `false` for the plain PTY
     /// fallback.
     var isPersistent: Bool
+    /// Sessions alive although a listing left them out: their socket exists
+    /// in the runtime directory and they have no exit record
+    /// (``ZmxRuntime/sessionsAliveWithoutListing()``), read after a listing:
+    /// the helper's listing leaves out a daemon that does not answer and
+    /// still succeeds, and removes the stale socket of a killed one. None
+    /// without a runtime directory.
+    var socketSessions: @MainActor () -> Set<SessionID> = { [] }
 }
 
-/// Owns one ``SessionController`` (and its ``PaneView``) per session that
-/// has been shown, keyed by session ID. Controllers are created lazily when
-/// a pane first becomes visible and live until their session leaves the
-/// model, so switching tabs or closing a window never destroys a terminal.
-/// Also the controllers' delegate: it records titles, directories, runtime
-/// versions and respawns in the ``AppModel``.
+/// What a host's listing said (docs/DESIGN.md section 6), kept with why it
+/// failed: a host that needs the user (a sign-in, an unknown or changed
+/// host key, a refused key) gets no attach for a pane that is not on
+/// screen, so no hidden pane ever sits at a password prompt.
+enum HostListing: Sendable, Hashable {
+    case live(Set<SessionID>)
+    /// It could not be reached (or the listing failed otherwise): nothing
+    /// is known, nothing is ended.
+    case unreachable
+    /// Connecting needs the user.
+    case needsUser
+}
+
+/// Owns one ``SessionController`` per session in the model, from the
+/// moment the session exists until it leaves the model (docs/DESIGN.md
+/// section 8), and the ``PaneView`` of each session shown so far
+/// (``PaneViewStore``), made when its pane is first shown around the
+/// controller that already exists. Switching tabs or closing a window
+/// never destroys a terminal. Also the controllers' delegate
+/// (`SessionRegistry+Delegate.swift`): it records titles, directories,
+/// runtime versions, grid sizes and respawns in the ``AppModel``.
 ///
-/// At launch it asks the backend once which sessions are alive
-/// (``liveProbe``); ``RestorePolicy`` then decides per pane, when it is
-/// first shown: create (new this run), attach (restored, maybe alive),
-/// ended (restored, gone) or unavailable (restored persistent session while
-/// the persistent runtime could not be set up; left alone until
-/// ``retryPersistence()`` succeeds).
+/// The parts, by file:
+/// - this file: the controllers, how a session is started when its pane is
+///   shown (``startIfNeeded(_:)``), status, closing and ending sessions;
+/// - `PaneViewStore.swift`: the pane views;
+/// - `SessionRegistry+LaunchAttach.swift`: attaching restored sessions whose
+///   panes are not on screen once their location's first listing has
+///   answered, a few at a time (``LaunchAttachQueue``);
+/// - `SessionRegistry+Remote.swift`: one ``RemoteZmxBackend`` per host,
+///   each host's listing, host edits and removals;
+/// - `SessionRegistry+Delegate.swift`: the controllers' delegate;
+/// - `GridSizeRecorder.swift`: each session's last grid size, recorded
+///   when it has settled.
 ///
-/// Remote sessions (step 6) use one ``RemoteZmxBackend`` per host, made
-/// when first needed and replaced when the host's settings change. Each
-/// host referenced by a restored session is probed in the background; until
-/// its answer arrives its sessions show as starting, and a host that does
-/// not answer leaves them disconnected (retried by schedule), never ended.
-/// A session whose host was removed is unavailable: left running, never
-/// killed.
+/// A restored session that is not attached (its location has not answered
+/// yet, its host needs the user, it has no saved size) shows the launch
+/// listing's answer as its status: alive → running, unanswered → starting.
 @MainActor
 @Observable
 final class SessionRegistry {
-    @ObservationIgnored private let model: AppModel
+    @ObservationIgnored let model: AppModel
     /// Preferences, themes and renderers for every pane.
     @ObservationIgnored let settings: AppSettings
-    @ObservationIgnored private var runtime: SessionRuntimeSetup
-    @ObservationIgnored private var policy: RestorePolicy
+    @ObservationIgnored var runtime: SessionRuntimeSetup
+    @ObservationIgnored var policy: RestorePolicy
     /// Shown in window subtitles while sessions do not outlive the app.
     private(set) var persistenceWarning: String?
     /// Sets the persistent runtime up again (Retry on an unavailable pane);
@@ -83,38 +107,76 @@ final class SessionRegistry {
     /// Sessions recorded by an earlier run of the app. They are attached to,
     /// never created: a session that is gone must show as ended, not be
     /// silently replaced by a fresh shell.
-    @ObservationIgnored private var restoredSessionIDs: Set<SessionID>
-    /// Restored sessions made by the persistent runtime (captured at launch:
-    /// a session being closed has already left the model).
-    @ObservationIgnored private let restoredPersistentIDs: Set<SessionID>
-    /// The `liveSessions()` call made at launch (and again after a
+    @ObservationIgnored var restoredSessionIDs: Set<SessionID>
+    /// One controller per session in the model. Observed, so status glyphs
+    /// follow a controller made after they were first drawn.
+    var controllers: [SessionID: SessionController] = [:]
+    /// The pane views of the sessions shown so far.
+    @ObservationIgnored let paneViews = PaneViewStore()
+    /// The local `liveSessions()` call made at launch (and again after a
     /// successful retry); `nil` result if it failed.
     @ObservationIgnored private(set) var liveProbe: Task<Set<SessionID>?, Never>
-    /// The probe's answer once it has arrived. Observed, like `panes`, so
-    /// status glyphs update when it arrives and when a pane is first shown.
-    private var liveAtLaunch: Set<SessionID>?
-    private var panes: [SessionID: PaneView] = [:]
+    /// The local listing's answer once it has arrived (`nil` while it has
+    /// not, or when it failed), and the sessions whose socket existed then.
+    /// Observed: the status of a session that is not attached comes from
+    /// them.
+    private(set) var localListed: Set<SessionID>?
+    private(set) var localSockets: Set<SessionID> = []
     /// Sessions in the model as last observed, and sessions already ended
     /// for good here (closed or retired by a respawn).
-    @ObservationIgnored private var knownSessionIDs: Set<SessionID>
-    @ObservationIgnored private var finishedSessionIDs: Set<SessionID> = []
-    /// Hosts of remote sessions as last observed: a session closed from
-    /// the model is gone from it by the time it is ended here.
-    @ObservationIgnored private var lastHosts: [SessionID: HostID] = [:]
-    @ObservationIgnored private var pruneTask: Task<Void, Never>?
+    @ObservationIgnored var knownSessionIDs: Set<SessionID>
+    @ObservationIgnored var finishedSessionIDs: Set<SessionID> = []
+    @ObservationIgnored private var sessionsTask: Task<Void, Never>?
     @ObservationIgnored private var rendererTask: Task<Void, Never>?
-    @ObservationIgnored private var hostsTask: Task<Void, Never>?
+    @ObservationIgnored var hostsTask: Task<Void, Never>?
     /// SSH support; `nil` when remote sessions are off (tests).
     @ObservationIgnored let remote: RemoteSessionSupport?
     /// One backend per host, made on first use.
-    @ObservationIgnored private var remoteBackends: [HostID: RemoteZmxBackend] = [:]
-    /// Each host's live sessions, asked once per backend (in the background).
-    @ObservationIgnored private var remoteProbes: [HostID: Task<Set<SessionID>?, Never>] = [:]
-    /// The answers that have arrived (observed, like ``liveAtLaunch``); a
-    /// host whose probe failed has none.
-    private var remoteLive: [HostID: Set<SessionID>] = [:]
+    @ObservationIgnored var remoteBackends: [HostID: RemoteZmxBackend] = [:]
+    /// Each host's listing, asked once per backend (in the background), or
+    /// again after a sign-in or a host edit.
+    @ObservationIgnored var hostListingTasks: [HostID: Task<HostListing, Never>] = [:]
+    /// The answers that have arrived (observed, like ``localListed``).
+    var hostListings: [HostID: HostListing] = [:]
+    /// Hosts whose listing needed the user: listed again once one of their
+    /// sessions connects (a shown pane signed in).
+    @ObservationIgnored var hostsAwaitingUser: Set<HostID> = []
+    /// The launch attaches still to make (``LaunchAttachQueue``).
+    @ObservationIgnored var launchQueue = LaunchAttachQueue()
+    /// Restored sessions whose start was asked for by their pane being
+    /// shown (``startIfNeeded(_:)``): the launch pass leaves them alone.
+    @ObservationIgnored var startRequested: Set<SessionID> = []
+    /// Starts by ``startIfNeeded(_:)`` still waiting or connecting: one per
+    /// session, however often its pane is shown meanwhile.
+    @ObservationIgnored var startsInProgress: Set<SessionID> = []
+    /// The launch pass runs only once the app has opened its windows
+    /// (``startLaunchPass()``), so panes about to be shown start at their
+    /// laid-out size; the listings may answer before that.
+    @ObservationIgnored var isLaunchPassStarted = false
+    /// The local listing has answered (``localListed`` is its answer, `nil`
+    /// if it failed).
+    @ObservationIgnored var hasLocalAnswer = false
+    /// Hidden sessions on a host that needs the user, whose automatic
+    /// retries stopped (``retryPreflight(for:)``): the relisting after a
+    /// sign-in reconnects them.
+    @ObservationIgnored var waitingForUser: Set<SessionID> = []
+    /// Sessions of ``waitingForUser`` that reconnected once when their pane
+    /// was shown (``startIfNeeded(_:)``); never twice by itself.
+    @ObservationIgnored var reconnectedWhenShown: Set<SessionID> = []
+    /// End Sessions and Quit is ending sessions: their ends say nothing
+    /// about a host. While it runs this also suppresses the relist for an
+    /// end the app did not cause (an attach finding its session gone at the
+    /// same moment); harmless, since the app quits right after.
+    @ObservationIgnored var isEndingAllSessions = false
+    /// The renderer each controller's surface was made with, and the one a
+    /// pending replacement will use, for sessions whose pane view has not
+    /// been made yet (a pane view keeps its own).
+    @ObservationIgnored var surfaceRenderers: [SessionID: (current: String, pending: String?)] = [:]
+    /// Each session's last grid size, written to the model once settled.
+    @ObservationIgnored let gridSizes: GridSizeRecorder
 
     static let persistenceWarningText = "Sessions won’t survive quitting"
+    static let unavailableReason = "Persistent sessions are unavailable."
 
     /// The backend new sessions use.
     var backend: any PersistenceBackend { runtime.backend }
@@ -129,26 +191,24 @@ final class SessionRegistry {
         self.remote = remote
         self.policy = RestorePolicy(backendIsPersistent: runtime.isPersistent)
         self.restoredSessionIDs = restoredSessionIDs
-        self.restoredPersistentIDs = Set(model.sessions.filter {
-            restoredSessionIDs.contains($0.id) && RestorePolicy.isPersistent($0)
-        }.map(\.id))
         self.persistenceWarning = runtime.isPersistent ? nil : Self.persistenceWarningText
         self.knownSessionIDs = Set(model.sessions.map(\.id))
-        self.lastHosts = Dictionary(
-            model.sessions.compactMap { session in session.remoteHostID.map { (session.id, $0) } },
-            uniquingKeysWith: { first, _ in first })
-        liveProbe = Self.probe(runtime.backend)
-        awaitProbe()
-        observeRemovedSessions()
+        self.liveProbe = Self.probe(runtime.backend)
+        self.gridSizes = GridSizeRecorder(
+            current: { [model] in model.session($0)?.gridSize },
+            write: { [model] in model.setGridSizes($0) })
+        for session in model.sessions { ensureController(for: session.id) }
+        awaitLocalProbe()
+        observeSessions()
         observeRenderer()
         observeHosts()
-        // Hosts of restored sessions are asked in the background; nothing
+        // Hosts of restored sessions are listed in the background; nothing
         // waits for them.
         let hosts = Set(model.sessions.filter { restoredSessionIDs.contains($0.id) }.compactMap(\.remoteHostID))
-        for host in hosts.sorted() { _ = remoteProbe(for: host) }
+        for host in hosts.sorted() { _ = hostListing(for: host) }
     }
 
-    private static func probe(_ backend: any PersistenceBackend) -> Task<Set<SessionID>?, Never> {
+    static func probe(_ backend: any PersistenceBackend) -> Task<Set<SessionID>?, Never> {
         Task {
             do {
                 return try await backend.liveSessions()
@@ -159,11 +219,32 @@ final class SessionRegistry {
         }
     }
 
-    private func awaitProbe() {
+    /// When the local listing answers: its answer (with the sockets present
+    /// then) becomes the status of restored sessions not attached yet, and
+    /// the launch pass runs (``runLocalLaunchPass()``).
+    func awaitLocalProbe() {
         let probe = liveProbe
         Task { [weak self] in
-            let live = await probe.value
-            self?.liveAtLaunch = live
+            let listed = await probe.value
+            guard let self, self.liveProbe == probe else { return }
+            self.localSockets = self.runtime.isPersistent ? self.runtime.socketSessions() : []
+            self.localListed = listed
+            self.hasLocalAnswer = true
+            if self.isLaunchPassStarted { await self.runLocalLaunchPass() }
+        }
+    }
+
+    /// The app has opened its windows (their panes on screen have asked to
+    /// start): the launch pass runs now for every location whose listing
+    /// has answered, and for the others when theirs does. Tests call it
+    /// themselves.
+    func startLaunchPass() {
+        guard !isLaunchPassStarted else { return }
+        isLaunchPassStarted = true
+        Task { [weak self] in
+            guard let self else { return }
+            if self.hasLocalAnswer { await self.runLocalLaunchPass() }
+            for host in self.hostListings.keys.sorted() { await self.runHostLaunchPass(host: host) }
         }
     }
 
@@ -180,112 +261,151 @@ final class SessionRegistry {
         }
     }
 
-    /// The pane view for `sessionID`, created (with its controller) on first use.
-    func paneView(for sessionID: SessionID) -> PaneView? {
-        if let pane = panes[sessionID] { return pane }
-        guard let session = model.session(sessionID) else { return nil }
+    // MARK: Controllers
+
+    /// The session's controller, if it has one (every session in the model
+    /// does, once the registry has seen it).
+    func controller(for sessionID: SessionID) -> SessionController? {
+        controllers[sessionID]
+    }
+
+    /// The controller of `sessionID`, made if the session is in the model
+    /// and has none yet. A restored session whose runtime is not available
+    /// (the persistent runtime, its host) is marked unavailable at once, a
+    /// restored plain one (made by the fallback, or a plain ssh shell) as
+    /// ended; automatic retries start paused while its workspace's window is
+    /// closed (``setWindowOpen(_:for:)``).
+    @discardableResult
+    func ensureController(for sessionID: SessionID) -> SessionController? {
+        if let existing = controllers[sessionID] { return existing }
+        guard !finishedSessionIDs.contains(sessionID), let session = model.session(sessionID) else { return nil }
+        let host = session.remoteHostID
+        let remoteBackend = host.flatMap { remoteBackend(for: $0) }
+        let backend: any PersistenceBackend = if host == nil {
+            runtime.backend
+        } else {
+            remoteBackend ?? UnavailableBackend(reason: unreachableHostReason)
+        }
+        let model = model
         let settings = settings
-        let factory = settings.surfaceFactory
-        let remoteBackend = session.remoteHostID.flatMap { remoteBackend(for: $0) }
         var makeOutputFilter = runtime.makeOutputFilter
-        if session.remoteHostID != nil { makeOutputFilter = { ZmxOutputFilter() } }
-        let paneThemeID = model.pane(showing: sessionID)?.themeID
+        if host != nil { makeOutputFilter = { ZmxOutputFilter() } }
         let controller = SessionController(
             session: session,
-            backend: remoteBackend ?? runtime.backend,
-            makeSurface: {
-                factory.makeSurface(appearance: settings.terminalAppearance(
-                    for: NSApp.effectiveAppearance, paneThemeID: paneThemeID))
+            backend: backend,
+            makeSurface: { [weak self] in
+                // The pane's theme and the renderer as they are when the
+                // surface is first needed.
+                let factory = settings.surfaceFactory
+                self?.surfaceRenderers[sessionID] = (factory.id, nil)
+                return factory.makeSurface(appearance: settings.terminalAppearance(
+                    for: NSApp.effectiveAppearance, paneThemeID: model.pane(showing: sessionID)?.themeID))
             },
             makeOutputFilter: makeOutputFilter)
         controller.delegate = self
-        if session.remoteHostID != nil {
+        controllers[sessionID] = controller
+        let restored = restoredSessionIDs.contains(sessionID)
+        if host != nil {
             controller.reconnectSchedule = remote?.reconnectSchedule
-            // Never reached through the local backend.
-            if remoteBackend == nil { controller.markUnavailable(reason: unreachableHostReason(for: session)) }
+            controller.retryPreflight = { [weak self, weak controller] in
+                guard let self, let controller else { return .connect }
+                return await self.retryPreflight(for: controller)
+            }
+            if remoteBackend == nil {
+                controller.markUnavailable(reason: unreachableHostReason)
+            } else if restored, !RestorePolicy.isPersistent(session) {
+                // A plain ssh shell from an earlier run cannot be reattached.
+                controller.markEnded()
+            }
+        } else if restored, policy.action(for: session, restored: true, live: nil) == .markUnavailable {
+            controller.markUnavailable(reason: Self.unavailableReason)
         }
-        let pane = PaneView(
-            controller: controller, settings: settings, rendererID: factory.id,
-            theme: .session(of: controller, in: model) { [weak self] in self?.split(pane: $0, axis: $1) })
-        pane.titleProvider = { [weak self, weak controller] in
-            guard let self, let controller else { return "Shell" }
-            return self.displayName(of: controller.session)
+        if let place = model.place(of: sessionID), model.workspace(place.workspace)?.window?.isOpen == false {
+            controller.pauseAutomaticReconnect()
         }
-        pane.onRetryPersistence = { [weak self] in self?.retryPersistence() }
-        pane.headerSource = { [weak self, weak controller] in
-            guard let self, let controller else { return PaneHeaderModel(status: .ended, title: "Shell", directory: nil) }
-            return self.headerModel(for: controller.session.id)
-        }
-        panes[sessionID] = pane
-        return pane
-    }
-
-    func controller(for sessionID: SessionID) -> SessionController? {
-        panes[sessionID]?.controller
+        return controller
     }
 
     /// Connects the session's controller if it has not been yet, as
-    /// ``RestorePolicy`` says.
+    /// ``RestorePolicy`` says: its pane is on screen (``ContentViewController``
+    /// calls this after layout, so it starts at the pane's real size). A
+    /// restored session waiting in the launch queue jumps it.
     func startIfNeeded(_ sessionID: SessionID) {
-        guard let controller = controller(for: sessionID), controller.state == .detached else { return }
-        let restored = restoredSessionIDs.contains(sessionID)
-        if let host = controller.session.remoteHostID {
-            startRemote(controller, host: host, restored: restored)
+        guard let controller = ensureController(for: sessionID) else { return }
+        makeUnavailableIfHostRemoved(controller)
+        // A hidden session whose retries stopped because its host needed the
+        // user: its pane is on screen now, so it reconnects once by itself
+        // (and may prompt there).
+        if waitingForUser.contains(sessionID), controller.state.isDisconnected, !controller.isReconnecting,
+           reconnectedWhenShown.insert(sessionID).inserted {
+            Task { await controller.reconnect() }
             return
         }
-        guard restored else {
+        guard controller.state == .detached else { return }
+        guard restoredSessionIDs.contains(sessionID) else {
             Task { await controller.start(.create) }
+            return
+        }
+        // Shown again while its start waits for the listing: that start
+        // stands (one counted start per session).
+        guard startsInProgress.insert(sessionID).inserted else { return }
+        startRequested.insert(sessionID)
+        let lane = Self.lane(of: controller.session)
+        launchQueue.started(sessionID, in: lane)
+        if let host = controller.session.remoteHostID {
+            let listing = hostListing(for: host)
+            Task {
+                let answer = await listing.value
+                if controller.state == .detached {
+                    // An unanswered listing (host down) or one that needs
+                    // the user attaches anyway: the pane is on screen, so a
+                    // sign-in can be answered there, and an unreachable
+                    // host leaves it disconnected and retried, never ended.
+                    if case .live(let live) = answer, !live.contains(sessionID) {
+                        await markEnded([controller])
+                    } else {
+                        await controller.start(.attach)
+                    }
+                }
+                startsInProgress.remove(sessionID)
+                launchStartFinished(sessionID, lane: lane, controller: controller, kind: .attach)
+            }
             return
         }
         let probe = liveProbe
         Task {
-            let live = await probe.value
-            guard controller.state == .detached else { return }
-            switch policy.action(for: controller.session, restored: true, live: live) {
-            case .create, .attach: await controller.start(.attach)
-            case .markEnded: await markEnded(controller)
-            case .markUnavailable: controller.markUnavailable(reason: "Persistent sessions are unavailable.")
+            let listed = await probe.value
+            if controller.state == .detached {
+                let alive = listed.map { $0.union(runtime.socketSessions()) }
+                switch policy.action(for: controller.session, restored: true, live: alive) {
+                case .create, .attach: await controller.start(.attach)
+                case .markEnded: await markEnded([controller])
+                case .markUnavailable: controller.markUnavailable(reason: Self.unavailableReason)
+                }
             }
+            startsInProgress.remove(sessionID)
+            launchStartFinished(sessionID, lane: lane, controller: controller, kind: .attach)
         }
     }
 
-    /// ``startIfNeeded(_:)`` for a session on `host`: created if new;
-    /// attached if restored and its host's probe did not find it gone. One
-    /// that was never persistent (a plain ssh shell) cannot be reattached.
-    private func startRemote(_ controller: SessionController, host: HostID, restored: Bool) {
-        guard remoteBackend(for: host) != nil else {
-            controller.markUnavailable(reason: unreachableHostReason(for: controller.session))
-            return
+    /// Shows restored sessions that are gone as ended, with the exit
+    /// statuses their backend recorded (one call for all of them, a single
+    /// command on a host); a clean exit then closes its pane
+    /// (``closePaneIfEndedCleanly(_:exit:)``). Only controllers still
+    /// detached are touched.
+    func markEnded(_ controllers: [SessionController]) async {
+        var byBackend: [ObjectIdentifier: (backend: any PersistenceBackend, controllers: [SessionController])] = [:]
+        for controller in controllers {
+            let backend = controller.activeBackend
+            let key = ObjectIdentifier(backend as AnyObject)
+            byBackend[key, default: (backend, [])].controllers.append(controller)
         }
-        guard restored else {
-            Task { await controller.start(.create) }
-            return
-        }
-        guard RestorePolicy.isPersistent(controller.session) else {
-            controller.markEnded()
-            return
-        }
-        let probe = remoteProbe(for: host)
-        Task {
-            let live = await probe.value
-            guard controller.state == .detached else { return }
-            // An unanswered probe (host down) attaches anyway: the attach
-            // then fails as unreachable and is retried, never ended.
-            if let live, !live.contains(controller.session.id) {
-                await markEnded(controller)
-            } else {
-                await controller.start(.attach)
+        for group in byBackend.values {
+            let statuses = await group.backend.recordedExitStatuses(of: Set(group.controllers.map(\.session.id)))
+            for controller in group.controllers where controller.state == .detached {
+                controller.markEnded(exitCode: statuses[controller.session.id])
             }
         }
-    }
-
-    /// Shows a restored session that is gone as ended, with the exit status
-    /// its backend recorded (a clean exit then closes its pane: see
-    /// ``closePaneIfEndedCleanly(_:exitStatus:)``).
-    private func markEnded(_ controller: SessionController) async {
-        let id = controller.session.id
-        let status = await controller.activeBackend.recordedExitStatuses(of: [id])[id]
-        controller.markEnded(exitCode: status)
     }
 
     // MARK: Clean exits
@@ -332,93 +452,82 @@ final class SessionRegistry {
         return closePanesOfSessionsThatEndedCleanly(statuses)
     }
 
-    /// Ends a session whose pane was closed and forgets it. A session that
-    /// was never shown has no controller, but may still be alive in the
-    /// backend (restored, not yet attached), so it is killed there too.
-    /// Unavailable sessions cannot be reached, so they are left running.
+    // MARK: Closing and ending
+
+    /// Ends a session whose pane was closed and forgets it, through its
+    /// controller (``SessionController/close()``), which kills it in its
+    /// backend whatever its state: a restored session that was never
+    /// attached may still be alive. Unavailable sessions (no persistent
+    /// runtime, a removed host) cannot be reached and are left running.
     func close(_ sessionID: SessionID) {
         guard finishedSessionIDs.insert(sessionID).inserted else { return }
         reportedDirectories.remove(sessionID)
-        let wasRestored = restoredSessionIDs.remove(sessionID) != nil
-        if let pane = panes.removeValue(forKey: sessionID) {
-            pane.removeFromSuperview()
-            let controller = pane.controller
-            let retires = !controller.state.isUnavailable
-            Task { [weak self] in
-                await controller.close()
-                if retires { self?.onSessionRetired?(sessionID) }
-            }
-        } else {
-            let session = model.session(sessionID)
-            if let host = session?.remoteHostID ?? lastHosts[sessionID] {
-                // A session on a removed host cannot be reached: left alone.
-                guard let backend = remoteBackend(for: host) else { return }
-                Task { [weak self] in
-                    try? await backend.kill(sessionID)
-                    self?.onSessionRetired?(sessionID)
-                }
-                return
-            }
-            if wasRestored, !runtime.isPersistent, restoredPersistentIDs.contains(sessionID) {
-                return // unavailable: cannot be reached, never killed blindly
-            }
-            let backend = runtime.backend
-            Task { [weak self] in
-                try? await backend.kill(sessionID)
-                self?.onSessionRetired?(sessionID)
-            }
+        restoredSessionIDs.remove(sessionID)
+        startRequested.remove(sessionID)
+        waitingForUser.remove(sessionID)
+        reconnectedWhenShown.remove(sessionID)
+        surfaceRenderers[sessionID] = nil
+        launchQueue.remove(sessionID)
+        gridSizes.forget(sessionID)
+        paneViews.remove(sessionID)?.removeFromSuperview()
+        guard let controller = controllers.removeValue(forKey: sessionID) else { return }
+        makeUnavailableIfHostRemoved(controller)
+        let retires = !controller.state.isUnavailable
+        Task { [weak self] in
+            await controller.close()
+            if retires { self?.onSessionRetired?(sessionID) }
         }
     }
 
     /// Disconnects every client at once without ending any session; used
-    /// when the app quits (synchronous, so quitting never waits).
+    /// when the app quits (synchronous, so quitting never waits). The grid
+    /// sizes not yet recorded are written to the model first, so the save
+    /// at quit has them.
     func detachAllNow() {
-        for pane in panes.values where pane.controller.state.isAttached {
-            pane.controller.detachNow()
+        gridSizes.flush()
+        for controller in controllers.values where controller.state.isAttached {
+            controller.detachNow()
         }
     }
 
-    /// End Sessions and Quit (docs/DESIGN.md section 8): ends every
-    /// session that may be alive, all at once. Shown panes go through their
-    /// controllers (``SessionController/close()``: the backend's kill, then
-    /// the client); sessions never shown are killed in their backend
-    /// (restored ones may be alive). Unreachable sessions are left: those of
-    /// a removed host, and persistent sessions while the persistent runtime
-    /// is unavailable. Each kill is bounded by its backend's command
-    /// timeout, so this returns within the longest of them. Panes stay in
-    /// place, ended; the model is not changed. `only` limits it to those
-    /// sessions (a second pass); returns the sessions it went through.
+    /// Writes the grid sizes not yet recorded to the model now (before the
+    /// synchronous save at quit).
+    func flushGridSizes() {
+        gridSizes.flush()
+    }
+
+    /// End Sessions and Quit (docs/DESIGN.md section 8): ends every session
+    /// that may be alive, all at once, through its controller
+    /// (``SessionController/close()``: the backend's kill, then the client),
+    /// attached or not. Unreachable sessions are left: those of a removed
+    /// host, and persistent sessions while the persistent runtime is
+    /// unavailable (their controllers are unavailable and kill nothing).
+    /// Each kill is bounded by its backend's command timeout, so this
+    /// returns within the longest of them. Panes stay in place, ended; the
+    /// model is not changed. `only` limits it to those sessions (a second
+    /// pass); returns the sessions it went through.
     @discardableResult
     func endAllSessions(only: Set<SessionID>? = nil) async -> Set<SessionID> {
-        let ids = only ?? Set(model.sessions.map(\.id)).union(panes.keys)
+        let ids = only ?? Set(model.sessions.map(\.id)).union(controllers.keys)
+        isEndingAllSessions = true
+        defer { isEndingAllSessions = false }
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
-                if let controller = panes[id]?.controller {
-                    group.addTask { await controller.close() }
-                } else if let session = model.session(id) {
-                    if let host = session.remoteHostID {
-                        guard let backend = remoteBackend(for: host) else { continue }
-                        group.addTask { try? await backend.kill(id) }
-                    } else if runtime.isPersistent {
-                        let backend = runtime.backend
-                        group.addTask { try? await backend.kill(id) }
-                    }
-                }
+                guard let controller = controllers[id] ?? ensureController(for: id) else { continue }
+                makeUnavailableIfHostRemoved(controller)
+                group.addTask { await controller.close() }
             }
         }
         return ids
     }
 
-    /// Sessions that may be running although an End pass went through
-    /// `ended`: ones it did not cover (a tab opened meanwhile), and covered
-    /// ones whose pane runs again (a Respawn meanwhile). A covered session
-    /// that was never shown is judged gone: its launch-probe status is
-    /// stale after the kill.
-    func sessionsRunning(after ended: Set<SessionID>) -> Set<SessionID> {
-        Set(model.sessions.map(\.id).filter { id in
-            guard ended.contains(id) else { return CloseRisk.mayBeRunning(riskItem(for: id)) }
-            return panes[id] != nil && CloseRisk.mayBeRunning(riskItem(for: id))
-        })
+    /// Sessions that may still be running (``CloseRisk/mayBeRunning(_:)``),
+    /// asked after an End pass: ones it did not cover (a tab opened
+    /// meanwhile) and covered ones whose pane runs again (a Respawn
+    /// meanwhile) are among them; a covered session shows its controller's
+    /// state like any other, so one it ended is not.
+    func sessionsStillRunning() -> Set<SessionID> {
+        Set(model.sessions.map(\.id).filter { CloseRisk.mayBeRunning(riskItem(for: $0)) })
     }
 
     /// Whether local sessions outlive the app in this run (the persistent
@@ -428,14 +537,21 @@ final class SessionRegistry {
     // MARK: Persistence availability
 
     /// Retry on an unavailable pane: sets the persistent runtime up again
-    /// and, if that works, attaches every unavailable session through it.
-    /// Sessions created as plain PTY sessions meanwhile stay as they are.
+    /// and, if that works, brings every unavailable session up through it,
+    /// as at launch: a session whose pane is on screen is attached at once;
+    /// the others follow the launch pass once the new listing has answered
+    /// (attached at their saved size, left until shown, or ended). Sessions
+    /// created as plain PTY sessions meanwhile stay as they are.
     func retryPersistence() {
         // Remote sessions only need their host back.
-        for pane in panes.values where pane.controller.state.isUnavailable {
-            guard let host = pane.controller.session.remoteHostID, let backend = remoteBackend(for: host) else { continue }
-            pane.controller.useBackend(backend, makeOutputFilter: { ZmxOutputFilter() })
-            startIfNeeded(pane.controller.session.id)
+        for controller in controllers.values where controller.state.isUnavailable {
+            guard let host = controller.session.remoteHostID, let backend = remoteBackend(for: host) else { continue }
+            controller.useBackend(backend, makeOutputFilter: { ZmxOutputFilter() })
+            if paneViews.isShown(controller.session.id) {
+                startIfNeeded(controller.session.id)
+            } else if case .live? = hostListings[host] {
+                Task { await runHostLaunchPass(host: host) }
+            }
         }
         guard !runtime.isPersistent else { return }
         guard let setup = setUpPersistentRuntime?(), setup.isPersistent else {
@@ -445,32 +561,41 @@ final class SessionRegistry {
         runtime = setup
         policy = RestorePolicy(backendIsPersistent: true)
         persistenceWarning = nil
+        localListed = nil
+        localSockets = []
         liveProbe = Self.probe(setup.backend)
-        awaitProbe()
-        for pane in panes.values where pane.controller.state.isUnavailable && pane.controller.session.remoteHostID == nil {
-            pane.controller.useBackend(setup.backend, makeOutputFilter: setup.makeOutputFilter)
-            startIfNeeded(pane.controller.session.id)
+        let local = controllers.values.filter { $0.state.isUnavailable && $0.session.remoteHostID == nil }
+        for controller in local {
+            controller.useBackend(setup.backend, makeOutputFilter: setup.makeOutputFilter)
         }
+        for controller in local where paneViews.isShown(controller.session.id) {
+            startIfNeeded(controller.session.id)
+        }
+        // The rest when the new listing answers.
+        awaitLocalProbe()
+    }
+
+    /// Whether `controller`'s session runs on a host that is no longer in
+    /// the model (or remote sessions are off in this run).
+    func isOnRemovedHost(_ controller: SessionController) -> Bool {
+        guard let host = controller.session.remoteHostID else { return false }
+        return remote == nil || model.host(host) == nil
+    }
+
+    /// A session on a removed host is never killed: before anything could
+    /// reach its backend, the controller gets one that refuses everything
+    /// (``observeHosts()`` does the same a turn later).
+    func makeUnavailableIfHostRemoved(_ controller: SessionController) {
+        guard isOnRemovedHost(controller), !(controller.activeBackend is UnavailableBackend) else { return }
+        controller.detachAsUnavailable(reason: unreachableHostReason, backend: UnavailableBackend(reason: unreachableHostReason))
     }
 
     // MARK: Ended sessions
 
-    /// Whether `sessionID` is known to have ended: its controller says so,
-    /// or it was restored, not shown yet, and the policy calls it gone
-    /// (never an unavailable one).
-    private func isEnded(_ sessionID: SessionID) -> Bool {
-        if let controller = controller(for: sessionID) {
-            if controller.state.isEnded { return true }
-            guard controller.state == .detached else { return false }
-        }
-        guard let session = model.session(sessionID) else { return false }
-        let restored = restoredSessionIDs.contains(sessionID)
-        if let host = session.remoteHostID {
-            guard restored, model.host(host) != nil else { return false }
-            guard RestorePolicy.isPersistent(session) else { return true }
-            return remoteLive[host].map { !$0.contains(sessionID) } ?? false
-        }
-        return policy.mayRespawnUnshown(session, restored: restored, live: liveAtLaunch)
+    /// Whether `sessionID` is known to have ended (its controller says so;
+    /// never an unavailable or disconnected one).
+    func isEnded(_ sessionID: SessionID) -> Bool {
+        controllers[sessionID]?.state.isEnded == true
     }
 
     /// Whether any pane of the workspace shows an ended session.
@@ -504,7 +629,7 @@ final class SessionRegistry {
                     return
                 }
                 guard let self else { return }
-                self.remoteLive[host] = live
+                self.hostListings[host] = .live(live)
                 for sessionID in candidates where !live.contains(sessionID) && self.isEnded(sessionID) {
                     self.respawn(sessionID)
                 }
@@ -512,43 +637,51 @@ final class SessionRegistry {
         }
     }
 
+    /// Respawns an ended session. A session whose pane view was never made
+    /// creates the fresh session at its saved size (its pane would be shown
+    /// at it), not at a renderer's default size; one with a pane view
+    /// creates at its terminal's grid, which only that pane's layout sets.
     private func respawn(_ sessionID: SessionID) {
-        guard let controller = paneView(for: sessionID)?.controller else { return }
-        controller.markEnded() // a pane never shown is still detached
+        guard let controller = controllers[sessionID], controller.state.isEnded else { return }
+        if paneViews.view(for: sessionID) == nil, let size = model.session(sessionID)?.gridSize {
+            controller.surface.setGridSize(columns: size.columns, rows: size.rows)
+        }
         Task { await controller.respawn() }
     }
 
     // MARK: Status
 
-    /// The status of one session, from its controller if it has been shown,
-    /// else from the launch probe.
+    /// The status of one session, from its controller; for a restored
+    /// session that is not attached (its location has not answered, its
+    /// host needs the user, or it has no saved size yet), from its
+    /// location's listing at launch: alive → running, else starting.
     func status(of sessionID: SessionID) -> SessionStatus {
-        if let controller = panes[sessionID]?.controller {
-            switch controller.state {
-            case .attached: return .running
-            case .ended: return .ended
-            case .disconnected: return .disconnected
-            case .unavailable: return .unavailable
-            case .attaching: return .pending
-            case .detached: break
-            }
+        guard let controller = controllers[sessionID] else {
+            return model.session(sessionID) == nil ? .ended : .pending
         }
-        guard let session = model.session(sessionID) else { return .ended }
-        let restored = restoredSessionIDs.contains(sessionID)
+        // A host removed a moment ago: its controllers are hung up on the
+        // next turn (``observeHosts()``), but the session is unreachable now.
+        if isOnRemovedHost(controller) { return .unavailable }
+        switch controller.state {
+        case .attached: return .running
+        case .ended: return .ended
+        case .disconnected: return .disconnected
+        case .unavailable: return .unavailable
+        case .attaching: return .pending
+        case .detached: return notAttachedStatus(of: controller.session)
+        }
+    }
+
+    /// The one place the launch listing still gives a status: a restored
+    /// session that is not attached. Its answer is not refreshed until the
+    /// session is attached (docs/DESIGN.md section 1).
+    private func notAttachedStatus(of session: Session) -> SessionStatus {
+        guard restoredSessionIDs.contains(session.id) else { return .pending }
         if let host = session.remoteHostID {
-            guard model.host(host) != nil, remote != nil else { return .unavailable }
-            guard restored else { return .pending }
-            guard RestorePolicy.isPersistent(session) else { return .ended }
-            // Not probed yet, or the host did not answer: starting.
-            guard let live = remoteLive[host] else { return .pending }
-            return live.contains(sessionID) ? .running : .ended
+            guard case .live(let live)? = hostListings[host] else { return .pending }
+            return live.contains(session.id) ? .running : .pending
         }
-        guard restored else { return .pending }
-        switch policy.action(for: session, restored: true, live: liveAtLaunch) {
-        case .markEnded: return .ended
-        case .markUnavailable: return .unavailable
-        case .create, .attach: return liveAtLaunch?.contains(sessionID) == true ? .running : .pending
-        }
+        return localSockets.contains(session.id) || localListed?.contains(session.id) == true ? .running : .pending
     }
 
     /// The summary of several sessions (a tab's panes).
@@ -580,151 +713,12 @@ final class SessionRegistry {
         QuitDecision.runningCount(model.sessions.map { riskItem(for: $0.id) })
     }
 
-    private func riskItem(for id: SessionID) -> CloseRisk.Item {
-        CloseRisk.Item(
+    func riskItem(for id: SessionID) -> CloseRisk.Item {
+        let controller = controllers[id]
+        return CloseRisk.Item(
             status: status(of: id),
-            mayExist: restoredSessionIDs.contains(id) || panes[id].map { $0.controller.state != .detached } ?? false,
-            isRunning: panes[id]?.controller.isRunning ?? false)
-    }
-
-    // MARK: Remote hosts
-
-    /// Why a remote session cannot be reached at all: its host was removed
-    /// (or remote sessions are off in this run).
-    static let hostRemovedReason = "The host this session runs on was removed from Settings › Hosts."
-
-    private func unreachableHostReason(for session: Session) -> String {
-        remote == nil ? "Remote sessions are not available in this run." : Self.hostRemovedReason
-    }
-
-    /// The backend for `host`, made on first use; `nil` if the host is gone
-    /// (or remote sessions are off).
-    func remoteBackend(for host: HostID) -> RemoteZmxBackend? {
-        guard let remote, let settings = model.host(host) else { return nil }
-        if let existing = remoteBackends[host], existing.host == settings { return existing }
-        let backend = remote.makeBackend(for: settings)
-        let versions = Dictionary(
-            model.sessions.filter { $0.remoteHostID == host }.compactMap { session in session.runtimeVersion.map { (session.id, $0) } },
-            uniquingKeysWith: { _, last in last })
-        Task { await backend.noteRuntimeVersions(versions) }
-        remoteBackends[host] = backend
-        return backend
-    }
-
-    /// The host's live-session probe, started on first use.
-    private func remoteProbe(for host: HostID) -> Task<Set<SessionID>?, Never> {
-        if let probe = remoteProbes[host] { return probe }
-        guard let backend = remoteBackend(for: host) else { return Task { nil } }
-        let probe = Self.probe(backend)
-        remoteProbes[host] = probe
-        Task { [weak self] in
-            guard let live = await probe.value, let self else { return }
-            self.remoteLive[host] = live
-            await self.closeRestoredSessionsThatEndedCleanly(on: host, backend: backend, live: live)
-        }
-        return probe
-    }
-
-    /// Restored sessions on `host` whose panes have not been shown and that
-    /// the host's first listing found gone: those whose programs exited
-    /// cleanly (their wrapper recorded 0) lose their panes, as at launch for
-    /// local sessions. Shown panes get the same rule through their
-    /// controllers (``markEnded(_:)``).
-    func closeRestoredSessionsThatEndedCleanly(on host: HostID, backend: any PersistenceBackend, live: Set<SessionID>) async {
-        let candidates = Set(model.sessions.filter { session in
-            session.remoteHostID == host && restoredSessionIDs.contains(session.id) && RestorePolicy.isPersistent(session)
-                && !live.contains(session.id) && (controller(for: session.id)?.state ?? .detached) == .detached
-        }.map(\.id))
-        guard !candidates.isEmpty else { return }
-        let statuses = await backend.recordedExitStatuses(of: candidates)
-        let unshown = statuses.filter { panes[$0.key] == nil }
-        closePanesOfSessionsThatEndedCleanly(unshown)
-    }
-
-    /// The hosts of some sessions (a tab's panes), in order, without repeats.
-    func hosts(of sessionIDs: [SessionID]) -> [ArmadaleCore.Host] {
-        var seen: Set<HostID> = []
-        return sessionIDs.compactMap { model.session($0)?.remoteHostID }.filter { seen.insert($0).inserted }.compactMap {
-            model.host($0)
-        }
-    }
-
-    /// Why one of these sessions will not survive quitting although it runs
-    /// on a host (it could not take the persistence helper), if any.
-    func persistenceNote(of sessionIDs: [SessionID]) -> String? {
-        sessionIDs.lazy.compactMap { self.panes[$0]?.controller.persistenceNote }.first
-    }
-
-    /// Settings › Hosts › Test Connection: what the host is, and whether
-    /// Armadale's helper is there. Throws when it cannot be reached.
-    func testConnection(to host: ArmadaleCore.Host) async throws -> String {
-        guard let remote else { throw BackendError.unreachable("Remote sessions are not available in this run.") }
-        do {
-            let probe = try await RemoteDeployer(host: host, transport: remote.transport).probe()
-            let system = probe.platform?.displayName ?? probe.uname
-            return probe.platform == nil
-                ? "Connected. \(host.displayName) runs \(system), which Armadale can’t keep sessions on."
-                : "Connected to \(system)." + (probe.isDeployed ? " The persistence helper is installed." : " The persistence helper will be installed when you first open a session there.")
-        } catch let failure as SSHFailure {
-            if case .needsInteraction = failure {
-                throw BackendError.unreachable(failure.message
-                    + " Armadale can’t answer prompts here: open a tab on this host to sign in, then test again.")
-            }
-            throw BackendError.unreachable(failure.message)
-        }
-    }
-
-    /// Settings › Hosts › Deploy Now.
-    func deployHelper(to host: ArmadaleCore.Host) async throws -> String {
-        guard let remote else { throw BackendError.unreachable("Remote sessions are not available in this run.") }
-        let deployer = RemoteDeployer(host: host, transport: remote.transport, binary: remote.binary)
-        do {
-            let deployment = try await deployer.deploy()
-            return "Installed the persistence helper " + (deployment.platform.map { "for \($0.displayName) " } ?? "")
-                + "in \(host.remoteDirectory) on \(host.displayName)."
-        } catch let failure as SSHFailure {
-            throw BackendError.unreachable(failure.message)
-        }
-    }
-
-    /// Host edits apply from each session's next connection: the host gets a
-    /// new backend and every controller of its sessions switches to it (a
-    /// live client keeps running; its next reattach, reconnect or retry
-    /// uses the new settings). A removed host's sessions are hung up and
-    /// become unavailable, with a backend that refuses everything, so
-    /// closing them later ends nothing on the host.
-    private func observeHosts() {
-        let model = model
-        hostsTask = Task { [weak self] in
-            for await hosts in Observations({ model.hosts }) {
-                guard let self else { return }
-                let current = Dictionary(hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-                for (id, backend) in self.remoteBackends where current[id] != backend.host {
-                    self.remoteBackends[id] = nil
-                    self.remoteProbes[id] = nil
-                    self.remoteLive[id] = nil
-                    let replacement = self.remoteBackend(for: id)
-                    for pane in self.panes.values where pane.controller.session.remoteHostID == id {
-                        let controller = pane.controller
-                        if let replacement {
-                            controller.useBackend(replacement, makeOutputFilter: { ZmxOutputFilter() })
-                        } else {
-                            controller.detachAsUnavailable(
-                                reason: Self.hostRemovedReason, backend: UnavailableBackend(reason: Self.hostRemovedReason))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// A workspace's window closed (or opened again): its remote sessions
-    /// stop (or resume) retrying lost connections by themselves.
-    func setWindowOpen(_ isOpen: Bool, for workspace: WorkspaceID) {
-        for id in model.sessionIDs(in: workspace) {
-            guard let controller = controller(for: id) else { continue }
-            if isOpen { controller.resumeAutomaticReconnect() } else { controller.pauseAutomaticReconnect() }
-        }
+            mayExist: restoredSessionIDs.contains(id) || controller.map { $0.state != .detached } ?? false,
+            isRunning: controller?.isRunning ?? false)
     }
 
     // MARK: Helpers
@@ -735,7 +729,7 @@ final class SessionRegistry {
     /// started in, which a shell sending no OSC 7 leaves behind at its first
     /// `cd` (DESIGN §8, "Pane cards"). Restored sessions count as unreported
     /// until they report again.
-    private var reportedDirectories: Set<SessionID> = []
+    var reportedDirectories: Set<SessionID> = []
 
     /// What the header of `sessionID`'s pane card shows (DESIGN §8, "Pane
     /// cards"): its glyph (◐ while it needs attention), the session's title
@@ -753,13 +747,17 @@ final class SessionRegistry {
             needsAttention: attention?.needsAttention(sessionID) ?? false)
     }
 
-    private func displayName(of session: Session) -> String {
+    func displayName(of session: Session) -> String {
         if !session.title.isEmpty { return session.title }
         return model.profile(session.profileID)?.name ?? "Shell"
     }
 
-    /// A renderer change applies to new panes at once and to existing ones
-    /// at their next attach (DESIGN §5): live terminals are never rebuilt.
+    /// A renderer change applies to new surfaces at once and to existing
+    /// ones at their next attach (DESIGN §5): live terminals are never
+    /// rebuilt. A pane view is told (it tracks its renderer); a controller
+    /// whose surface was made but is not shown gets the replacement
+    /// directly; one whose surface was never made makes it with the new
+    /// renderer anyway.
     private func observeRenderer() {
         let preferences = settings.preferences
         rendererTask = Task { [weak self] in
@@ -768,101 +766,46 @@ final class SessionRegistry {
                 guard let self else { return }
                 if last != nil, last != id {
                     let factory = self.settings.surfaces.factory(for: id)
-                    for pane in self.panes.values { pane.useRenderer(factory) }
+                    for (sessionID, controller) in self.controllers {
+                        if let pane = self.paneViews.view(for: sessionID) {
+                            pane.useRenderer(factory)
+                        } else if controller.hasSurface, let record = self.surfaceRenderers[sessionID] {
+                            guard record.current != factory.id else {
+                                // Back to the surface's own renderer: cancelled.
+                                controller.replaceSurfaceOnNextAttach(nil)
+                                self.surfaceRenderers[sessionID] = (record.current, nil)
+                                continue
+                            }
+                            let settings = self.settings
+                            let model = self.model
+                            self.surfaceRenderers[sessionID] = (record.current, factory.id)
+                            controller.replaceSurfaceOnNextAttach { [weak controller] in
+                                factory.makeSurface(appearance: settings.terminalAppearance(
+                                    for: NSApp.effectiveAppearance,
+                                    paneThemeID: controller.flatMap { model.pane(showing: $0.session.id)?.themeID }))
+                            }
+                        }
+                    }
                 }
                 last = id
             }
         }
     }
 
-    /// Sessions can leave the model through any intent (closing a tab,
-    /// deleting a workspace); end them too.
-    private func observeRemovedSessions() {
+    /// Sessions can enter the model through any intent (a new session) and
+    /// leave it through any intent (closing a tab, deleting a workspace):
+    /// a new one gets its controller, a removed one is ended.
+    private func observeSessions() {
         let model = model
-        pruneTask = Task { [weak self] in
+        sessionsTask = Task { [weak self] in
             for await sessions in Observations({ model.sessions.map { ($0.id, $0.remoteHostID) } }) {
                 guard let self else { return }
                 let ids = Set(sessions.map(\.0))
                 let removed = self.knownSessionIDs.subtracting(ids)
-                for (id, host) in sessions { if let host { self.lastHosts[id] = host } }
                 self.knownSessionIDs = ids
-                for id in removed {
-                    self.close(id)
-                    self.lastHosts[id] = nil
-                }
+                for id in removed { self.close(id) }
+                for (id, _) in sessions { self.ensureController(for: id) }
             }
         }
-    }
-}
-
-extension SessionRegistry: SessionControllerDelegate {
-    func sessionController(_ controller: SessionController, didChangeState state: SessionState) {
-        // A clean exit takes its pane with it (DESIGN §4, "Ended").
-        if case .ended(let exit?) = state {
-            closePaneIfEndedCleanly(controller.session.id, exit: exit)
-        }
-    }
-
-    func sessionController(_ controller: SessionController, didSetTitle title: String) {
-        model.setTitle(title, for: controller.session.id)
-    }
-
-    func sessionController(_ controller: SessionController, didChangeDirectory path: String) {
-        reportedDirectories.insert(controller.session.id)
-        model.setWorkingDirectory(path, for: controller.session.id)
-    }
-
-    func sessionController(_ controller: SessionController, didRecordRuntimeVersion version: String) {
-        model.setRuntimeVersion(version, for: controller.session.id)
-        // Without it a crash would leave the session looking non-persistent.
-        onRuntimeVersionRecorded?()
-    }
-
-    func sessionController(_ controller: SessionController, didReplace old: SessionID, with new: Session) {
-        // Re-key before the model drops `old`; the old session is retired
-        // (the controller already killed it), so pruning leaves it alone.
-        if let pane = panes.removeValue(forKey: old) {
-            panes[new.id] = pane
-        }
-        finishedSessionIDs.insert(old)
-        restoredSessionIDs.remove(old)
-        reportedDirectories.remove(old)
-        model.replaceSession(old, with: new)
-        onSessionRetired?(old)
-    }
-
-    func sessionController(_ controller: SessionController, launchForRespawning session: Session) -> LaunchSpec? {
-        model.launchForRespawn(of: session)
-    }
-
-    func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {
-        panes.values.first { $0.controller === controller }?.surfaceWasReplaced(old)
-    }
-
-    func sessionControllerDidRingBell(_ controller: SessionController) {
-        attention?.signal(.bell, from: controller.session.id)
-        if NSApp?.isActive == false {
-            NSApp.requestUserAttention(.informationalRequest)
-        }
-    }
-
-    func sessionController(_ controller: SessionController, didReceiveNotification title: String, body: String) {
-        attention?.signal(.notification(title: title, body: body), from: controller.session.id)
-    }
-
-    func sessionController(_ controller: SessionController, didActivateLink link: String) {
-        // Program output is untrusted: only open ordinary web, mail and file links.
-        guard let url = URL(string: link), let scheme = url.scheme?.lowercased(),
-              ["http", "https", "mailto", "file"].contains(scheme)
-        else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    func sessionController(_ controller: SessionController, didRequestClipboard op: ClipboardOp) {
-        // OSC 52: writes are allowed (as in most terminals); reads are denied
-        // by the surface.
-        guard case .write(let text) = op else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 }

@@ -138,6 +138,27 @@ public struct ZmxRuntime: Sendable, Hashable {
         return result
     }
 
+    /// Whether session `id`'s socket exists in the runtime directory.
+    public func hasSocket(for id: SessionID) -> Bool {
+        var info = stat()
+        return lstat(socketPath(for: id), &info) == 0 && (info.st_mode & S_IFMT) == S_IFSOCK
+    }
+
+    /// Whether session `id` is alive although a listing left it out: its
+    /// socket is still there (asked after the listing, which removes a dead
+    /// daemon's socket) and its program has left no exit record (the
+    /// recorder writes it before the daemon ends, so a session with one has
+    /// ended, whatever its socket says while the daemon tears down). The one
+    /// local rule for "gone" (docs/DESIGN.md section 4).
+    public func isAliveWithoutListing(_ id: SessionID) -> Bool {
+        hasSocket(for: id) && recordedExitStatus(for: id) == nil
+    }
+
+    /// ``isAliveWithoutListing(_:)`` for every session with a socket.
+    public func sessionsAliveWithoutListing() -> Set<SessionID> {
+        sessionsWithSockets().filter { recordedExitStatus(for: $0) == nil }
+    }
+
     /// What the launch housekeeping treats as alive, so their logs and exit
     /// files are kept: sessions the listing named that were not just ended,
     /// and every session whose socket exists (a stopped daemon is left out

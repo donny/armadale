@@ -81,6 +81,28 @@ public final class SwiftTermSurface: TerminalSurface {
         return NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
     }
 
+    /// Gives the view the size of `columns` × `rows` cells (plus a legacy
+    /// scroller's width), which SwiftTerm turns back into that grid
+    /// (`processSizeChange` divides the frame by the cell and truncates, so
+    /// half a point is added to stay clear of rounding). SwiftTerm's own
+    /// `resize(cols:rows:)` is not used: it ends in a soft reset and leaves
+    /// the frame alone, so the next layout would size the grid back. The
+    /// cell is the one SwiftTerm measured when the font was set (snapped to
+    /// the backing scale of the window or, outside one, the main screen) and
+    /// does not change when the view enters a window, so the grid stays.
+    public func setGridSize(columns: Int, rows: Int) {
+        let current = gridSize
+        guard columns > 0, rows > 0, current.columns > 0, current.rows > 0,
+              current.columns != columns || current.rows != rows
+        else { return }
+        // The current grid's cell, exactly as SwiftTerm lays it out.
+        let cellWidth = CGFloat(current.cellWidth), cellHeight = CGFloat(current.cellHeight)
+        guard cellWidth > 0, cellHeight > 0 else { return }
+        terminalView.setFrameSize(NSSize(
+            width: cellWidth * CGFloat(columns) + reservedScrollerWidth + 0.5,
+            height: cellHeight * CGFloat(rows) + 0.5))
+    }
+
     public func feed(_ bytes: ArraySlice<UInt8>) {
         terminalView.feed(byteArray: bytes)
     }

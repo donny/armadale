@@ -82,13 +82,20 @@ Each tab row carries a status glyph:
 | ○ ended | all panes have exited |
 | ⚠ disconnected | Armadale lost its connection (a host that cannot be reached, or a client that cannot reattach); the session may still be alive |
 | ⚠ unavailable | the persistent runtime could not be set up, or the session's host was removed |
-| starting (dotted circle) | not attached yet: starting or connecting, a new session whose pane has not been shown, or a restored one whose pane has not been shown while the launch probe (for a host, its first listing) has not answered |
+| starting (dotted circle) | not attached yet: starting or connecting, a new session whose pane has not been shown, or a restored one that is not attached while its location's first listing has not answered (or did not list it) |
 
 The glyph is shared by the sidebar's tab rows and the tab bar
 (`StatusGlyph`), computed by `SessionRegistry.glyphStatus(of:)` (the
 session's `status(of:)` with attention applied); a tab whose panes are all
-empty shows none. A pane not shown yet whose session the probe found alive
-counts as running. ◐ attention is SF Symbol `circle.lefthalf.filled`,
+empty shows none. Every session's status comes from its controller
+(section 8), whether its pane was ever shown or not. The one exception is
+a restored session that is not attached (section 4, "Restore at launch":
+it has no saved size yet, its host needs the user or has reached its cap
+of attached sessions, or its location's first listing has not answered): its status is that listing's answer, alive
+counting as running and anything else as starting. That answer is not
+refreshed until the session is attached, so such a session that ends
+meanwhile still shows running (and counts for the quit question) until its
+pane is first shown. ◐ attention is SF Symbol `circle.lefthalf.filled`,
 purple (section 10). A tab shows the most important state of its panes.
 The precedence, most important first (`SessionStatus.precedence`,
 unit-tested), is:
@@ -258,6 +265,12 @@ struct Session: Identifiable, Codable, Sendable {
     var createdAt: Date
     var runtimeVersion: String?            // zmx version that created the daemon; nil for ephemeral
     var options: SessionOptions?           // the dialog's per-session choices; nil for older files
+    var gridSize: SessionGridSize?         // columns × rows last applied to its program; nil: not known yet
+}
+
+struct SessionGridSize: Codable, Sendable { // a grid in cells
+    var columns: Int
+    var rows: Int
 }
 
 struct SessionOptions: Codable, Sendable {  // what the New Session dialog adds to a profile
@@ -383,6 +396,18 @@ copies it). A saved built-in takes what it runs (kind, program, arguments,
 environment) from the running version of Armadale and keeps its saved name,
 icon and toggle (`Profile.refreshingBuiltIn`, applied by `AppModel.init`),
 so a newer Armadale's launch reaches profiles saved by an older one.
+`Session.gridSize` is the size the session's own program last had while
+Armadale was attached to it: the size given to the create or attach, then
+every resize that changed the grid (section 7). It is the session's size,
+not one computed from a layout, so a tab that is not on screen keeps the
+size it had when it was last shown; the launch attaches a session whose
+pane is not on screen at it (section 4, "Restore at launch").
+`AppModel.setGridSizes(_:)` records any number of sizes in one change (the
+app collects them until they have settled, section 8), ignoring sizes that
+are not `SessionGridSize.isPlausible` (1…4,000 columns, 1…2,000 rows) and
+unknown sessions. `replaceSession(_:with:)` (a respawn) gives the fresh
+session the old one's size unless it brings its own: it runs in the same
+pane.
 `AppModel.onSessionsRemoved` is called synchronously, inside the intent,
 with the sessions that left the model (closed, or retired by a respawn);
 the attention center uses it.
@@ -524,6 +549,15 @@ persistence.
   step. The repair after every load (below) also turns a pane whose
   `sessionID` names a session missing from the file into an empty pane,
   logged, so it shows the chooser.
+- **Fields added at schema 2.** `Session.gridSize` (section 2) is optional
+  and absent when unknown; every older file decodes with none, and those
+  sessions are attached when their pane is first shown (section 4,
+  "Restore at launch"). It needs no bump: 0.1.0 and 0.1.1 refuse every
+  schema-2 file by version (`scripts/check-state-compat.sh` answers
+  `newerVersion` for both), so no released build reads the field and
+  drops it. The repair after every load drops a size that is not
+  plausible (zero, negative, absurdly large; `SessionGridSize.isPlausible`),
+  logged.
 - **Fixtures** hold the rule from the reading side: one saved state per
   released version, `Packages/ArmadaleCore/Tests/ArmadaleCoreTests/Fixtures/state-<version>.json`,
   written by that version's own code. `scripts/state-fixtures/run.sh`
@@ -753,7 +787,8 @@ backend builds the two operations itself:
   `true`, dies at once, and the client exits 1, leaving nothing behind. This
   closes the window between an `ls` check and the attach. Restore still
   consults `liveSessions()` first (one `zmx ls --short` per backend at
-  launch) so missing sessions are marked ended without any spawn.
+  launch, and locally the runtime directory's sockets: "Restore at launch"
+  below) so missing sessions are marked ended without any spawn.
 - **`create`** runs `zmx attach a-<id> <program> …`, waits for the client to
   connect (it prints `session "a-<id>" created`), drops that client, and
   then attaches again. This is needed because the daemon only replays its
@@ -804,6 +839,14 @@ position, `ESC[0m`, OSC 7 (cwd) and OSC 2 (title). Alternate‑screen programs
 are replayed inside `?1049h`. Scrollback is capped at 10,000 lines by zmx and
 is not configurable.
 
+zmx 0.8.1 sends a program that is on the alternate screen one SIGWINCH at
+every attach, at the size it already has too (a forced redraw), so a
+full-screen program redraws once per attach, whatever Armadale does. A
+program on the primary screen gets none at an attach whose window size is
+the one it has, and one when it differs, the pixel size included (measured
+November 14, 2026, `docs/HISTORY.md`). This is why a controller never sends
+a pixel size alone (section 7).
+
 A session that is on the alternate screen when Armadale reattaches (vim,
 less, an agent's full-screen UI) is replayed as that screen only: zmx sends
 neither the primary screen nor its scrollback while the alternate screen is
@@ -841,8 +884,9 @@ replay and is accepted.
 - **Unavailable**: when the persistent runtime cannot be set up at launch,
   Armadale falls back to plain PTY sessions for new panes only. Restored
   sessions that the runtime created (`runtimeVersion` set) show
-  "Persistent sessions are unavailable" with **Retry**, which runs the
-  installer again and attaches them if it now works. They are never shown
+  "Persistent sessions are unavailable" with **Retry** from the start,
+  shown or not; Retry runs the installer again and, if it now works,
+  brings them up as at launch ("Restore at launch" below). They are never shown
   as ended, never respawned by Respawn All, and never killed (they cannot be
   reached). ⌘W on such a pane always asks first ("This session may still be
   running and cannot be reached right now."), and closing it leaves the
@@ -943,15 +987,17 @@ replay and is accepted.
     cleanly while Armadale was not running. That may delete workspaces, all
     of them included; it runs before `AppModel.ensureWorkspacesToOpen()`,
     so a launch where every restored session ended cleanly opens one fresh
-    "Workspace" and nothing else. A restored session found gone when its
-    pane is first shown (or an attach that finds it gone) is marked ended
-    with its record, and the same rule applies then. Remote restored
-    sessions cannot hold up the launch: when a host's first listing
-    arrives, its restored sessions that are gone and were never shown have
-    their records read in one command, and those that ended cleanly lose
-    their panes then; a workspace emptied that way is deleted and its
-    window, if open, closes then (the listing comes within seconds of the
-    launch).
+    "Workspace" and nothing else. Once the local listing has answered,
+    every restored local session found gone, its pane shown or not, is
+    marked ended through its controller with its record ("Restore at
+    launch" below; one read of the records for all of them), and the same
+    rule applies then; so does an attach that finds a session gone. Remote
+    restored sessions cannot hold up the launch: when a host's first
+    listing arrives, its restored sessions that are gone have their
+    records read in one command and are marked ended through their
+    controllers, and those that ended cleanly lose their panes then; a
+    workspace emptied that way is deleted and its window, if open, closes
+    then (the listing comes within seconds of the launch).
 - **Daemon killed from outside** (SIGKILL, reboot): `ls` reports the stale
   socket as an error entry, cleans it up, and `ls --short` omits it. The pane
   ends up in the same ended state, with no record (status unknown): the
@@ -974,6 +1020,127 @@ replay and is accepted.
   until the host answers, then re-attaches automatically (section 6).
 - **Workspace › Respawn All Ended** exists for the morning‑after‑reboot case
   where every session is gone.
+
+### Restore at launch
+
+Every live restored session is attached after launch, so an agent that
+finishes in a tab nobody has visited since the relaunch still raises
+attention (section 10), and its status follows its program rather than the
+launch listing. The registry holds a controller for every session from the
+start (section 8); what each restored one gets:
+
+- **Panes on screen** are started when shown, by their window's content
+  controller after layout, at their laid-out size
+  (`SessionRegistry.startIfNeeded`), as soon as their location's first
+  listing has answered; a pane shown several times meanwhile still has one
+  start. They jump the launch queue.
+- **Every other restored session**, in sidebar order
+  (`AppModel.sessionOrder`, closed workspaces included), once the app has
+  opened its windows (`SessionRegistry.startLaunchPass()`, called by the
+  app delegate right after it opens them) and its location's first
+  listing has answered, by `LaunchAttachPlan` (`ArmadaleSessions`, pure,
+  tested). Should the pass reach a pane on screen before its window has
+  started it, that session is attached at its saved size and its first
+  layout corrects it with at most one resize.
+  - **alive with a saved size** (`Session.gridSize`, section 2): attached
+    at that size. A session whose pane view was never made has its surface
+    given that grid first (`TerminalSurface.setGridSize`, section 5), so
+    the attach asks for the size the program already has and sends it no
+    resize; when its pane is shown later and laid out at the same grid it
+    gets none either, and exactly one when the laid-out grid differs. A
+    terminal hosted in a pane view gets its grid only from that pane's
+    layout: a session whose pane view exists (shown earlier, its tab not on
+    screen now: after Retry, say) is attached at its terminal's current
+    grid.
+  - **alive without one** (a session saved by an older build, until it has
+    been shown once): left unattached until its pane is first shown, so no
+    program is resized on a guess. Its status is the listing's answer
+    (section 1).
+  - **gone**: marked ended through its controller with its recorded exit
+    status, read for all of them at once, so the clean-exit rule ("Ended"
+    above) applies as for a pane on screen.
+  - **unknown** (the listing failed: a host that cannot be reached, a local
+    listing that failed): attached if it has a saved size, which on an
+    unreachable host ends Disconnected on the usual retry schedule (section
+    6), never Session Ended; left alone otherwise.
+- **Locally alive** means listed **or** with a socket in the runtime
+  directory and no exit record (`ZmxRuntime.sessionsAliveWithoutListing()`,
+  which the app hands the registry as `socketSessions`, read after the
+  listing, which removes the stale socket of a killed daemon): the helper's listing
+  leaves out a daemon that does not answer within about a second and still
+  succeeds. **A session with an exit record has ended**, whatever its
+  socket says: the recorder writes the record before the daemon ends, so
+  the rule cannot depend on how long a dying daemon's socket lasts. The one
+  local rule for "gone" is therefore: not listed, and no socket left after
+  the listing or an exit record (`ZmxRuntime.isAliveWithoutListing`). It is
+  used for every decision that ends or shows a session (the orphan reclaim
+  and the file housekeeping count every socket instead, a deliberate
+  exception: "Housekeeping" below): `LocalZmxBackend.exists` and so `resolveExit`, the
+  driver's own checks inside create and attach (`ZmxSessionDriver.exists`,
+  `isGone`: an attach whose client gives up never kills a session the rule
+  keeps alive and never reports it missing), and the launch pass (the
+  registry's `socketSessions`). A session the rule keeps alive whose client
+  goes away is detached (reattached once, then Disconnected with
+  Reconnect), never ended, never closed by the clean-exit rule and never
+  respawned over. An attach to a stopped daemon succeeds at once (its
+  client writes `ESC[2J` before it is answered) and shows nothing until the
+  daemon runs again, which needs no click. A killed daemon's socket is
+  removed by the listing, so it is gone. Closing such a session sends a
+  kill its daemon may not answer: when a kill fails or is not answered (it
+  times out) and the session's socket is still there afterwards, nothing
+  is killed by pid, and one log line names the session and the kind of
+  error, never its text (`os.Logger`, subsystem
+  `com.tinylittleapps.armadale`, category `sessions`;
+  `LocalZmxBackend.Configuration.onUnansweredKill`); the daemon may keep
+  running with no pane. Hosts have no such fallback: a daemon a host's
+  listing leaves out is taken as gone.
+- **Pacing** (`LaunchAttachQueue`, pure, tested): at most **4** local
+  attaches in flight and **2** per host. Attaches made for panes on screen
+  count against the same limit and go first; a pane shown while its
+  session waits in the queue jumps it and is attached at once at its
+  laid-out size. A local launch attach that ends Disconnected although the
+  session exists (it missed the 2 s window for its client's first bytes)
+  is tried once more after the local queue has drained; local controllers
+  have no retry schedule of their own.
+- **Hosts**: after a host's first listing (`HostListing`, kept with why it
+  failed). **At most 6 of a host's sessions** are kept attached for panes
+  nobody showed (`LaunchAttachPlan.maximumHiddenAttachedPerHost`): a hidden
+  session is started only while fewer than 6 of its host's sessions have
+  a client or are getting one (attached, attaching, retrying by
+  themselves, or started), panes on screen and sessions the user started
+  counted; the rest, in sidebar order, stay not attached until shown, like
+  a session without a saved size. A pane the user shows always starts.
+  Every client of a host shares one ssh connection, each attached session
+  holds one of its sessions, and sshd allows 10 per connection by default
+  (`MaxSessions`); past it, by reading, control commands on that
+  connection would be refused too (a close's kill, listings, new panes).
+  The limit is unverified on a host. Listed: as above, gone sessions'
+  records read in one command.
+  Unreachable: the attach attempt for sessions with a saved size, which
+  leaves them Disconnected and retried, never ended. **Needs the user** (a
+  sign-in, an unknown or changed host key, a refused key: a listing that
+  fails with `authenticationFailed`): nothing is started for a pane not on
+  screen, so no hidden pane sits at a password prompt; the host's sessions
+  stay not attached (starting) until one of its panes is shown and signs
+  in, and when any session of that host reaches it (connects, or its
+  attach finds it gone; not an end the app causes by closing a pane or
+  by End Sessions and Quit) the host is listed again and the
+  rest follow the rule above. A hidden session never starts an
+  interactive sign-in by itself (section 6). Editing a host's settings
+  lists it again if it had been listed. A session whose host was removed is unavailable from the start.
+  Automatic retries pause while a session's workspace window is closed,
+  from the start for workspaces whose window was closed at the last quit
+  (section 6).
+- **Unavailable**: when the persistent runtime could not be set up,
+  restored persistent sessions are unavailable from the start. Retry
+  (`SessionRegistry.retryPersistence`) attaches the shown ones at once and
+  runs the same pass for the rest once the new listing has answered.
+- **Not attached**: what is left for a restored session without a client
+  is one case: its runtime is unavailable, its host is unreachable,
+  removed or waiting for the user, it is past its host's cap, it has no
+  saved size yet, or its location has not answered yet. Its status is the listing's (section 1),
+  and closing it, ending it at quit and Respawn All Ended go through its
+  controller like any other (section 8).
 
 ### Environment handed to new sessions
 
@@ -1047,6 +1214,13 @@ killing a session (close, respawn) removes its log and exit file there;
 nothing else is collected on hosts, whose `~/.armadale` several Macs may
 share.
 
+The orphan reclaim (below) and this collection count every session whose
+socket exists as alive, without the exit-record half of the rule that
+decides whether a session has ended (section 4, "Restore at launch"). That
+is deliberate: it errs towards alive, so a session with a record and a
+leftover socket is spared by the reclaim and keeps its files for one more
+launch.
+
 At launch, once the live probe has answered, Armadale also ends live
 sessions in its runtime directory that no saved session refers to (for
 example one whose pane was closed while the runtime was unavailable).
@@ -1110,6 +1284,7 @@ without touching sessions or layout.
     var view: NSView { get }
     var delegate: TerminalSurfaceDelegate? { get set }
     var gridSize: GridSize { get }                     // cols, rows, cell px
+    func setGridSize(columns: Int, rows: Int)          // size the view to hold exactly that grid
     func feed(_ bytes: ArraySlice<UInt8>)              // process → screen
     func apply(_ appearance: TerminalAppearance)       // font, theme, cursor
     func clearScrollback()
@@ -1143,7 +1318,16 @@ without touching sessions or layout.
   `SurfaceRegistry.standard` registers them, and `SessionRegistry` makes
   every new surface through the factory named by the `rendererID`
   preference. When that preference changes, each existing pane calls
-  `SessionController.replaceSurfaceOnNextAttach(_:)`; the controller swaps
+  `SessionController.replaceSurfaceOnNextAttach(_:)` (the registry calls it
+  directly for a controller whose surface was made but has no pane view
+  yet, and records which renderer its surface has and which one is
+  pending, so a pane view made later knows both and choosing the
+  surface's own renderer again cancels the replacement; a surface
+  installed for a session without a pane view takes the old surface's
+  grid, so the reconnect or respawn that installs it does not resize the
+  program; one whose surface was never made makes it with the new
+  renderer);
+  the controller swaps
   the surface at the start of its next connect (Respawn, Reconnect, an
   automatic reattach; a relaunch makes new surfaces anyway), before
   anything is fed to it or its size is taken, and tells its delegate, which
@@ -1154,7 +1338,26 @@ without touching sessions or layout.
   recolour selected text and ignores it.
 - Surface views are owned by the session controller, not by the layout. Tab
   switches and pane moves reparent the view; they never recreate it, so no
-  terminal state is lost and no replay is needed.
+  terminal state is lost and no replay is needed. The controller makes its
+  surface the first time anything needs it (a pane view, a connect), so a
+  session that is never attached or shown (an ended one in a tab nobody
+  opens, one left until shown) costs no terminal; a pane view shows
+  `controller.surface.view` and is told when it is replaced.
+- `setGridSize(columns:rows:)` sizes the grid whether or not the view is in
+  a window, by giving the view the size that holds exactly that grid at
+  the current font (columns × cell width plus a legacy scroller's width,
+  rows × cell height, plus half a point against rounding), and reports the
+  change through `didResize` like any other, only when the grid differs.
+  It is how a session whose pane is not on screen is attached at its saved
+  size (section 4, "Restore at launch"). In `SwiftTermSurface` the cell is
+  the one SwiftTerm measured when the font was set (snapped to the backing
+  scale of the window or, outside one, the main screen) and does not
+  change when the view enters a window, so a view sized this way keeps its
+  grid in a window at the same size. SwiftTerm's own `resize(cols:rows:)`
+  is not used: it leaves the frame alone and ends in a soft reset. SwiftTerm
+  keeps at least 2 columns and 1 row. Tested in `SwiftTermSurfaceTests`
+  (outside a window; entering a window at the same size reports nothing, a
+  wider frame one change).
 
 ---
 
@@ -1347,15 +1550,37 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   retried as a create (nothing was created); everything else as an attach.
   A dropped ssh client with the host still reachable (e.g. `pkill -f 'ssh
   -tt'`) is resolved as detached and reattached at once, to the same shell.
+  **A session whose pane has not been shown in this run never starts an
+  interactive sign-in by itself**: before each of its automatic retries
+  connects, the registry asks the host for its listing in batch mode
+  (`SessionController.retryPreflight`, `SessionRegistry.retryPreflight`).
+  Unreachable: the retry waits for the next one on the schedule. Needs the
+  user: retrying stops, the pane stays Disconnected with ssh's message
+  (Reconnect, or showing the pane, may prompt: when its pane is first
+  shown it reconnects once by itself), and the host waits for a sign-in;
+  when a session of it next reaches the host, the host is listed again and
+  such sessions reconnect (within the cap of section 4). The answer is
+  judged when it arrives: a session whose pane was shown while the host
+  was being asked connects as a shown pane does. The mark that it waits
+  for the user stays until it connects, is closed or is respawned, so one
+  the host's pass leaves out at the cap still reconnects when shown.
+  Answered: the retry connects. A pane shown in this run retries on the
+  schedule without asking first and may prompt, being on screen to answer
+  it.
 - **Sessions on hosts in the app** (`SessionRegistry`): one
   `RemoteZmxBackend` per host, made on first use and replaced when the
   host's settings change. Every controller of that host switches to the new
   one at once; an attached client keeps its working connection, and its
-  next reattach, Reconnect or retry uses the new settings. At launch each
-  host referenced by a restored session is probed (`ls --short`) in the
-  background; until it answers its sessions show as starting, never ended,
-  and attaching them waits for that answer only. A host that does not
-  answer leaves them attaching → disconnected → retried. Respawn All Ended
+  next reattach, Reconnect or retry uses the new settings (and the host is
+  listed again if it had been listed). At launch each host referenced by a restored session is
+  listed (`ls --short`) in the background, and the answer is kept with why
+  a listing failed (`HostListing`: live, unreachable, needs the user);
+  until it answers its sessions show as starting, never ended, and
+  attaching them waits for that answer only. What the answer then does to
+  sessions whose panes are not shown is section 4, "Restore at launch"; a
+  shown pane attaches whatever it says (on a host that needs the user the
+  sign-in then happens in that pane). A host that does not answer leaves
+  them attaching → disconnected → retried. Respawn All Ended
   lists each host again first and leaves every session on a host that does
   not answer alone. Remote orphans are not reclaimed (several Macs may
   share a host's `~/.armadale`). Closing a pane on an unreachable host
@@ -1364,10 +1589,14 @@ A session with `.remote(host)` location uses the same zmx model on the host.
 - **Removed hosts**: a removed host's sessions stay in their panes and are
   unavailable, with a "Host removed" placeholder (Close Pane only; closing
   asks first and leaves the session running on the host), never killed.
-  An attached pane is hung up at once (the session keeps running on the
-  host) and its controller gets an `UnavailableBackend`, which refuses to
-  create or attach and whose kill does nothing, so a later close ends
-  nothing on the host.
+  An attached client is hung up at once (the session keeps running on the
+  host) and every controller of the host's sessions, attached or not, gets
+  an `UnavailableBackend`, which refuses to create or attach and whose kill
+  does nothing, so a later close ends nothing on the host. The registry
+  does the same at once, without waiting for its observation of the
+  hosts, when a session on a removed host is shown, started, closed or
+  ended (`makeUnavailableIfHostRemoved`), and status shows it unavailable
+  from the moment the host is gone.
 
 ## 7. Process plumbing (`ArmadaleSessions`)
 
@@ -1499,8 +1728,9 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   stdout, stderr)` and a timeout. It can feed stdin from a pipe (uploads),
   with `F_SETNOSIGPIPE` so a command that exits early cannot kill the app.
 - `SessionController` (`@MainActor`) is the per‑session glue: owns the
-  surface, the `ProcessHandle`, the state machine, and forwards title / cwd
-  / bell / notifications through a delegate (the registry, which records
+  surface (made on first use: section 5), the `ProcessHandle`, the state
+  machine, and forwards title / cwd / bell / notifications through a
+  delegate (the registry, which records
   them in `AppModel` and passes bells and notifications to the app's
   `AttentionCenter`; attention is kept there, per session, not in the
   controller, so it outlives views and needs the app's focus). An optional
@@ -1510,6 +1740,20 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   runs exactly once per attach, however the session ends. The session ends
   when the process has exited and its output has drained, or 500 ms after
   the exit if the stream stays open.
+- **Sizes given to the PTY.** A connect gives the client the surface's
+  grid (`currentPTYSize()`: columns and rows, and the text area in pixels
+  at the window's backing scale, or the main screen's outside a window).
+  After the connect, and on every resize the surface reports, a size is
+  sent only when its columns or rows differ from the last one given
+  (`appliedSize`): a different pixel size alone (another backing scale)
+  would reach the program as a SIGWINCH for nothing (section 4). Each size
+  given is reported to the delegate (`didApplySize`), which records it as
+  the session's last grid size (`Session.gridSize`, section 8). So the
+  pixel size the program has can be stale: a session attached while its
+  pane was not on screen (at the main screen's scale) and first shown on a
+  screen of another scale keeps the old pixel size until its grid next
+  changes; re-sending it alone would cost the program a SIGWINCH
+  (accepted).
 - `respawn()` is not re-entrant: a second call while one is in progress
   does nothing, so a double click cannot retire one session twice. A
   connect that `close()` or `respawn()` overtakes is killed in the backend
@@ -1604,12 +1848,42 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   sessions, honouring the "don't ask again" default; unreachable ones
   always). App-wide commands (new workspace, font size) are on the app
   delegate.
-- An app-level `SessionRegistry` owns one `SessionController` and its
-  `PaneView` per session shown so far. It creates them lazily when a pane
-  first becomes visible and keeps them until the session leaves the model,
-  so tab switches and window closes never destroy a terminal. It is the
-  controllers' delegate, and it records titles, directories and respawns in
-  `AppModel`.
+- An app-level `SessionRegistry` owns one `SessionController` per session
+  in the model, independent of views: for restored sessions from its
+  initializer, for a new session from the moment the registry sees it (its
+  observation of the model's sessions, or its pane being shown, whichever
+  comes first). A `PaneView` is made when a pane is first shown, around the
+  controller that already exists, and kept separately (`PaneViewStore`);
+  both are kept until the session leaves the model, so tab switches and
+  window closes never destroy a terminal. A pane view starts at the size
+  that holds the terminal view as it is and lays the terminal out itself,
+  so making it, putting it in a window or laying it out at the same grid
+  never resizes a session attached before it was shown. The registry is
+  the controllers' delegate, and records titles, directories, grid sizes
+  and respawns in `AppModel`; a bell or notification reaches
+  `AttentionCenter` whether or not the pane was ever shown. Its files, by
+  seam: `SessionRegistry.swift` (controllers, starting a shown pane's
+  session, status, closing and ending), `PaneViewStore.swift`,
+  `SessionRegistry+LaunchAttach.swift` (section 4, "Restore at launch"),
+  `SessionRegistry+Remote.swift` (backends and listings per host, host
+  edits and removals, test connection and deploy),
+  `SessionRegistry+Delegate.swift`, `GridSizeRecorder.swift`.
+- **Grid sizes** (`GridSizeRecorder`): each size a controller gives its
+  program's PTY (section 7) is held until it has settled, 500 ms without a
+  change, then all pending sizes go to the model in one change
+  (`AppModel.setGridSizes`), which saves through the usual debounce. A live
+  window resize changes many panes' grids many times a second; recording
+  every step would save and re-evaluate every view observing the model's
+  sessions each time. An attach at the recorded size records nothing. The
+  pending sizes are flushed before the synchronous save at quit and before
+  every client is hung up (`detachAllNow`), so a crash loses at most the
+  settle time plus the usual save window. A respawn's fresh session takes
+  over the pane's size; a respawn of a session whose pane view was never
+  made (Respawn All Ended) creates it at that size, and one whose pane
+  view exists at that pane's grid. A terminal hosted in a pane view gets
+  its grid only from that pane's layout, and the pane puts its terminal
+  back at its place whenever it is laid out or enters a window, so a
+  mismatch never lasts.
 - The pane area is pinned to the content view's safe area. On macOS 27 the
   content view extends under both the transparent title bar and the
   floating sidebar.
@@ -2054,7 +2328,13 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     `SurfaceRegistry` and turns them into a `TerminalAppearance` for a
     light or dark view. Each `PaneView` observes it, so every appearance
     change, including a re-imported user theme, applies to all panes at
-    once, shown or not. A pane can override the theme from its context
+    once, shown or not. A session attached before its pane view was ever
+    made (section 4, "Restore at launch") keeps the appearance its surface
+    was made with until then; the pane view applies the current one when
+    it enters a window. A changed font or size then resizes the program
+    once when the font is applied, and the pane's layout can resize it
+    once more: up to two resizes when such a pane is first shown
+    (accepted). A pane can override the theme from its context
     menu (above, "Pane context menu"); the Settings theme then applies
     only to panes on Default, while font, size and cursor still apply to
     every pane.
@@ -2518,16 +2798,18 @@ And for the dialog and Settings › Favorites:
   backend's live sessions once, then opens every workspace whose window was
   open at last quit (else the first workspace; with none at all, a fresh
   one: `AppModel.ensureWorkspacesToOpen()`) and attaches its visible
-  panes first, the rest lazily when their tab is first shown. When the
-  local probe answers, the orphan reclaim runs, its result is recorded in
-  the model and saved at once, and the log and exit files are collected
-  (section 4, "Housekeeping").
+  panes first, when shown, at their laid-out size; right after opening the
+  windows it starts the launch pass (`SessionRegistry.startLaunchPass()`),
+  and every other live restored session follows once its location's first
+  listing has answered, a few at a time (section 4, "Restore at launch"). When the local probe answers, the orphan reclaim
+  runs, its result is recorded in the model and saved at once, and the log
+  and exit files are collected (section 4, "Housekeeping").
 - A plain quit never kills sessions (with sessions running, the quit asks
   first; see "Quitting with running sessions" below; only *End Sessions
-  and Quit* ends them). `applicationShouldTerminate` hangs every
-  pane's client up synchronously (SIGHUP and closing its terminal; no
-  waiting) and returns `.terminateNow`, then the state is saved
-  synchronously. It never returns `.terminateLater`: SIGTERM's handler
+  and Quit* ends them). `applicationShouldTerminate` writes the grid sizes
+  not yet recorded to the model, hangs every client up synchronously
+  (SIGHUP and closing its terminal; no waiting; panes on screen or not)
+  and returns `.terminateNow`, then the state is saved synchronously. It never returns `.terminateLater`: SIGTERM's handler
   would reply from inside a main-queue block, where AppKit's nested run
   loop starves the main actor, so the reply never comes and logout hangs.
   SIGTERM quits from the run loop, performed in the common **and
@@ -2553,8 +2835,10 @@ And for the dialog and Settings › Favorites:
   quit Apple Event, SIGTERM, the status menu's Quit and End Sessions and
   Quit). A close confirmation sheet holds a quit up. Closing a pane kills its
   session after a confirmation if it is still running or disconnected
-  (configurable), and also kills a session that was never shown (restored
-  but not yet attached). Closing a window keeps the workspace.
+  (configurable), through its controller, and also kills a restored
+  session that may be alive although it was never attached; an
+  unavailable session (no persistent runtime, a removed host) is never
+  killed. Closing a window keeps the workspace.
 - Closing the last tab in a tab group removes the tab group. Closing the
   last tab group in a workspace (⌘W on its last pane, Close Tab, Close Tab
   Group, the placeholder's Close Pane), or dragging its last tab into
@@ -2778,9 +3062,9 @@ the menu bar.
   status menu's promise holds only under Allow; what to say about it is
   an open point (section 13, `HANDOFF.md`).
 - **End Sessions and Quit** ends every session that may be alive, then
-  quits: shown panes through their controllers (`close()`), the rest
-  through their backends (`kill`); unavailable sessions cannot be
-  reached and are left. The quit is cancelled while this runs
+  quits, each through its controller (`close()`: its backend's kill, then
+  its client), attached or not, shown or not; unavailable sessions (no
+  persistent runtime, a removed host) cannot be reached and are left. The quit is cancelled while this runs
   (`.terminateCancel`), then `terminate` is called again with a flag
   that skips the question; `.terminateLater` is not used (the SIGTERM
   deadlock above). The kills run concurrently, so the wait is the
@@ -2807,7 +3091,11 @@ values `ask` / `keepInMenuBar` / `endSessions`, anything else reads as
   (restored from the last run, or a start was attempted), and a session
   of any status counts while its controller reports a live attached
   process (`CloseRisk.Item.isRunning`). A tab created in
-  this run and never shown has no process and is not counted. Remote
+  this run and never shown has no process and is not counted. Every
+  session's status comes from its controller; only a restored session that
+  is not attached takes it from the launch listing (section 1), which is
+  not refreshed until it is attached, so such a session that has ended
+  still counts until its pane is first shown. Remote
   sessions count as well, although after a quit they leave no local
   process (the Dock never shows them): the question is about sessions,
   not about the Dock.
@@ -2829,10 +3117,12 @@ values `ask` / `keepInMenuBar` / `endSessions`, anything else reads as
   sessions…" and every item is disabled meanwhile; on the alert path the
   windows stay up, their panes showing *Session Ended* as each finishes.
   Before the final quit the running sessions are counted again
-  (`SessionRegistry.sessionsRunning(after:)`): a session the pass did not
+  (`SessionRegistry.sessionsStillRunning()`): a session the pass did not
   cover (a tab opened meanwhile) or one whose pane runs again (a Respawn)
-  gets one more pass, then the app quits regardless. A relaunch
-  afterwards shows the ended panes, as after a reboot.
+  gets one more pass, then the app quits regardless; a covered session
+  shows its controller's state like any other, so one that ended is not
+  counted again. A relaunch afterwards shows the ended panes, as after a
+  reboot.
 - **Showing a workspace window leaves menu bar mode** (`openWindow` calls
   `leaveMenuBarMode()`), so every path back is covered: *Open Armadale*,
   `applicationShouldHandleReopen` (`open -a`, Finder), a notification click
@@ -3004,7 +3294,15 @@ badge).
 SwiftTerm delivers bells and titles to the main thread through its event
 queue and lets at most one bell through per 100 ms per view; OSC 9/777 are
 observed passively and hop to the main actor. None of this depends on the
-pane being on screen.
+pane being on screen, or on its pane view ever having been made: every
+live restored session is attached after launch (section 4, "Restore at
+launch"), so an agent that finishes in a tab nobody has visited since the
+relaunch sets attention, badges the Dock and notifies like any other
+(tested with a real SwiftTerm surface in no window). The exceptions are
+restored sessions that are not attached: one without a saved size (saved
+by an older build) until its pane is first shown, those on a host that
+needs the user until one of its panes signs in, and those past their
+host's cap of attached sessions until shown.
 
 **Notifications** (`NotificationService`, `UserNotificationService`,
 `NotificationPolicy`). A signal that sets attention may post a notification:
@@ -3198,8 +3496,12 @@ armadale/
 │   │                                PaneMenu (the pane context menu builder, PaneThemeBinding,
 │   │                                ActionMenuItem), PaneCardStyle + PaneHeaderView (pane cards:
 │   │                                geometry and borders, the header and its hosting view)
-│   ├── Sessions/                    SessionRegistry (controllers per session, a backend per host,
-│   │                                RemoteSessionSupport), SessionStatus / CloseRisk,
+│   ├── Sessions/                    SessionRegistry (a controller per session, start and status,
+│   │                                closing; RemoteSessionSupport), PaneViewStore (pane views),
+│   │                                SessionRegistry+LaunchAttach (restore at launch),
+│   │                                SessionRegistry+Remote (a backend and listing per host),
+│   │                                SessionRegistry+Delegate, GridSizeRecorder (last grid sizes),
+│   │                                SessionStatus / CloseRisk,
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
 │   ├── Settings/                    SettingsWindowController, Preferences, SwiftUI tabs
 │   │                                (General, Appearance, Profiles, Hosts, Favorites)
@@ -3222,7 +3524,8 @@ armadale/
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
 │   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
 │   │                                SessionController, LaunchResolver, HelperLocator, HelperInstaller,
-│   │                                OrphanReclaimer, RestorePolicy; Sources/ctty-exec
+│   │                                OrphanReclaimer, RestorePolicy, LaunchAttachPlan (+ LaunchAttachQueue);
+│   │                                Sources/ctty-exec
 │   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
 │   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
@@ -3261,7 +3564,10 @@ armadale/
   pane menu and pane themes; the tab bar's style, track scrolling and
   middle click; inline rename; the sidebar's focus and shown path; the
   placeholder's keyboard; the clean-exit rule; remote sessions in the
-  registry; the instance lock, the launch's load and save safety, window
+  registry; restore at launch through the registry (`LaunchAttachTests`
+  with a scripted local backend, `RemoteLaunchAttachTests` with a scripted
+  SSH transport) and panes of sessions attached at their saved size
+  (`SavedGridPaneTests`, `RelaunchResizeTests`); the instance lock, the launch's load and save safety, window
   geometry and the full-screen serializer; the acknowledgements file; and
   the DMG's layout and background. It is unhosted: it compiles the app's sources (all
   but `main.swift`) into the test bundle, so the app never launches, no
@@ -3666,6 +3972,23 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
   reading the daemon while stdout is blocked, would make this unnecessary.
 - **Alternate-screen replay** drops the primary screen and scrollback from
   the pane (section 4).
+- **Every restored session attached at launch** (section 4, "Restore at
+  launch"). Each live restored session with a saved size has a client, a
+  surface and its output parsed on the main actor whether or not anyone
+  looks at it. Measured in a test harness (not yet in the app), 20
+  sessions attached with 5,000 lines of output each: about 1.3 MB per
+  session in the app (controller and SwiftTerm surface, whose own
+  scrollback is SwiftTerm's default of 500 lines) and 2.4 MB per client
+  process; the daemons (about 8.7 MB each) existed before. Busy agents in
+  tabs nobody looks at cost the main actor their output. On a host, every
+  attached session is one more ssh session over the shared connection,
+  and sshd allows 10 per connection by default (`MaxSessions`), which a
+  host with ten or more restored sessions reaches at launch; not checked
+  on this Mac (no test host), so the launch keeps at most 6 of a host's
+  sessions attached for hidden panes (section 4); that number is
+  unverified too. A local session whose daemon is stopped is attached to a
+  client that shows nothing until it runs again, and is never taken for
+  ended while its socket exists (section 4); a host has no such fallback.
 - **SwiftTerm under Swift 6.** It is not annotated for strict concurrency.
   The adapter confines it to the main actor with `@preconcurrency import`,
   and the swappable surface means a cleaner renderer can replace it later.
