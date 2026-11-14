@@ -17,8 +17,12 @@ import Foundation
 /// - Older `zmx-<version>` copies are kept while any session still records
 ///   that version (zmx has no version handshake, so a daemon is always
 ///   attached with the binary that created it) and removed otherwise.
-///   Older `ctty-exec-*` copies are always removed: nothing keeps running
-///   them (the trampoline execs into the client at once).
+///   Older `ctty-exec-*` copies are always removed. A client's trampoline
+///   execs into the client at once; a session's exit recorder
+///   (`--exit-file`) keeps running the copy it was started from for the
+///   life of the session, but the running process keeps its inode, so
+///   removing the file does not disturb it, and nothing starts an old copy
+///   again.
 public struct HelperInstaller: Sendable {
     /// The installed helpers.
     public struct Installation: Sendable, Hashable {

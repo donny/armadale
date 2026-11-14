@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the release artifact: a Developer ID signed, notarized and stapled
-# DMG (docs/DESIGN.md section 11, "Release pipeline (step 9)").
+# DMG (docs/DESIGN.md section 11, "Release pipeline").
 #
 #   scripts/release.sh [--skip-notarize] [--allow-dirty] [--allow-existing-tag]
 #

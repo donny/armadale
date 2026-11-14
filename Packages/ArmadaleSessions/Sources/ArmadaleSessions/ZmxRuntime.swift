@@ -29,7 +29,7 @@ public struct ZmxRuntime: Sendable, Hashable {
 
     /// `<state dir>/run` if a session socket in it fits zmx's limit, else
     /// `/tmp/armadale-<uid>`. With the default state directory the fallback
-    /// is only needed when `$HOME` is longer than 64 bytes.
+    /// is only needed when `$HOME` is longer than 43 bytes.
     public static func directory(forStateDirectory stateDirectory: URL, uid: uid_t = getuid()) -> String {
         let preferred = (plainPath(stateDirectory) as NSString).appendingPathComponent("run")
         return fits(preferred) ? preferred : "/tmp/armadale-\(uid)"

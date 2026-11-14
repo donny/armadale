@@ -364,7 +364,7 @@ final class PaneView: NSView {
             closePane: { [weak self] in self?.onClosePane?() },
             focusPane: { [weak self] in self?.focusTerminal() })
         // The dead terminal's idle cursor would show as a hollow box beside
-        // the placeholder's card (DESIGN §8, "Session Ended").
+        // the placeholder's card (DESIGN §4, "Ended").
         controller.surface.setCursorVisible(false)
         if let placeholder {
             placeholder.rootView = view

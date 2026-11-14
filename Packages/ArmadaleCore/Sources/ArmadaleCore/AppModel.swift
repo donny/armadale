@@ -55,10 +55,10 @@ public final class AppModel {
     /// Creates a model from persisted state. Built-in profiles missing from
     /// `state` are added back so they can always be resolved, and saved
     /// built-ins take what they run (kind, program, arguments, environment)
-    /// from this version of Armadale, keeping only their saved name and
-    /// icon: those are the only parts of a built-in the user can change, so
-    /// a newer Armadale's launch (step 7: the agents' notification
-    /// arguments) reaches profiles saved by an older one.
+    /// from this version of Armadale, keeping their saved name, icon and
+    /// attention toggle (those are the parts of a built-in the user can
+    /// change), so a newer Armadale's launch reaches profiles saved by an
+    /// older one.
     public init(state: PersistedState = .empty, defaultWorkingDirectory: String = NSHomeDirectory()) {
         self.workspaces = state.workspaces
         self.sessions = state.sessions
@@ -621,7 +621,8 @@ public final class AppModel {
         mutateTab(tab.id) { $0.layout = layout }
     }
 
-    /// Resets every split ratio of the workspace's selected tab to 0.5.
+    /// Sets every split ratio of the workspace's selected tab so the panes
+    /// along each axis get equal room (``PaneLayout/equalized()``).
     public func equalizePanes(in workspaceID: WorkspaceID) {
         guard let tab = selectedTab(in: workspaceID) else { return }
         let layout = tab.layout.equalized()

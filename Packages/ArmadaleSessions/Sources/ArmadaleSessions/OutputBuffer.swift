@@ -9,7 +9,9 @@ import Synchronization
 ///   period go out at once (interactive echo is not delayed), but within
 ///   ``interval`` of the previous batch further output waits until the
 ///   interval has passed or a full batch has accumulated. A flood therefore
-///   reaches the main actor as at most ~60 batches a second of up to 64 KB.
+///   reaches the main actor as full 64 KB batches, as fast as the consumer
+///   takes them: the interval only holds back smaller batches, and
+///   backpressure (below), not the interval, bounds a flood.
 /// - Delivery is pull-based (`AsyncStream(unfolding:)`): when more than
 ///   ``highWater`` bytes are waiting, the producer is told to stop reading,
 ///   which lets the kernel's PTY buffer fill and blocks the child, exactly as

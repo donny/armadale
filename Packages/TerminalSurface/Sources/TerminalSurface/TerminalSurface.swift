@@ -35,7 +35,7 @@ public protocol TerminalSurface: AnyObject {
 /// (`ESC [ ? 25 l` hides, `ESC [ ? 25 h` shows), fed to the screen like
 /// output, so every renderer understands it. The host hides a dead
 /// terminal's cursor under a placeholder and shows it again once the
-/// terminal is live (DESIGN §8, "Session Ended").
+/// terminal is live (DESIGN §4, "Ended").
 public enum TerminalCursorVisibility {
     /// `ESC [ ? 2 5 l`.
     public static let hideSequence: [UInt8] = [0x1B, 0x5B, 0x3F, 0x32, 0x35, 0x6C]

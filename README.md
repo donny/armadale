@@ -11,15 +11,18 @@ versioned JSON in `~/Library/Application Support/Armadale/`.
 
 ## Status
 
-All nine steps of the build order in [docs/DESIGN.md](docs/DESIGN.md)
-section 12 are implemented and committed on `main` (October 2026). Step 8
-is menu bar mode, asking before quitting with running sessions; step 9 is
-Developer ID signing and `scripts/release.sh`, which builds a notarized,
-stapled DMG (see [Releasing](#releasing)). There is no updater and no
-crash reporting in v1.
-Where development stopped, what is next and the open items are in
-[HANDOFF.md](HANDOFF.md); the rules for working in the repository are in
-[AGENTS.md](AGENTS.md).
+All ten steps of the build order in [docs/DESIGN.md](docs/DESIGN.md)
+section 12 are implemented and committed on `main`, and 0.1.1 is the
+current release. Step 8 is menu bar mode, asking before quitting with
+running sessions; step 9 is Developer ID signing and
+`scripts/release.sh`, which builds a notarized, stapled DMG (see
+[Releasing](#releasing)); step 10 is the New Session chooser. There is
+no updater and no crash reporting in v1.
+Where development stands, what is next and the open items are in
+[HANDOFF.md](HANDOFF.md); what is true of the design now is in
+[docs/DESIGN.md](docs/DESIGN.md), and why and when in
+[docs/HISTORY.md](docs/HISTORY.md); the rules for working in the
+repository are in [AGENTS.md](AGENTS.md).
 
 What works today:
 
@@ -556,8 +559,8 @@ repository only. DNS at the registrar: `A` records for the apex to
 GitHub Pages (185.199.108.153, 185.199.109.153, 185.199.110.153,
 185.199.111.153), `CNAME www` to `donny.github.io`, and the
 `_github-pages-challenge-donny` TXT record from GitHub's domain
-verification. `docs/DESIGN.md` is served too, as a raw file; that is
-fine, the repository is public. A change to the page is a normal commit
+verification. `docs/DESIGN.md` and `docs/HISTORY.md` are served too,
+as raw files; that is fine, the repository is public. A change to the page is a normal commit
 on `main`; Pages redeploys within a minute or two.
 
 `scripts/release.sh --skip-notarize` (no credentials needed) stops after
@@ -577,7 +580,7 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `docs/` | `DESIGN.md` (the design contract), `icon/AppIcon.svg` (master vector of the app icon, generated) |
+| `docs/` | `DESIGN.md` (the design contract: what is true now), `HISTORY.md` (why and when: the change log and each design section's history), `index.html`, `CNAME` (the website), `icon/AppIcon.svg` (master vector of the app icon, generated) |
 | `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), `AttentionCenter`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog`, `AppSettings` and `UserNotificationService` (`Support/`), `Resources/armadale-notify`, `Resources/Acknowledgements.txt` (the third-party notices shown by Help › Acknowledgements) |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `AttentionTracker`, `AgentIntegration`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |

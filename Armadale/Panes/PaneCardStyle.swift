@@ -113,7 +113,7 @@ enum PaneCardStyle {
 
     /// The widths the title and the working directory are drawn in, in
     /// `available` points, from their untruncated widths (DESIGN §8, "Pane
-    /// cards", *As built*). Both whole when they fit. Otherwise the
+    /// cards", *Working directory*). Both whole when they fit. Otherwise the
     /// directory keeps up to ``directoryShare`` of the width (at least
     /// ``minimumTextWidth``, never more than it needs, and all the title
     /// leaves when the title fits whole) and the title is truncated to the

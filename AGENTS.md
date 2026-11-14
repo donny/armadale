@@ -2,9 +2,12 @@
 
 Durable rules for any agent (or person) working on Armadale. Where
 development currently stands, what is next and the open items are in
-`HANDOFF.md`, which is updated whenever work pauses. The design contract is
-`docs/DESIGN.md`; build and run instructions are in `README.md`. Read
-`HANDOFF.md` and `docs/DESIGN.md` before changing code.
+`HANDOFF.md`, which is updated whenever work pauses. The design contract,
+what is true now, is `docs/DESIGN.md`; why and when (the change log, and
+the history of each design section under the same section numbers) is
+`docs/HISTORY.md`; build and run instructions are in `README.md`. Read
+`HANDOFF.md` and `docs/DESIGN.md` before changing code, and the part of
+`docs/HISTORY.md` on the sections you are about to change.
 
 ## Build and test
 
@@ -48,7 +51,13 @@ loop, and it has worked well:
 
 The owner wants to give the go-ahead before each step starts, and
 sometimes runs other UI-driving agents on this Mac. Ask before starting a
-step; pause immediately if asked. When work pauses, update `HANDOFF.md`.
+step; pause immediately if asked. When work pauses, update `HANDOFF.md`:
+it holds where things stand and the open items. The account of a
+finished change (what was built, how it was checked, what was found on
+the way) goes to the end of Part 1 of `docs/HISTORY.md`, with one line in
+HANDOFF's status list. Open items, not-checked-live lists and pending
+decisions stay in HANDOFF until they are resolved; then remove them
+there and say so in the Part 1 entry of the change that resolved them.
 
 ## Rules learned the hard way
 
@@ -139,7 +148,11 @@ entries). The test host is the owner's Lima VM (below).
 string `zmx` must never appear in user-visible text (say "persistence
 helper"). Profiles only add a program and arguments; never modify a user's
 agent configuration files. Design deviations are written into
-`docs/DESIGN.md` in the same change.
+`docs/DESIGN.md` in the same change. DESIGN.md says what is true now, in
+the present tense, under section numbers and names the code refers to, so
+keep both; the date, the reason and the evidence (what was measured,
+checked live or rejected) go into Part 2 of `docs/HISTORY.md`, under the
+same section.
 
 ## Test hosts and tools on this Mac
 

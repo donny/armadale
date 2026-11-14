@@ -1,14 +1,28 @@
-# HANDOFF.md — where development stopped
+# HANDOFF.md — where development stands
 
-Point-in-time status for whoever picks Armadale up next. Update this file
-whenever work pauses. The durable rules for working in this repository are
-in `AGENTS.md`; the design contract is `docs/DESIGN.md`; build and run
-instructions are in `README.md`.
+Point-in-time status for whoever picks Armadale up next: where things
+stand, what is next, what waits for the owner, the open items. Update
+this file whenever work pauses. The durable rules for working in this
+repository are in `AGENTS.md`; the design contract, what is true now,
+is `docs/DESIGN.md`; why and when (the change log, and the history of
+each design section) is `docs/HISTORY.md`; build and run instructions
+are in `README.md`.
 
-## Status (October 30, 2026)
+## Status (November 14, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
-reviewed and committed on `main`:
+reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
+23, 2026) and 0.1.1 (tag `v0.1.1`, the first public release, November
+5, 2026) are released, notarized and stapled; the code is under the MIT
+License and https://armadale.dev is live. Since the build order the
+sidebar, the tab bar and the panes (now cards with a header and a pane
+menu) were reworked, a clean exit closes its pane, menu bar mode and the
+quit alert activate the app again, and on November 14, 2026 the first
+findings of an architecture review were built: one Armadale process per
+state directory, a safer orphan reclaim and save schedule, and state
+file schema 2. The last gate run: 761 tests, zero warnings. What each
+change was, how it was checked and what was found on the way is in
+`docs/HISTORY.md`.
 
 | Step | Commit | What it added |
 |---|---|---|
@@ -23,975 +37,105 @@ reviewed and committed on `main`:
 | 9 Ship | cb63ef7 | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
 | 10 New Session | 507a52a, 9168f0b, 18faf87 | empty panes, the New Session dialog, favorites, the chooser in every new pane (October 24, 2026) |
 
-The app icon ("Panes": a graphite tile with three panes, the top-right
-one lit coral) was added after step 7: `scripts/render-app-icon.swift`
-generates the Icon Composer document, the asset catalog rasters and
-`docs/icon/AppIcon.svg` from one geometric description. Concept and
-refinement pages used to choose it are not in the repository.
-
-After step 9, cf9305c added `scripts/install-release.sh`, which runs the
-release pipeline and installs the app from the DMG into `~/Applications`.
-
-Small changes after the build order (October 19–20, 2026), each through
-the full gate: the About panel's copyright holder (f3855aa); the sidebar
-toggle moved to the divider end of the sidebar section (a2c236b); tab
-group rows always show the plain folder icon (628c99e); AGENTS.md's
-rule to end test builds by pid while the installed app may be running
-(26c6699); and **inline renaming** of workspaces, tab groups and tabs
-in the sidebar and the tab bar (double-click or the context menu; Return
-commits, Escape cancels, focus loss commits; blank names are ignored and
-a blank tab title restores the derived one; the three Workspace menu
-items and the rename sheet are gone; `docs/DESIGN.md` sections 1 and 8).
-Built with the implementer → reviewer loop and a live keystroke pass
-(October 20, 2026). Then the **full-screen frame** fix (same day): the
-frame is never recorded while a window is in full screen, `WindowState`
-gained `isFullScreen` (decoding to false for older files, no schema
-bump), a full-screen workspace comes back full screen at launch and
-after menu bar mode, and a saved frame is clamped to a screen that still
-exists (`docs/DESIGN.md` section 8, "Full screen" and "Saved frames and
-screens"). Built with the implementer → reviewer loop and two live
-passes.
-
-October 23, 2026: the About panel puts "All rights reserved." on its own
-line and unfocused panes are no longer dimmed, only the focused pane's
-accent border remains (9e47bee, owner's request). Then **a clean exit
-closes the pane** (same day, implementer → reviewer loop, two live
-passes, Lima VM for the host side): an exit recorder sits between the
-persistence daemon and the program, locally `ctty-exec --exit-file`
-(`posix_spawn` instead of `execv`; `N` for a normal exit, `signal N` for
-a death by signal) and on hosts the session's `sh` script (`$?`, so 128
-and above reads as a signal), writing `<run dir>/a-<id>.exit` through a
-temporary file and a rename. `ExitResolution.ended` carries a
-`ProgramExit`; `EndedSessionRule` (ArmadaleCore, pure) closes the pane
-through the Close Pane path when the program exited normally with 0, or
-with any status when the session runs the user's shell (^D after ^C is
-130; `exit` after a failed command is 1), and keeps the *Session Ended*
-placeholder, now with "exited with status N" or "was ended by signal N",
-for a signal death, an unknown end, or a non-shell program's non-zero
-exit; the only pane of a workspace always keeps the placeholder. At
-launch, restored local sessions that ended cleanly while the app was
-closed lose their panes before any window shows; remote ones when their
-host first answers. The placeholder's Respawn button answers Return only
-in the focused pane, and a click around the placeholder's card focuses
-the pane. `docs/DESIGN.md` sections 4, 6, 7 and 13; README. The owner's
-request to remove the "Ask Siri" field from the sidebar's context menus
-was **withdrawn** the same day (open items, Hierarchy and UI).
-
-Later on October 23, 2026 (implementer → reviewer loop, two live passes):
-**an empty workspace is deleted automatically.** A tab group is never
-kept without tabs and a workspace never without tab groups: closing or
-moving away the last tab removes the group, and removing the last group
-deletes the workspace and closes its window, the only workspace
-included, so the model may hold zero workspaces (the app stays running
-with its Dock icon; ⌘N or a Dock click makes a fresh "Workspace";
-`CloseResult.deletedWorkspace`, `AppModel.ensureWorkspacesToOpen()`).
-A workspace closed with tabs in it (red button, ⇧⌘W) is unchanged: it
-stays dimmed in the sidebar with its sessions running. A close that
-asks anyway adds "The workspace “X” will be removed too." (after
-committing an open inline rename). Loading the state file drops closed
-workspaces with no tab groups and, in the repair pass, groups with no
-tabs, logged and with no schema bump; the owner's own "Workspace 2" husk
-goes at the next launch of a build with this change. After a move
-empties the group the window showed, the target group is shown when it
-is in the same workspace. `docs/DESIGN.md` sections 1, 3 and 8; README.
-
-Then (October 23, 2026, evening, implementer → reviewer loop, three
-live passes) **a clean exit closes a workspace's only pane too**: the
-last-pane exception of `EndedSessionRule` is gone, so the close
-cascades through tab, tab group and workspace, the window closes, and
-with no workspace left the app keeps running with its Dock icon (or
-stays in menu bar mode with "0 sessions running" and the tooltip
-"Armadale": owner's decision, the app never leaves menu bar mode or
-quits on its own). At launch, restored sessions that all exited
-cleanly give one fresh "Workspace". Two bugs fixed on the way. First,
-a window closing itself while any window was entering or leaving full
-screen came back as an empty orphan and the next queued window never
-entered full screen: the launch queue in `AppDelegate` is replaced by
-`Windows/FullScreenSerializer.swift`, which runs every full-screen
-toggle one at a time (launch entries, menu bar exits and re-entries,
-exits before a close), starting only when no window is in a transition
-and 0.3 s after the last one ended; a full-screen window that has to
-close leaves full screen first (an exit AppKit reports as failed is
-retried up to four times; a window on an inactive Space cannot leave
-and is closed in full screen as its own step); closes go ahead of
-entries; entries for deleted workspaces are skipped; still no timeout
-if AppKit never ends a transition. Menu bar mode with several
-full-screen windows also changed: switching to accessory mode moves
-full-screen windows off the active Space, so on return each one is
-brought forward, leaves and re-enters full screen instead of coming
-back without its title bar (a visible Space switch, about 2.5 s for
-two windows; the usual case after ⌘Q → Keep Running). Known gap: ⇧⌘W on a
-full-screen window, whose exit after the close the serializer does not
-see (`docs/DESIGN.md` section 8, "Full screen", "Closing in full
-screen", "Menu bar mode"; `FullScreenSerializerTests`). Second, Return
-never pressed the placeholder's Respawn / Reconnect / Retry button,
-since step 2, because the ended terminal view kept keyboard focus; the
-pane itself is first responder while a placeholder is shown
-(`PlaceholderKeyboardTests`). `docs/DESIGN.md` sections 4 and 8; README.
-
-October 29, 2026 (owner's decision, done by the coordinating session
-through the gate, no agents): **the Shortcuts tab moved from Settings to
-Help › Keyboard Shortcuts** (`Armadale/Help/ShortcutsWindowController.swift`
-and `ShortcutTable.swift`, the Help menu item without a key equivalent,
-`AppDelegate.showKeyboardShortcuts`; the window is ordered out in menu
-bar mode with Settings and closing it there hides the app the same way;
-a saved `settingsTab` of `shortcuts` opens General; `docs/DESIGN.md`
-sections 8, 9 and 11; README). Reason: Settings is for what can be
-changed, and every binding is a menu item key equivalent that System
-Settings › Keyboard › App Shortcuts can already rebind by title. **Not
-checked live** (the Mac was not free): the window itself (Help ›
-Keyboard Shortcuts, its size, ⌘W closing it, menu bar mode). Tests: 623
-(171 app + 226 core + 206 sessions + 13 + 7), zero warnings.
-
-Later on October 29, 2026 (owner's rule, coordinating session, through
-the gate, no agents, code-only): **sidebar icon colours**. Icons are
-accent-coloured only in a window that looks active and only on its shown
-path (its workspace, the tab group it shows, that group's selected tab);
-every other icon is gray, and all of them are in an inactive window
-(then `SidebarIconTint` in `Sidebar/SidebarView.swift`, now `SidebarShownPath`, `SidebarShownPathTests`,
-`docs/DESIGN.md` section 1). Removing the selection highlight was
-discussed and **deferred by the owner** ("I'll test it later"): there is
-no supported way to hide a List's selection highlight on macOS, so it
-would mean dropping the selection binding that the double-click rename
-and the context menus are built on. The owner ran the build and the
-icon colours looked right. Then (same evening, owner's rule) **the
-highlight moved** from the shown tab group's row to the deepest visible
-row of the shown path (`SidebarHighlight`: the selected tab, the group
-while collapsed, the workspace while collapsed), and a click on a row of
-the window that changes nothing now moves the highlight back and gives
-the pane the keyboard (seen live by the owner: clicking the current
-workspace row left it bright blue, the List holding keyboard focus).
-The owner's live check of that commit (204627f): renaming the tab and
-the workspace by double-click looked right (highlight on the tab, bright
-blue while the rename field holds focus inside the list), but
-double-clicking the shown group's row left **no row highlighted**: the
-click still wrote `select(tabGroup:)` to the model, which changed no
-value but re-rendered the sidebar inside the click. Fixed the same
-evening: a click on a row that is already shown writes nothing
-(`SidebarHighlight.isShown`, tested). Also seen in that screenshot and
-unexplained: "Main" and the second tab under it drawn semibold while the
-tab rename field was up; not reproduced from code, watch for it.
-**Not checked live:** the group double-click after this fix, that the
-keyboard returns to the pane after a single click on the current
-workspace, the selected group and the selected tab, the collapsed-group
-and collapsed-workspace highlight, and that `appearsActive` flips the
-icons on every activation path. Tests: 626, zero warnings.
-
-Then (October 29, 2026, owner's decision after trying those commits,
-implementer agent, not committed by it): **the sidebar has no selection
-and no highlight at all.** The owner still saw highlight and focus
-problems, so the `List` lost its selection binding, and with it
-`SidebarHighlight` (and its two tests), the selection nudge, the shown-row
-guard and `WorkspaceActions.focusFocusedPane`. Rows act through tap
-gestures over the whole row width, as the tab bar's tabs do
-(`SidebarRowActions`: a click acts, a simultaneous double tap renames, both
-off while the row's rename field is up), and each row has its own
-`.contextMenu`. Without a selection the outline view behind the List still
-took keyboard focus on every click (seen live; `.focusable(false)` on the
-List did not stop it), so `WorkspaceWindow.makeFirstResponder(_:)` refuses
-any table or outline view in the sidebar; and since the list then never
-takes focus from an open rename field, `WorkspaceWindow.sendEvent(_:)`
-commits the window's open rename on a mouse down in the sidebar outside
-the field (a first try that committed on the refused focus request also
-ended a fresh double-click edit at once, since the outline view asks again
-after the double tap). Icon colours and the semibold current workspace are
-unchanged. `docs/DESIGN.md` sections 1 and 8. **Checked live** (test build,
-isolated state, screenshots of the window only): single clicks on the
-current workspace row, the shown group row, the selected tab row, another
-tab, another group and another workspace's row (its window came forward)
-each acted and left typed `echo` commands reaching the focused terminal;
-no row was ever drawn selected (only AppKit's blue context-menu target
-outline while a menu is open); double-click renames of a tab, a group and
-the workspace opened the field with the text selected, Return committed,
-Escape cancelled, a click in the field kept the edit, a click on another
-row or on the current workspace row committed it; the three context menus
-(and the other workspace's, with Show Window); a tab dragged onto another
-group moved there; a group's chevron collapsed and expanded without
-selecting it. **Found and not fixed:** a double-click on another
-workspace's row whose window, once brought forward, covers the clicked
-spot starts no rename (the second click lands in that window); the
-context menu's Rename works. **Not checked live:** the keyboard reaching
-an empty pane's chooser after a sidebar click, and a tab bar rename being
-committed by a click in the sidebar (both were then seen by the
-reviewer's live pass). After review (code only, no live run): a click on a
-row of the shown path writes nothing to the model; the sidebar mouse down
-is hit-tested from the window's frame view, so title-bar clicks above the
-sidebar do not commit a rename; `SidebarFocusTests` covers the refusal;
-each row is an accessibility button with a default action and a Rename
-action. Arrow keys and Full Keyboard Access no longer reach sidebar rows
-(owner's decision); **VoiceOver was not checked live.** Tests: 625, zero
-warnings. Committed as 831b9af.
-
-October 30, 2026 (owner's rule, coordinating session, through the gate,
-no agents, code-only): **sidebar title weight follows the shown path.**
-The three rows of a window's shown path (its workspace, the tab group it
-shows, that group's selected tab) are semibold in every window, active or
-not; every other row is regular, including a tab needing attention, which
-was semibold before (it keeps ◐ and the purple counts). So bold says what
-a window shows and blue alone says which window is active. The tint
-helper became `SidebarShownPath` (`contains`, `isAccented`, `font`,
-`color`; `SidebarShownPathTests` replaces `SidebarIconTintTests`), and
-the shown-path click guard uses it. `docs/DESIGN.md` sections 1 and 8.
-This also accounts for the earlier "unexplained" semibold "Main": it was
-that window's workspace, and a semibold tab under it would have been one
-needing attention. **Not checked live** (the owner will see it on the next
-install): a screenshot of an inactive window with its path semibold and
-all icons gray. Tests: 626, zero warnings. Committed as 9162c7e; the
-owner installed it (build 14) and accepted the look.
-
-October 30, 2026 (owner's request, implementer → reviewer loop): **the
-tab bar is drawn like the native macOS 27 window tab bar**, at the
-native 36 pt height: a capsule track holding the tabs, the selected tab
-a raised pill (flat in a window that is not key), hairline dividers
-between plain tabs and none beside a pill, a hovered tab and a tab
-needing attention (purple) as pills too, and "+" as a circle at the
-bar's right end outside the track. Style only: tab content, alignment,
-widths, scrolling, drag, rename, context menu, middle click and "+" are
-as before (`TabBarStyle` in `Tabs/TabBarView.swift`, `TabBarStyleTests`;
-`docs/DESIGN.md` section 8, "Tab bar look", with the measurements, the
-per-appearance tints and what deliberately differs from native).
-Increase Contrast strengthens the hairlines (tested, not seen live).
-**Checked live** by both agents in light (against a Terminal window with
-its tab bar) and in dark (the test build forced dark with a test-only
-injected library, since deleted, against a scratch native-tab window):
-1, 3 and 9+ tabs, hover, inactive window, rename with Return and Escape,
-middle click, drag reorder and the drop indicator, attention, a narrow
-window, scrolling. **Older bugs found by the reviewer and not fixed**
-(reproduced on the unchanged build; recorded in DESIGN section 8): the
-track can stay scrolled about 30 pt past its start after the window is
-narrowed and widened again, until relaunch; a new tab beyond the visible
-ones is selected but not scrolled into view; and, from code reading, a
-hidden overflow tab's stored frame could catch a middle click near "+".
-Tests: 632, zero warnings. Committed as 60e107d; the owner installed it
-(build 15).
-
-October 30, 2026, later (owner's request, implementer → reviewer loop,
-three review rounds): **tabs fill the track and the three tab bar bugs
-above are fixed.** The 220 pt maximum is gone: tabs share the track's
-whole inside equally (one tab fills it, two are halves, as native), down
-to 110 pt, below which the track scrolls. Scrolling is decided by the
-pure `TrackScroll` from the tab count, the selected index, the bar width
-and the current or pending offset, never from measured frames: a
-selection change reveals the selected tab with the least scroll (start
-for the first, end for the last); a tab-count change only clamps the
-user's offset (start when everything fits, new end when past it); a
-width change clamps and keeps a selected tab that was wholly visible
-visible. A programmatic scroll the scroll view drops (seen live with
-quick ⌘9 ⌘2 bursts) is retried once by the pure `PendingScroll` state
-machine in `TabFrameStore`: a target counts as reached only when the
-track rests on it, a user scroll phase clears it. Middle click resolves
-only inside the track's visible frame. `docs/DESIGN.md` section 8 ("Tab
-bar look", "Scrolling the track"). **Checked live** (light; dark for the
-widths and the first scroll round): 1, 2, 5 and 11 tabs; "+", ⌘1/⌘9 and
-sidebar clicks revealing hidden tabs; two- and three-key ⌘ bursts (74/74
-after the last fix); closing tabs with the track scrolled (offset only
-clamps); narrow to 520 pt and widen to 1100 pt; a trackpad scroll during
-a reveal animation wins with no later jump; middle click on "+", the
-margins and a partly hidden tab; drag reorder with overflow. **Known and
-not fixed:** dragging a tab does not auto-scroll the track, so only
-visible tabs are drop targets. **Not checked live:** the attention
-reveal's scroll (same selection-change path), a sidebar toggle at the
-same moment as a selection change, a tab closed during a live resize,
-and the last fix in dark mode. Tests: 644, zero warnings. Committed as
-49fd474.
-
-October 30, 2026, evening (owner's request, coordinating session, through
-the gate, code-only): **the eighteen Show Tab / Show Tab Group items are
-out of the Window menu**, kept as hidden commands
-(`allowsKeyEquivalentWhenHidden`, `MainMenu.hideCommand`) so ⌘1…⌘9 and
-⇧⌘1…⇧⌘9 still work; `ShortcutTable` folds a hidden item into the one
-before it only when the title matches too, so these keep their rows
-under Help › Keyboard Shortcuts (tested). And **a tab group row of the
-current workspace ends in its ⇧⌘N shortcut** (`SidebarShortcut`, first
-nine groups, nothing for other workspaces' groups) instead of the tab
-count. `docs/DESIGN.md` sections 1 and 9. **Not checked live** (the Mac
-was not free): the Window menu's look without the items and the sidebar
-badge; the owner will see both on the next install. Tests: 646, zero
-warnings. Committed as 2b64971.
-
-October 30, 2026, evening (owner's decision, implementer → reviewer
-loop): **a right-click context menu per pane, with a Theme submenu that
-sets that pane's theme.** `Pane.themeID` (saved only when set, missing
-key decodes nil, no schema bump; older builds read the file and drop the
-themes on their next save), `AppModel.setTheme(_:forPane:)` and
-`forgetTheme(_:)` (a removed user theme clears panes using it, wired
-into Settings › Appearance › Remove through `AppSettings.removeUserTheme`).
-One explicit theme per pane for both appearances; Default follows
-Settings. `PaneMenu.make` (`Panes/PaneMenu.swift`) is the pure builder
-future pane items go into; `PaneThemeBinding` ties a pane to the model.
-Click rules are `ContextClick` in `TerminalSurface`, used by
-`HostTerminalView` (SwiftTermSurface subclass; the SwiftTerm checkout is
-untouched): a right-click goes to a program that asked for the mouse,
-otherwise to the pane; Shift + right-click always opens the pane menu;
-Control-click (without Command) is a right-click and reaches such a
-program as a right button; ⌘-click is left to SwiftTerm. A themed pane
-draws its chooser and placeholder (and, cosmetically, its menu) in the
-appearance suiting the theme. `docs/DESIGN.md` sections 2, 8 ("Pane
-context menu") and 11. **Owner decision pending** (DESIGN names the
-one-line alternative): Control-click reaching a mouse-aware program as a
-right button means it never sees Control+left-click (Emacs's buffer
-menu). **Checked live** by the implementer (test build, isolated state,
-dark Mac): menu on terminal, padding, placeholder and empty pane;
-Dracula on one of two panes; Default; Settings theme changes only
-Default panes; import and remove of a Ghostty theme; survival across
-respawn, a sidebar tab move and quit/relaunch; forced light appearance;
-vim with mouse=a (plain right-click and Control-click to vim, Shift +
-right-click to the menu). The reviewer reproduced the menu, the themes,
-vim, the mouse bytes in SGR and X10 modes and SIGTERM persistence, then
-**stopped its live pass at about 20:15: a mis-aimed Control-drag landed
-on the desktop** (Finder frontmost on the guard check) and Finder made
-`~/Desktop/Pasted 2026-10-30 at 8.14.53 PM.textClipping` from stale drag
-data; the reviewer moved it to the Trash. **Not re-verified by the
-reviewer:** ⌘Q through the quit alert then relaunch, respawn, theme
-import/remove, forced light, the Session Ended placeholder, Control-click
-and Control-drag in a plain shell, Control-click on an empty pane
-(`NSApp.currentEvent` path, not unit-testable), attention colours on a
-themed pane. Tests: 674, zero warnings. Committed as ebec034.
-
-October 30, 2026, late evening (owner's decision; a deletion done by the
-coordinating session, through the gate): **no mouse event opens the pane
-menu any more.** Asked to choose between Control-click reaching a
-mouse-aware program as a right button and Control-click always opening
-Armadale's menu, the owner chose neither: vim and Emacs must get every
-mouse event untouched, and a better UI entry point for the pane menu will
-be chosen later. `HostTerminalView` and `ContextClick` (and its tests) are
-gone; `SwiftTermSurface` uses SwiftTerm's `TerminalView` as before the
-menu; `PaneView` and `EmptyPaneView` no longer override `menu(for:)`,
-`rightMouseDown`, `mouseDown` (for Control) or `hitTest`, and instead
-offer `paneMenu()`, which nothing calls yet besides the tests. The
-builder (`PaneMenu.make`), `Pane.themeID`, `PaneThemeBinding`, the themed
-pane appearance and all their tests stay, so the Theme submenu is one
-entry point away (it is unreachable in the app until then). Mouse
-behaviour is exactly that of 2b64971. `docs/DESIGN.md` section 8 ("Pane
-context menu", rewritten) and 11. Nothing was run live: the change only
-removes code paths, and the remaining paths are the ones live-tested
-before the menu existed. Committed as a9f13c8.
-
-October 31, 2026, morning (owner's decision): **pane cards** are the next
-step. Each pane becomes a rounded card with a gutter and gaps of 8 pt, a
-28 pt header (status glyph, session title, working directory, a "…"
-button and right-click opening the pane menu, which is the menu's entry
-point), hairline and focus borders on the card, attention in the header.
-The agreed design is `docs/DESIGN.md` section 8, "Pane cards" (owner's
-four decisions recorded there; the "Show pane headers" preference is
-deferred, section 13). This commit is the design only; the
-implementation follows through the implementer → reviewer loop and
-needs the Mac for live checks. Committed as 20b315b.
-
-October 31, 2026, morning (implementer → reviewer loop): **pane cards
-implemented.** `Panes/PaneCardStyle.swift` (pure geometry and borders:
-gutter 8, gap 8, radius 10, header 28, 4 pt to the grid, padding 10,
-hairline 0.5 pt at 12 %, focus 1.5 pt accent at 55 %, the header text
-width rule, the menu origin), `Panes/PaneHeaderView.swift`
-(`PaneHeaderModel`, the SwiftUI header, `PaneHeaderHostingView`: a click
-focuses the pane; "…", right-click and Control-click open `paneMenu()`),
-`PaneView` and `EmptyPaneView` as clipped rounded cards hosting the
-header, `SplitTreeView` with an 8 pt invisible divider,
-`ContentViewController` insetting the split tree, `SessionRegistry`
-feeding the headers (title, `~`-abbreviated directory only after an OSC 7
-report, status glyph, attention). Deviations recorded in DESIGN §8 "As
-built": directory hidden when equal to the title and shown only after
-OSC 7; title and directory share the header (directory at least 40 pt
-or 40 % of the text width, dropped only when the title would go under
-40 pt); the placeholder covers only the area below the header; the "…"
-menu right-aligns on the rightmost pane; a once-reported directory can
-go stale (accepted). **Checked live** (implementer, light and dark via a
-test-only injected dylib; reviewer, light): 2 × 2 split, two themes side
-by side from "…" and from a header right-click, lone and zoomed panes,
-empty pane at 90/165/185 pt, Session Ended pane, divider drag in the gap,
-vim with mouse=a keeping its right-clicks while the header opens the
-menu, mouse bytes reaching `cat -v` for right, Control and left clicks,
-`stty size` after split/zoom/resize/drag, a bell's ◐ and purple title,
-typing after every header action, the three review fixes. **Not checked
-live:** the *Disconnected* placeholder, Increase Contrast, dark mode for
-the review fixes, release on the respawn path (the close path is
-tested). Tests: 675, zero warnings. Committed as 8f601d1.
-
-October 31, 2026, mid-morning (owner's request, implementer → reviewer
-loop): **Split Right and Split Down in the pane menu and as header
-buttons.** The pane menu is Split Right ⌘D, Split Down ⇧⌘D, separator,
-Theme; the items split the pane the menu was opened for
-(`PaneThemeBinding.split(axis)`, `WorkspaceActions.split(pane:axis:)`,
-which records the pane's session as last focused so the New Session
-dialog takes its directory as after ⌘D; the registry finds the pane's
-window from the model, wired by the app delegate, and falls back to the
-model without one). The header shows Split Right, Split Down and "…" as
-three 24 × 20 pt buttons at its trailing end (text width = header width
-− 116 pt with a glyph); the split buttons hide below a 156 pt header,
-where the menu still offers both splits. The owner reversed the earlier
-"no split buttons" decision; zoom and close stay out of the header.
-DESIGN §8 (both bullets). **Checked live** (implementer and reviewer,
-light): buttons and tooltips on terminal and empty panes, Split Down
-from an unfocused pane's button splitting that pane with the chooser
-focused in the new pane, both items from the right-click menu with the
-shortcuts shown, ⌘D with the menu open splitting once, typing after,
-truncation beside three buttons in a 417 pt pane, headers of about
-105 pt hiding the split buttons cleanly, the rightmost "…" menu inside
-the window. **Not checked live:** dark mode, the dialog's directory after
-a split (unit-tested), a pane moved to another window. Review's three
-low findings fixed by the coordinator: DESIGN wording on the shortcuts,
-`StatusGlyph.width` shared with `PaneCardStyle.glyphWidth`, the release
-test now exercises the split closures. Tests: 682, zero warnings.
-Committed as 2695c1b.
-
-October 31, 2026, later morning (owner's decisions, implementer →
-reviewer loop): **header split buttons dropped; Session Ended no longer
-dimmed.** The owner found three header buttons busy, so the header is
-back to glyph, title, directory and "…" (text space = header − 68 pt
-with a glyph, − 50 without; no hide threshold); Split Right ⌘D and Split
-Down ⇧⌘D stay in the pane menu. The placeholder's 18 % black layer is
-gone (an ended pane looked grey beside a white empty pane): the pane's
-theme background shows and the last output stays readable under the
-card; the dead terminal's cursor is hidden under any placeholder kind
-(DECTCEM through `TerminalSurface.setCursorVisible`, re-hidden after
-each appearance change while the placeholder is up because SwiftTerm's
-font setter soft-resets the terminal) and shown again when the terminal
-is live. DESIGN §8 (pane cards, Session Ended). **Checked live** (light):
-"…" only; the menu's split items and a split from them; an ended pane
-white beside an empty pane with no cursor box and its last output
-readable; a click beside the card focusing the pane; Dracula on the
-ended pane keeping the cursor hidden; Return respawning with the cursor
-back and typing working. **Not checked live:** dark system appearance;
-the disconnected, reconnecting, unavailable and host-removed
-placeholders; the reconnect ordering of the show sequence. Tests: 683,
-zero warnings.
-
-**Found in review, older than this step, not fixed (owner's decision
-pending):** `SwiftTermSurface.apply` sets `terminalView.font` on every
-call without comparing, and SwiftTerm 1.99.0's font setter ends in
-`terminal.softReset()` (application cursor keys and keypad mode off,
-cursor shown, scroll region, origin mode, wraparound, charset,
-attributes and colours reset; mouse reporting, the alternate screen and
-bracketed paste survive). `PaneView.viewDidMoveToWindow` applies the
-appearance whenever the pane enters a window, so a split, a tab switch
-or a zoom resets those modes for the program in the pane (seen live
-with DECRQM: `?1` and `?25` reset after ⌘D; a window resize alone left
-them). Proposed fix: set the font only when its name or size changed,
-and skip the re-apply when nothing changed. Committed as 6e0e0ca.
-
-October 31, 2026, late morning (owner's go, implementer → reviewer
-loop): **a split, a tab switch or a zoom no longer soft-resets the
-program in a pane.** `SwiftTermSurface.apply` sets the font only when
-its name or size changed (`appliedFont`); `PaneView` skips the surface
-when the appearance it computes equals the one last applied to the same
-surface (record cleared when the surface is replaced), still updating
-its card and header; the placeholder's cursor re-hide runs after the
-font apply. A font or size change (⌘= / ⌘- / ⌘0, Settings) still
-soft-resets the program's modes, and a theme change still replaces an
-OSC 4 palette: SwiftTerm properties, accepted and recorded in DESIGN §8
-with the lines consulted. Tests: same appearance, a theme change and a
-cursor-style change keep modes 1 and 25, a size change resets them; a
-pane re-entering a window applies nothing; ⌘= on an ended pane keeps the
-cursor hidden. **Checked live** (implementer and reviewer, light): `?1h`
-and `?25l` surviving ⌘D, ⌘2/⌘1 and zoom (DECRQM `?1;1`, `?25;2`, where
-before the fix they read `?1;2`, `?25;1`); vim with mouse=a keeping the
-mouse and arrows after a theme change and a tab switch; ⌘= enlarging
-text with the accepted reset; an ended pane keeping the cursor hidden
-through ⌘= and a theme change, Return respawning with the cursor back.
-**Incident:** the implementer's keystroke helper sent ⌘ and ⇧ as flags
-without pressing and releasing the modifier keys, leaving both held
-system-wide for a few minutes (the test build went full screen and
-zoomed from its typing); it released them, rewrote the helper, and the
-reviewer and the coordinator confirmed no modifier held afterwards
-(`CGEventSource.flagsState`). Tests: 686, zero warnings.
-
-Committed as c2c3aa2.
-
-November 4, 2026, evening (owner's decision, coordinator): **MIT
-License.** The owner plans to make the repository public and to put a
-simple site at armadale.dev (bought at Namecheap; a logo and a DMG link;
-GitHub Pages, free once the repository is public). Options weighed:
-plain MIT, MIT with the Commons Clause, the marketplace-only variant of
-it (as joseph/mud uses), BSL/FSL and AGPL; the owner first chose
-"anyone can read and fork, only I ship it through stores", then plain
-MIT for simplicity, as SwiftTerm, Ghostty and the persistence helper
-are. Added: `LICENSE` (MIT, the owner's name), `CONTRIBUTING.md`
-(contributions under the same license), `THIRD_PARTY_LICENSES.md`
-(SwiftTerm's and the persistence helper's MIT notices in full, credits
-for the six built-in palettes) and a README "License" section. Still to
-do before the switch to public, each for its own go-ahead: a scan of the
-history and scripts for anything that should not be public; the notices
-shipped inside the app bundle with a Help › Acknowledgements item (the
-MIT condition is that the notice accompanies every copy, and the DMG is
-a copy; in-app text must say "persistence helper", never the helper's
-name); the site under `docs/` (GitHub Pages serves a branch root or
-`docs/`, and Actions are off) with the DMG as a GitHub Release here (`releases/latest/download/Armadale.dmg` as a stable
-link); Namecheap DNS (A records to GitHub Pages, `www` CNAME, domain
-verification TXT) and Enforce HTTPS, which a `.dev` domain requires; a
-notarized DMG from a full `scripts/release.sh` run, since the installed
-build is made with `--skip-notarize`. The repository visibility change
-is the owner's to flip.
-
-Committed as 7047a64.
-
-November 4, 2026, later evening (owner: "go with all three"; coordinator
-scan and site, implementer → reviewer loop for the code, no live UI as
-the Mac was not declared free): **ready to go public.** (1) **Scan:** all
-80 commits and 663 unique blobs grepped for key material (private keys,
-GitHub/AWS/Slack/Anthropic token shapes, JWTs): none. The tree holds
-the team ID, the bundle id, the notary profile name, the Lima VM name
-and `/Users/donny` in test fixtures, none of them secret; HANDOFF and
-AGENTS describe this Mac in detail, which is the owner's call. Ever-
-tracked paths: only `.github/workflows/ci.yml` and superseded sources
-were deleted; no plist, key or env file was ever committed. (2) **Help ›
-Acknowledgements:** `Armadale/Resources/Acknowledgements.txt` (SwiftTerm's
-and the persistence helper's MIT notices verbatim, the palette credits,
-never the helper's name), `Armadale/Help/AcknowledgementsWindowController.swift`
-(one window kept by the app delegate like Keyboard Shortcuts, read-only
-selectable monospaced text, hidden in menu bar mode), the Help menu item
-without a shortcut, `AcknowledgementsTests` (the file cannot gain a
-notice the bundle lacks; no "zmx" in the resource). Review: no blocker;
-low findings fixed by the coordinator (DESIGN no longer claims the two
-files "cannot drift"; the inert find-bar lines dropped; the text view
-is the window's initial first responder; the About panel's "All rights
-reserved" now reads "MIT License"). Accepted: no test checks the app
-bundle itself for the resource (the reviewer confirmed it by hand);
-`showAcknowledgements` is covered by reading, not a test. **Not checked
-live:** the window's look in light and dark, ⌘W, bring-to-front on a
-second request, menu bar mode hiding; `scripts/check-quit.sh` not re-run
-(the quit code is untouched). (3) **Site:** `docs/index.html`, `docs/CNAME`
-(armadale.dev), `docs/.nojekyll`; icon, name, tagline, a Download button
-to `releases/latest/download/Armadale.dmg`, an All releases link and a
-Source link, dark mode, phone width; the reviewer's contrast finding
-fixed (dark text on the accent, 5.6:1). README "Releasing" gained step 4
-(tag, `gh release create` with the DMG uploaded under its versioned
-name and as `Armadale.dmg`) and "The website" (Pages from `main`
-`/docs`, DNS records, Enforce HTTPS). Every GitHub link on the page is
-dead until the repository is public, Pages is on and a release carries
-`Armadale.dmg`. Tests: 692, zero warnings.
-
-Committed as 7fc2e32. The owner then enabled Pages (main, `/docs`), set
-the Namecheap records, verified the domain and ticked Enforce HTTPS once
-GitHub's DNS check (stale for ~30 minutes after the records changed) and
-the Let's Encrypt certificate came through; https://armadale.dev is live
-(November 4, 2026, late evening).
-
-November 5, 2026, after midnight (owner: 0.1.1, dmgbuild, go; implementer
-→ reviewer loop, no Finder on screen): **the release DMG opens to a
-designed Finder window.** `scripts/fetch-dmgbuild.sh` installs dmgbuild
-1.6.5 (with ds_store 1.3.1 and mac_alias 2.2.2, the newest for Xcode's
-Python 3.9.6) into the git-ignored `Vendor/dmgbuild` venv from
-`scripts/dmgbuild-requirements.txt` (sha256-pinned, `--require-hashes
---only-binary`, `PIP_CONFIG_FILE=/dev/null`), stamping the requirements
-file's hash so `--check` catches a changed pin or hash.
-`scripts/render-dmg-background.swift` draws `scripts/dmg/background.png`,
-`x.png` and the two-representation `background.tiff` (600 × 400 pt,
-#F5F5F7 ground, a #6E6E73 arrow between the icon spots, caption "Drag
-Armadale to Applications" at y 320) deterministically; `scripts/dmg/settings.py`
-places Armadale.app at (150, 200) and Applications at (450, 200), 128 pt
-icons, 13 pt labels, window {{200, 250}, {600, 400}}, sidebar/toolbar/
-status/path bars off, the hidden files parked at (900, 900), the volume
-icon made at release time with iconutil from the appiconset. `release.sh`
-checks dmgbuild in Preflight (and that no volume named Armadale is
-mounted), builds the DMG with it, then mounts the image unbrowsed and
-checks inside before signing: the app identical to the archive (`diff
--r`), `codesign --verify --deep --strict`, `stapler validate` on the
-notarized path, the Applications link, the background, the volume icon
-flag and `.DS_Store`; an EXIT trap detaches on failure. `DMGLayoutTests`
-checks the committed images' pixel sizes and DPI and the settings values.
-Review: no blocker; the medium (nothing checked inside the image) and
-the lows fixed as above; accepted: no Python version guard (documented).
-**Not checked:** how Finder draws the window (whether `WindowBounds` is
-the content size or the frame, the 2x background on Retina, the volume
-icon on the desktop); the owner opens the notarized DMG. Verified
-without UI: a `--skip-notarize` run passes every in-image check; a
-broken app copy fails it and the image is detached. Tests: 695, zero
-warnings.
-
-Committed as a39f3ab (rebased over two GitHub-made CNAME commits from the
-Pages settings). Then `scripts/bump-build.sh --version 0.1.1 --commit`
-(7560281, build 27), a full `scripts/release.sh` run (app and DMG
-notarizations Accepted, stapled ticket validated inside the image,
-Gatekeeper "Notarized Developer ID" for both), tag `v0.1.1` at 7560281,
-and GitHub release v0.1.1 with `Armadale-0.1.1.dmg` and the same file as
-`Armadale.dmg` (the site's stable link; checked: the download redirects
-to it, the bytes match, `spctl` accepts, `stapler validate` passes). The
-first public release (November 5, 2026, afternoon). The owner has not yet
-opened the DMG to judge the Finder window, nor installed 0.1.1
-(`~/Applications/Armadale.app` is still the earlier 0.1.0 build).
-
-Committed as ade6f27. The owner judged the DMG window "great" and
-installed 0.1.1 (November 5, 2026).
-
-November 5 and 9, 2026 (owner: Mac free; live-check agents only, no code
-changes): **Help › Acknowledgements checked live**, light and dark
-(dark forced on the test build by a tiny injected dylib setting
-`NSApp.appearance`; `DYLD_INSERT_LIBRARIES` is dropped when the launch
-goes through `env` or `nohup`, so export it and exec the binary directly):
-the window, wrapping, overlay scrollbar, credits at the bottom, ⌘W with
-"Close Acknowledgements" in File, the same window returning to the front,
-⌘A/⌘C, hiding and returning in menu bar mode, and a real ⌘Q with the
-quit alert ("1 session is still running"; Keep Running in Menu Bar / End
-Sessions and Quit / Cancel) ending the session and exiting: all pass.
-Minor: a reopened window keeps its scroll position; the alert says "keep
-them running" for one session. **Found, not fixed (owner's go needed):
-menu bar mode does not activate the app.** With Armadale accessory and
-Terminal active, Settings… from the status item (pressed through
-accessibility) opens the Settings window under Terminal's front window,
-drawn inactive, the menu bar still Terminal's; Help › Acknowledgements
-then lands behind Settings. `showSettings` and `showAcknowledgements`
-call `NSApp.activate()` (cooperative since macOS 14), which the system
-refuses when the active app does not yield; whether a real mouse click
-on the status item counts as the user event that would let it through
-is untested (the click lies in the top-right region agents avoid).
-Candidate fix: `activate(ignoringOtherApps: true)` or a temporary
-`.regular` policy while an auxiliary window is shown, then a live check
-with a real status-item click. Incidents: on November 5 an agent's click
-hit a Calendar notification banner and opened Calendar (rule added to
-AGENTS.md with the modifier-key and clipboard rules); the same agent
-cleared the owner's clipboard after a copy test. The local `build/` and
-`Packages/*/.build` folders were deleted on the owner's request
-(November 9).
-
-Committed as 8ef4178.
-
-November 9, 2026, evening (owner's go, Mac free; implementer → reviewer
-loop with real status-item clicks under the new window-layer rule):
-**menu bar mode activates the app again.** Reproduced with a real click:
-Settings… and Open Armadale from the status item left the other app
-active (cooperative `NSApp.activate()` refused; a switch to `.regular`
-first refused too). Fix: `AppActivation.bringForward(allWindows:)` in
-`Armadale/App/MenuBarMode.swift` activates with
-`NSRunningApplication.current.activate(from: frontmostApp)` when another
-app is frontmost (not deprecated; let through on macOS 27 though the
-header documents it for a yielding app; the result is checked and a
-refusal falls back to `NSApp.activate()`), used by Settings, Keyboard
-Shortcuts, Acknowledgements and Open Armadale (the last with
-`.activateAllWindows`). Decision (coordinator, owner may overrule):
-Settings and the Help windows shown from menu bar mode keep the
-accessory policy, so no Dock icon appears and the menu bar stays the
-previous app's; key equivalents work. Also: the quit alert agrees in
-number for one session ("keep the session running … end the session
-later. Ending the session stops every program running in it."). DESIGN
-§8 rewritten (its old claim that real status-menu clicks activated the
-app was false). **Checked live** by both agents: Settings… from the
-status item makes Armadale active with the window in front and drawn
-active; Open Armadale brings the workspace forward, regular, with
-Armadale's menu bar and Dock item; ⌘W returns to the previous app; the
-one-session alert text. Review: no blocker; lows: result ignored (fixed
-by the coordinator), the Help items are not reachable from the status
-menu so their change is for consistency only. **Open, found by the
-reviewer, unverified:** the quit alert for a Dock or script quit still
-uses plain `NSApp.activate()` and DESIGN says it "brings it forward";
-after ⌘W on Settings in menu bar mode the app reported `hidden false`
-where DESIGN says it hides. Not tested: Open Armadale while already
-frontmost; ⌘Q from Settings in accessory mode. Tests: 696, zero
-warnings.
-
-Committed as dcdeb50.
-
-November 12, 2026 (owner's go, Mac free; a short live check by the
-coordinator, then the fix through the gate): **the quit alert comes
-forward again.** The reviewer's first open item was real: with
-Terminal active and a shell session running, a scripted quit opened the
-alert behind Terminal's front window with Armadale inactive (the plain
-`NSApp.activate()` refused, as for Settings). Fix: the alert uses
-`AppActivation.bringForward()` too (`askAboutRunningSessions`,
-`Armadale/App/AppDelegate.swift`); checked live the same way: Armadale
-active, its own menu bar, the alert in front. The second item was a
-probe artefact: after ⌘W on Settings in menu bar mode Terminal was
-frontmost again, as designed; `NSRunningApplication.isHidden` stays
-false for an accessory app after a successful `hide` (`NSApp.isHidden`
-is true; confirmed with a windowless accessory app). DESIGN §8 records
-both. Also seen: Settings… from a real status-item click came up in
-front and active (dcdeb50 holds). Still not tested: Open Armadale while
-already frontmost; ⌘Q from Settings in accessory mode. The installed
-0.1.1 has neither activation fix; a new release would ship them. Tests:
-696, zero warnings.
-
-ac7094b removed GitHub Actions: there is no CI. Every commit was made after
-the full local build and test command passed (452 tests at dac547f, zero
-warnings; 467 from step 8 on; 523 at the clean-exit change; 545 at the
-empty-workspace change; 551 at the last-pane change). The working tree was clean and nothing was
-running when work paused (October 19, 2026, evening).
-
-**Releases.** Armadale 0.1.0 (build 1) was built, notarized and stapled
-on October 19, 2026 from 72cf014 and installed to `~/Applications`
-(untagged). Armadale 0.1.0 (build 2) was built, notarized and stapled by
-`scripts/install-release.sh` on October 23, 2026 from 524c9da (both
-notary submissions accepted) and installed to `~/Applications`, replacing
-build 1; it is tagged **`v0.1.0`** (annotated, pushed). The build number
-is raised with `scripts/bump-build.sh` before each release. The DMG is
-not kept in the repository (`build/` is ignored and wiped by the script).
-
-Step 8 (October 19, 2026) came out of the macOS 27 investigation below:
-Armadale asks before quitting with running sessions and can stay in the
-menu bar instead (`docs/DESIGN.md` section 8, "Quitting with running
-sessions"). Owner decisions: a plain quit that leaves sessions running
-exists only in the status item's menu (from accessory mode, where the
-Dock shows nothing), never in the ⌘Q alert; the choice is rememberable
-through a General preference (Ask / Keep running in the menu bar / End
-sessions, default Ask); the status item shows the Panes glyph as a
-template image. Built with the implementer → reviewer loop (467 tests,
-zero warnings, `check-quit.sh` passing).
-
-Step 9 (October 19, 2026): Developer ID signing under team
-**YJ8LXVCB3T** (an individual enrolment under the owner's name; "Tiny
-Little Apps" is only the bundle id prefix), `scripts/release.sh`
-(archive, verify, notarize and staple the app, build, sign, notarize and
-staple the DMG, Gatekeeper checks), a README "Releasing" section. **No
-updater** in v1 (the repository is private, so a Sparkle feed has no
-public home; revisit if the repository or a website becomes public) and
-**no crash reporting**. Spec: `docs/DESIGN.md` section 11, "Release
-pipeline (step 9)". The keychain profile `armadale-notary` exists on this
-Mac and the first notarized `Armadale-0.1.0.dmg` was produced and
-accepted during the step's verification (not kept: `build/` is
-git-ignored and wiped by the script). Built with the implementer →
-reviewer loop. The app is arm64 only (macOS 27 has no Intel support);
-the bundled persistence helper stays universal for Intel Mac hosts.
-
-November 14, 2026 (implementer → reviewer loop on Opus 5.5, two review
-rounds, three live passes): **one Armadale process per state
-directory**, the first item of the architecture review's second pass.
-`StateLock` (ArmadaleCore) takes an exclusive `flock` on
-`armadale.lock` in the state directory, close-on-exec, held for the
-life of the process; `AppDelegate.init` takes it before
-`StateStore.load`. A second process on the same directory loads and
-saves nothing, starts no helper, shows "Armadale is already running",
-writes the holder's pid and the lock file to standard error and the
-log, and quits through the fatal launch path; after the alert it
-brings the other copy forward when that is a regular app. A lock that
-cannot be taken at all (no `flock` on the volume) is logged and the
-app runs without one. A fatal launch (this one, a newer or an
-unreadable state file) now brings itself forward with
-`AppActivation.bringForward()` and ignores a reopen while its alert is
-up. The scheme's Run action sets `ARMADALE_STATE_DIR=/tmp/armadale-dev`
-and `ARMADALE_DEFAULTS_SUITE=armadale-dev` (Profile inherits them; the
-test action does not, through a disabled placeholder variable that
-XcodeGen needs). `docs/DESIGN.md` sections 3, 8 and 11; README. Checked
-live, all on test builds in `/tmp/armadale-lock`: the refused copy's
-alert text read on screen, matching `InstanceLock.refusal` word for
-word; the state directory's listing identical before, during and after
-it; Return dismissing it, the copy quitting by itself and the first
-copy coming forward; SIGTERM with the alert up ending it in about
-60 ms; a session started from the chooser whose daemon, trampoline,
-shell and client held no descriptor on the lock; a relaunch taking the
-lock while that daemon ran; a refused copy while the first was in menu
-bar mode (alert shown, the first not activated, its windows still
-hidden); `scripts/check-quit.sh`, three scenarios. Known limit: builds
-before this one, 0.1.1 included, take no lock, so the installed app
-and a new build are not kept apart until the installed app is
-replaced; AGENTS.md's isolation rule still stands. Seen on the way: a
-normal launch started from a shell does not come forward (open items,
-Hierarchy and UI). Tests: 711 at this change (236 app + 247 core + 206
-sessions + 13 + 9).
-
-Then, the same day (same loop, three fix rounds, five live passes, all
-without input): **reclaim and save safety**, the review's orphan
-reclaim and save scheduling findings. The state file gained two
-fields, in schema 1 at that commit: `sparedSessionIDs`, sessions the
-orphan reclaim must never end, and `sessionListIncomplete`, set
-whenever a launch did not read `state.json` as written (a first
-launch, a missing
-or unreadable file, a recovery from a backup) and cleared once that
-launch has recorded what was running. A launch that may not reclaim
-ends nothing and spares every live session no saved session names,
-and every session whose socket exists in the runtime directory: the
-helper's listing leaves out a daemon that does not answer within about
-a second and still succeeds (measured with `kill -STOP`: exit 0 after
-1.06 s, nothing printed). The list never shrinks by itself. A launch
-that read a complete file ends only what is listed, unnamed and not
-spared, as before. Spared sessions are invisible: no pane shows them
-and End Sessions and Quit leaves them alone (open items, Session
-layer). The launch housekeeping keeps the logs and exit files of
-sessions that are listed or have a socket. `StateSaver` keeps its
-500 ms debounce and has a longest wait of 2 s from the first unwritten
-change; a retry pending after a failed write keeps its own time.
-`state.json.launch.bak` is the file a launch read successfully, copied
-before that launch's first save and tried after `state.json` and
-`state.json.bak`; the recovery alert names the backup it used, and a
-fresh start now means removing all three files. `docs/DESIGN.md`
-sections 3, 4, 8 and 13; README. Checked live on test builds in
-`/tmp/armadale-reclaim`: unreadable `state.json` and `.bak` with a
-running session (spared, alive after the next clean launch, still
-listed as spared after it was ended by hand); a hand-written file
-carrying the flag with nothing spared; a file without the new fields
-(the stray session ended, as before); SIGKILL at eight moments of an
-unclean launch; a stopped daemon the listing left out (spared by its
-socket, its log kept, counted as running); a first launch and a
-recovery leaving a good launch backup untouched, three unreadable
-files, a newer-version launch backup (fatal, nothing moved); the alert
-texts read on screen; `scripts/check-quit.sh`. Not staged live: a
-failing disk under a stream of changes (the retry timing has unit
-tests only; one attempt with a read-only state directory produced no
-save attempt at all, not looked into). Known limit: 0.1.1 ignores both
-fields and drops them at its next save, after which its own reclaim
-would end spared sessions. Tests: 748 at this change (244 app + 265
-core + 217 sessions + 13 + 9).
-
-Then, the same day (same loop, two review rounds; one live check with
-the owner's leave, the rest code and scripts): **a rule for the state
-file's version, held by fixtures.** The rule (`docs/DESIGN.md` section
-3): `schemaVersion` is bumped whenever a released build could not
-decode the file, or would decode it and lose something whose loss is
-unsafe; a released build answers a newer file by reading it without
-loss or by refusing it by version, never by treating it as damaged.
-Applied at once: **the state file is schema 2**, with a first
-migration step from 1 that changes only the version. Two reasons,
-both read from the tags: 0.1.0 has a non-optional `Pane.sessionID`
-and so cannot decode the empty panes 0.1.1 and later save, and 0.1.1
-would drop `sparedSessionIDs` at its next save. So a state directory
-saved by a build from this change on is refused by 0.1.0 and 0.1.1
-("This version of Armadale is too old for your saved layout"); they
-leave state files and sessions alone, but before that alert they
-install their own helper copies in `bin/` and remove other versions'
-copies there (open items, Shipping). Fixtures: one saved state per
-release, written by that release's own code in a temporary worktree
-of its tag (`Packages/ArmadaleCore/Tests/ArmadaleCoreTests/Fixtures/`;
-generators, and how to add the next one, in `scripts/state-fixtures/`),
-with tests that the working tree reads them. From the other side,
-`scripts/check-state-compat.sh` gives every release tag a file written
-by the working tree and fails when one treats it as damaged, or reads
-it and would save it back with something lost that
-`scripts/state-fixtures/accepted-drops` does not list; with today's
-file set back to schema 1 it reports 0.1.0 as unparseable and 0.1.1
-as losing the spared list and its flag. It is not part of the gate
-(about 18 s, it builds the old versions): run it before a release and
-whenever the state file's shape changes (README, "Releasing"). On the
-way: every fatal launch (another copy holds the lock, a newer file, an
-unreadable file) now installs no helper, prepares no runtime and
-removes no stale temporary file, checked live once at schema 99 with
-decoy helper copies in a test directory (only the lock file changed;
-the control launch at schema 2 removed the decoys); and a JSON
-boolean is no longer taken for a version. `docs/DESIGN.md` sections 3,
-8, 11 and 13; README. Tests: 761 at this change (248 app + 274 core +
-217 sessions + 13 + 9).
+Since the build order (changes to the app and its scripts; the
+investigations, the step 10 design and other documents-only commits
+are in `docs/HISTORY.md`):
+- October 18, 2026: the app icon, "Panes" (bbf81a4).
+- October 19, 2026: `scripts/install-release.sh` (cf9305c).
+- October 19, 2026: Armadale 0.1.0 build 1, from 72cf014 (untagged).
+- October 19, 2026: About panel copyright holder (f3855aa); sidebar
+  toggle moved (a2c236b); plain folder icon for tab groups (628c99e);
+  AGENTS.md: end test builds by pid (26c6699).
+- October 20, 2026: inline renaming in the sidebar and tab bar
+  (ba9ecf5).
+- October 20, 2026: the full-screen frame fix (f67d804).
+- October 23, 2026: Armadale 0.1.0 build 2, tagged `v0.1.0` (bump
+  fd96512; built from 524c9da).
+- October 23, 2026: About panel on two lines; no dimming of unfocused
+  panes (9e47bee).
+- October 23, 2026: a clean exit closes the pane (f218600).
+- October 23, 2026: an empty workspace is deleted automatically
+  (a651532).
+- October 23, 2026: a clean exit closes a workspace's only pane too;
+  `FullScreenSerializer`; Return presses the placeholder's button
+  (2462fe6).
+- October 24, 2026: step 10 (table above).
+- October 29, 2026: Shortcuts moves from Settings to Help › Keyboard
+  Shortcuts (c4e45e0).
+- October 29, 2026: sidebar icon colours (5b005b6), highlight on the
+  shown path (204627f), a click on a shown row writes nothing
+  (5249216).
+- October 29, 2026: the sidebar has no selection and no highlight
+  (831b9af).
+- October 30, 2026: sidebar title weight follows the shown path
+  (9162c7e).
+- October 30, 2026: the tab bar drawn like the native macOS 27 one
+  (60e107d).
+- October 30, 2026: tabs fill the track; three tab bar bugs fixed
+  (49fd474).
+- October 30, 2026: Show Tab items hidden from the Window menu; ⇧⌘N on
+  sidebar tab group rows (2b64971).
+- October 30, 2026: a pane context menu with a Theme submenu (ebec034).
+- October 30, 2026: no mouse event opens the pane menu (a9f13c8).
+- October 31, 2026: pane cards, designed (20b315b) and built (8f601d1).
+- October 31, 2026: Split Right and Split Down in the pane menu and as
+  header buttons (2695c1b).
+- October 31, 2026: header split buttons dropped; Session Ended no
+  longer dimmed (6e0e0ca).
+- October 31, 2026: a split, tab switch or zoom no longer soft-resets
+  the program (c2c3aa2).
+- November 4, 2026: MIT License (7047a64).
+- November 4, 2026: the pre-publication scan, Help › Acknowledgements
+  and the armadale.dev page (7fc2e32); the site went live that night.
+- November 5, 2026: the release DMG opens to a designed Finder window
+  (a39f3ab); 0.1.1 build 27 (7560281), tagged `v0.1.1` and released
+  on GitHub (ade6f27).
+- November 5 and 9, 2026: Help › Acknowledgements checked live; new
+  live-testing rules in AGENTS.md (8ef4178).
+- November 9, 2026: menu bar mode activates the app again (dcdeb50).
+- November 12, 2026: the quit alert comes forward again (704a941).
+- November 12, 2026: an architecture review, recorded (298e881); its
+  second pass, November 14, 2026 (75a22c8).
+- November 14, 2026: one Armadale process per state directory
+  (ab27dfe).
+- November 14, 2026: reclaim and save safety (64221bb).
+- November 14, 2026: a rule for the state file's version; schema 2
+  (d34d3af).
+- November 14, 2026: the documents split: `docs/DESIGN.md` holds the
+  contract, `docs/HISTORY.md` the change log and each section's
+  history, and this file where things stand.
 
 ## Next
 
-**Step 10, New Session (owner's request, October 24, 2026): done in
-three sub-steps (10a 507a52a, 10b 9168f0b, 10c 18faf87).** `docs/DESIGN.md` §8 "New sessions: the chooser, the dialog
-and favorites", §2 (`Pane.sessionID` optional, `SessionOptions`,
-`SessionRequest`, `Favorite`, the new intents), §3, §10 and
-§12 (step 10, three sub-steps) hold the agreed design. In short: a new
-pane never starts a shell by itself; it shows a chooser with the saved
-favorites, Cancel and New Session…; the New Session dialog (a sheet)
-takes Local or SSH (a picker of saved hosts plus Add Host…), a working
-directory, a profile, per-agent options (Claude Code: skip permissions,
-continue, model; Codex: bypass approvals and sandbox, sandbox mode,
-model; both: additional arguments) and an Add to Favorites checkbox with
-a prefilled name; Cancel and Start. Favorites are saved with the layout
-and get a Settings › Favorites page. Removed: File › New Tab with
-Profile, File › New Tab on Host, the tab bar "+" context menu, General's
-default profile and directory. Splits ask too; Respawn is unchanged; a
-chooser pane survives a quit as a chooser pane. Decisions the owner made
-on the way: keep the word Profile and the Profiles and Hosts pages as
-they are; the word for the thing is "session"; the button is Start; a
-favorite whose host or profile is gone is shown broken until edited or
-removed. The flag names were read from `claude 2.1.304 --help` and
-`codex-cli 0.163.0 --help` on October 24, 2026 (Codex has no
-`--full-auto` any more). The owner said not to care about files written
-by older builds (unreleased), so the state file stays schema 1 with
-additive decoding (0.1.0 had in fact been tagged the day before and
-cannot read an empty pane; schema 2 since November 14, 2026, Status
-above). Order: 10a model and removals, 10b dialog and
-Settings › Favorites, 10c the chooser; each through the implementer →
-reviewer loop. The owner gave the go-ahead for all of step 10 on October
-24, 2026 and asked only to be told when the Mac is needed for live UI
-work (10c; 10a and 10b were done code-only, no app launch).
+Nothing is in progress. The owner gave the go-ahead on November 14,
+2026 for the architecture review's items in the suggested order
+("Architecture review" and its second pass, at the end of the open
+items), and they are done: the lock, the orphan reclaim and save
+scheduling changes, the schema rule, and the documents (this file cut
+to where things stand, its change log and the history of each
+`docs/DESIGN.md` section moved to `docs/HISTORY.md`). What comes next
+waits for the owner.
 
-**10a (model and removals) is committed:** empty panes, `SessionOptions`,
-`SessionRequest`, `Favorite`, `startSession(in:request:)`, the favorite
-intents, the agent flag table (pulled forward from 10b) in
-`AgentIntegration`, `ShellWords.split`, respawn with the session's
-options; the two File items, the "+" context menu and General's defaults
-removed; an **interim** (`WorkspaceActions.withInterimShells`, marked
-`Step 10a interim`) gives every new pane a local shell in the focused
-pane's directory until 10c, so between 10a and 10b there is no way to
-start a remote or non-shell session except Respawn. Reviewer findings,
-all low, were fixed (directory trimming, repair wording, `ShellWords`
-wording) except two notes for later: a pane whose `sessionID` names a
-missing session is kept and shows blank (as at HEAD before 10a); 10c's
-repair should turn it into an empty pane that shows the chooser. **10b
-live check to do:** nobody has run a real Codex session with `--model`,
-`--sandbox` or `--dangerously-bypass-approvals-and-sandbox` to see
-whether they, like the `-c` overrides §10 records, make Codex run
-"without the shared background server"; they parse together fine
-(`codex … completion zsh` exits 0). "Add Host…" needs its own way to open
-Settings › Hosts in 10b, since `showHostsSettings` went with the menu.
-Tests: 578 at 10a (129 app + 223 core + 206 sessions + 13 + 7).
-
-**10b (the dialog and Settings › Favorites) is committed:** the New
-Session sheet (`NewSessionSheet` over the view-free `NewSessionForm`,
-tested), Settings › Favorites, `AppDelegate.showSettings(tab:)` for Add
-Host…, and the interim changed: every empty pane now gets the sheet from a
-per-window `NewSessionPresenter` (marked `Step 10b interim`), Cancel
-closes the pane and cascades, so between 10b and 10c the app already
-asks for every new pane, only without the favorites list in the pane.
-The reviewer's blocker: **AppKit's `terminate:` returns without calling
-`applicationShouldTerminate` while any window has a sheet attached**
-(confirmed with a standalone program; `presentAsSheet` and `beginSheet`
-alike), so ⌘Q, the Quit item and SIGTERM did nothing with a New Session
-sheet up. Fixed by `ArmadaleApplication` (an `NSApplication` subclass,
-the principal class) that takes every New Session sheet down before the
-terminate runs; panes stay empty and saved; a cancelled quit brings the
-sheets back. `scripts/check-quit.sh` now has three scenarios (sheet up,
-normal, fallback alert), all passing (SIGTERM with the sheet up quit in
-351 ms). Also fixed from the review: respawn dropped `Session.options`
-after the first respawn (10a bug in `SessionController`); a sheet
-outliving its pane's move to another workspace; a host added while the
-sheet is open becomes the selected host; Choose… is a sheet on the sheet;
-switching Claude Code ↔ Codex clears skip, continue, sandbox and model;
-the New Favorite sheet sizing (`.presentationSizing(.fitted)`, **not
-checked live**). Known from the live passes: the directory prefill comes
-from `Session.workingDirectory`, which only OSC 7 updates, and the
-owner's zsh sends none, so the prefill is `~` until shell integration
-exists (owner decision, not started). Not checked live in 10b: full
-screen and menu bar mode with a sheet up, a host deleted while the sheet
-is open, broken favorites in Settings, the host-removal count sentence,
-Codex options, a real SSH start. Tests: 604 at 10b (155 app + 223 core
-+ 206 sessions + 13 + 7).
-
-**10c (the chooser) is committed:** every empty pane shows the New
-Session chooser (`EmptyPaneView` hosting `NewSessionPaneView`, decisions
-in the view-free `NewSessionChooser`): favorites (icon, name, host badge,
-directory; a broken one dimmed with its reason, inert, still editable),
-a hint when there are none, Cancel and New Session…; ↑/↓ select (broken
-ones skipped, ↑ from the first returns to none), Return starts the
-selection or opens the dialog, Escape closes the pane and cascades, only
-in the focused pane; right-click Edit… / Remove. The 10b interim
-presenter is gone; the dialog's Cancel returns to the chooser; a
-cancelled quit brings no sheet back; no sheet opens during a full-screen
-transition or while the window closes; a sheet ends when its pane leaves
-the window's workspace. Repair turns a pane whose session is missing into
-an empty pane. `scripts/check-quit.sh` scenarios: chooser up, normal
-(attaches to a session the helper creates first), fallback alert. A tab
-of only empty panes shows no status glyph (`StatusGlyph` takes nil).
-Both cards (`PaneCard`) go compact below 340 pt. Repair and drop logs go
-through `os.Logger` (subsystem `com.tinylittleapps.armadale`, category
-`state`, public) because NSLog is `<private>` in `log show` on macOS 27.
-Reviewed with two live passes (all scripted checks passed: quit script,
-every chooser path, Return/Escape routing in splits, favorites
-edit/remove/broken, SIGTERM with the dialog and the Edit Favorite sheet
-up, a tab with the dialog up dragged to another window, full screen,
-⌘Q counting). Not checked live: menu bar mode with a chooser pane,
-keypad Enter, hover, a scrolling favorites list, dark mode, ⇧⌘N / tab bar
-"+" / sidebar New Tab in 10c (they share the path), Add Host… from the
-Edit Favorite sheet, zoom with a chooser, the compact Disconnected and
-Unavailable cards. Known: compact chooser rows show only icon and name,
-so a remote favorite in a narrow pane does not show its host. Tests: 621 at 10c (169 app +
-226 core + 206 sessions + 13 + 7).
-
-Other candidates, each needing an owner decision:
-the Ghostty second renderer (below), the open items below, a public home
-for an update feed, and what step 8 should say or do about macOS 27's
-"Allow in the Background" switch, which ends every session a few seconds
-after any quit when it is off, from the menu bar too (tested October 19,
-2026, evening; "macOS 27: Allow in the Background switched off" below).
-The owner deferred that last decision on October 19, 2026; it is an
-open item, not started.
-
-An architecture review on November 12, 2026 added candidates of its
-own, with a suggested order: "Architecture review" at the end of the
-open items below. A second pass on November 14, 2026 added three
-findings and put a new one first, a lock against two processes
-sharing one state directory: "Architecture review, second pass",
-after it. The lock, the orphan reclaim and save scheduling changes,
-and the schema rule are done (November 14, 2026, Status above). The
-owner gave the go-ahead the same day for the rest in the suggested
-order, which leaves the documents. Attaching restored sessions at
-launch, showing or re-adopting spared sessions, and a fork of the
-persistence helper still wait for owner decisions.
+Waiting for owner decisions:
+- **Attaching restored sessions at launch**, a step of its own: it
+  needs an owner decision on pane sizes ("Restored sessions in tabs not
+  shown yet are not attached" and what the second pass adds to it).
+- **Showing or re-adopting spared sessions** (open items, Session
+  layer, and "Adds to Orphan reclaim").
+- **A fork of the persistence helper** ("The persistence helper's
+  workarounds").
+- **The Ghostty second renderer** ("Decisions pending" below).
+- **An updater.** There is no updater in v1 (step 9: the repository
+  was private then, so a Sparkle feed had no public home). The
+  repository is public now and https://armadale.dev is live, so a feed
+  has a home (GitHub Releases or the site); whether a later version
+  gets an updater is the owner's call.
+- **macOS 27's "Allow in the Background" switch:** what step 8 should
+  say or do about it, since it ends every session a few seconds after
+  any quit when it is off, from the menu bar too (tested October 19,
+  2026, evening; "Decisions pending" below). The owner deferred that
+  decision on October 19, 2026; it is an open item, not started.
+- Any of the open items below.
 
 ## Open items carried forward
 
@@ -1080,6 +224,10 @@ Session layer
   long, so an allowed reclaim in one would end the other's sessions
   (inferred from the code, not reproduced; it needs two long paths,
   and test directories under `/tmp` are short).
+- Not staged live (November 14, 2026, reclaim and save safety): a
+  failing disk under a stream of changes (the retry timing has unit
+  tests only; one attempt with a read-only state directory produced no
+  save attempt at all, not looked into).
 
 Hierarchy and UI
 - One extra SIGWINCH reaches each pane after relaunch (harmless at a
@@ -1102,18 +250,6 @@ Hierarchy and UI
   six further runs lost nothing. Not reproduced; watch for it. Return
   on a selected sidebar row does not start a rename (the List never
   has keyboard focus); only double-click and the context menu do.
-- macOS 27 puts an "Ask Siri" field at the top of the sidebar's context
-  menus (workspace, tab group and tab rows). Investigated October 23,
-  2026: it is AppKit's "assistant field", not a context menu plug-in
-  (`allowsContextMenuPlugIns = false` leaves it; SwiftUI's
-  `contextMenuIntelligentAssistantBehavior` is not public). It appears
-  only in context menus inside a SwiftUI `List`, not for `.contextMenu`
-  outside a List (the tab bar) nor for AppKit `popUpContextMenu`,
-  `popUp(positioning:)` or `NSTableView.menu`. The only working removal
-  was a private AppKit setter on each menu as it is built; the owner
-  ruled out private API and **withdrew the request**. If it comes back,
-  the public route is AppKit-built pop-up menus for the sidebar rows,
-  which means mapping the click to its row.
 - Empty workspaces (October 23, 2026), predating the change: a Dock
   click does nothing while the Settings window is the only window and
   no workspace exists (`hasVisibleWindows` is true; ⌘N works); a
@@ -1184,6 +320,12 @@ Menu bar mode (step 8), from its review
   Whether launchd lists the session daemons under Background App
   Activity after a quit is still unknown (needs root or the System
   Settings UI).
+- Decision (coordinator, November 9, 2026; owner may overrule):
+  Settings and the Help windows shown from menu bar mode keep the
+  accessory policy, so no Dock icon appears and the menu bar stays the
+  previous app's; key equivalents work.
+- Still not tested (November 9 and 12, 2026): Open Armadale while
+  already frontmost; ⌘Q from Settings in accessory mode.
 
 Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
@@ -1205,16 +347,84 @@ Shipping (step 9)
   `scripts/check-state-compat.sh` before a release, and add the new
   tag's fixture after it (`scripts/state-fixtures/README.md`). The
   comparison step needs `/usr/bin/python3`, which Xcode provides.
+- Known limit of the instance lock (November 14, 2026): builds before
+  it, 0.1.1 included, take no lock, so the installed app and a new
+  build are not kept apart until the installed app is replaced;
+  AGENTS.md's isolation rule still stands.
+- The installed 0.1.1 has neither activation fix (dcdeb50, 704a941);
+  a new release would ship them.
+
+From finished changes: not checked live, and found and not fixed
+- Step 10, New Session (October 24, 2026).
+  - 10b live check to do: nobody has run a real Codex session with
+    `--model`, `--sandbox` or
+    `--dangerously-bypass-approvals-and-sandbox` to see whether they,
+    like the `-c` overrides §10 records, make Codex run "without the
+    shared background server"; they parse together fine (`codex …
+    completion zsh` exits 0).
+  - The directory prefill comes from `Session.workingDirectory`, which
+    only OSC 7 updates, and the owner's zsh sends none, so the prefill
+    is `~` until shell integration exists (owner decision, not
+    started).
+  - Not checked live in 10b: full screen and menu bar mode
+    with a sheet up, a host deleted while the sheet is open, broken
+    favorites in Settings, the host-removal count sentence, Codex
+    options, a real SSH start.
+  - Not checked live in 10c: menu bar mode with a chooser pane, keypad
+    Enter, hover, a scrolling favorites list, dark mode, ⇧⌘N / tab bar
+    "+" / sidebar New Tab in 10c (they share the path), Add Host… from
+    the Edit Favorite sheet, zoom with a chooser, the compact
+    Disconnected and Unavailable cards. Known: compact chooser rows
+    show only icon and name, so a remote favorite in a narrow pane does
+    not show its host.
+- Help › Keyboard Shortcuts (October 29, 2026, c4e45e0). **Not checked
+  live** (the Mac was not free): the window itself (Help › Keyboard
+  Shortcuts, its size, ⌘W closing it, menu bar mode).
+- Sidebar (October 29, 2026). Not checked live: that `appearsActive`
+  flips the icons on every activation path (5b005b6). From 831b9af:
+  **found and not fixed:** a double-click on another workspace's row
+  whose window, once brought forward, covers the clicked spot starts no
+  rename (the second click lands in that window); the context menu's
+  Rename works. **VoiceOver was not checked live.**
+- Tab bar (October 30, 2026). Increase Contrast strengthens the
+  hairlines (tested, not seen live; 60e107d). From 49fd474: **known and
+  not fixed:** dragging a tab does not auto-scroll the track, so only
+  visible tabs are drop targets. **Not checked live:** the attention
+  reveal's scroll (same selection-change path), a sidebar toggle at the
+  same moment as a selection change, a tab closed during a live resize,
+  and the last fix in dark mode.
+- Window menu and sidebar badge (October 30, 2026, 2b64971). **Not
+  checked live** (the Mac was not free): the Window menu's look without
+  the items and the sidebar badge; the owner will see both on the next
+  install.
+- Per-pane themes (October 30, 2026, ebec034). **Not re-verified by
+  the reviewer:** ⌘Q through the quit alert then relaunch, respawn,
+  theme import/remove, forced light, the Session Ended placeholder,
+  attention colours on a themed pane. (Its Control-click items went
+  with the mouse paths in a9f13c8.)
+- Pane cards (October 31, 2026, 8f601d1). **Not checked live:** the
+  *Disconnected* placeholder, Increase Contrast, dark mode for the
+  review fixes, release on the respawn path (the close path is
+  tested). The "Show pane headers" preference is deferred
+  (`docs/DESIGN.md` section 13).
+- Split Right and Split Down in the pane menu (October 31, 2026,
+  2695c1b). **Not checked live:** dark mode, the dialog's directory
+  after a split (unit-tested), a pane moved to another window.
+- Session Ended no longer dimmed (October 31, 2026, 6e0e0ca). **Not
+  checked live:** dark system appearance; the disconnected,
+  reconnecting, unavailable and host-removed placeholders; the
+  reconnect ordering of the show sequence.
+- Help › Acknowledgements (November 5 and 9, 2026). Minor: a reopened
+  window keeps its scroll position.
 
 Architecture review (November 12, 2026)
 
 Findings from reading the documents and the code. Nothing was built or
-run, so none is reproduced live, and none is started. Suggested order:
-the orphan reclaim and the save scheduling first (small, in
-`ArmadaleCore` and `AppDelegate`, testable without launching the app),
-the schema rule before the next change to the state file's shape, then
-the documents; attaching restored sessions at launch needs an owner
-decision on pane sizes and is a step of its own.
+run, so none is reproduced live. Of its suggested order, the orphan
+reclaim, the save scheduling and the schema rule were built on November
+14, 2026, and the documents were split the same day
+(`docs/HISTORY.md`); attaching restored sessions at launch needs an
+owner decision on pane sizes and is a step of its own.
 - **Restored sessions in tabs not shown yet are not attached.**
   `SessionRegistry.startIfNeeded` is called only for the panes of a
   window's selected tab (`ContentViewController.show`) and by
@@ -1226,42 +436,6 @@ decision on pane sizes and is a step of its own.
   every live restored session after launch needs a size before the
   pane is laid out (an attach at another size resizes the program);
   saving each pane's last grid size would give one.
-- **Orphan reclaim is held back for one launch only.** After an
-  unreadable state file (`.unparseable`, with or without a usable
-  backup) `stateLoadedCleanly` is false and nothing is killed, but
-  that run saves a clean file (`ensureWorkspacesToOpen` makes a
-  workspace, the quit flushes). The next launch loads it cleanly and
-  `OrphanReclaimer` ends every live session it does not name: all of
-  them after a fresh start, those newer than the backup after a
-  recovery. The quarantined `state.json.corrupt-<time>` is kept, but
-  the sessions it names are gone by then. Possible: save with the
-  state that its references are incomplete, and reclaim only sessions
-  created after that. **Built November 14, 2026** (Status above): the
-  flag is `sessionListIncomplete`, and the sessions found are spared
-  for good instead of being told apart by age.
-- **No rule for an older build reading a newer file.** The schema is
-  still 1 with additive decoding (`Migrations.steps` is empty), which
-  DESIGN section 3 justifies for a new build reading old files. Since
-  v0.1.0 an older build is a real reader: a change it cannot decode,
-  made without a version bump, is `.unparseable` there (quarantine,
-  fresh start, then the reclaim above) instead of the safe
-  `.newerVersion` alert, and a key it does not know is dropped by its
-  next save. Rule to adopt: bump `schemaVersion` whenever a released
-  build could not decode the file. No test reads a state file written
-  by a released version; a fixture per release would hold the rule.
-  **Built November 14, 2026** (Status above): the rule, schema 2, a
-  fixture per release, and `scripts/check-state-compat.sh`.
-- **Save scheduling.** Every title change (`AppModel.setTitle`, OSC
-  0/2) increments `changeCount`, and `StateSaver.schedule` restarts
-  its 500 ms timer on every change with no longest wait, so programs
-  that keep changing their titles (several agents at work) can put
-  layout saves off until the model is quiet or the app quits; a crash
-  meanwhile loses them. New sessions are safe
-  (`onRuntimeVersionRecorded` saves at once). `state.json.bak` is
-  replaced by every save (`StateStore.rotateBackup`), so two saves of
-  a bad state leave no good copy; a backup kept once per launch would.
-  **Built November 14, 2026** (Status above): a longest wait of 2 s,
-  and `state.json.launch.bak` beside the per-save backup.
 - **The persistence helper's workarounds.** Create's double attach,
   attach-only through `/usr/bin/true`, telling the cases apart by a
   client's first bytes within 2 s, the RIS filter, the flood reattach
@@ -1269,25 +443,27 @@ decision on pane sizes and is a step of its own.
   for what zmx 0.8.1 lacks. An attach-only flag, the program's exit
   status and a bounded client buffer, upstream or in a fork, would
   remove most of them.
-- **The documents.** `docs/DESIGN.md` is 235 KB (3,644 lines, section
-  8 alone 1,440) and this file 84 KB, and AGENTS.md has every agent
-  read both before changing code. DESIGN.md mixes the contract with
-  its history: 69 lines carry an October 2026 date or "until then".
-  Separating what is true now from a decision log, and cutting this
-  file's Status to the current state, would make the contract
-  findable.
+- **The documents.** Split on November 14, 2026 (`docs/HISTORY.md`,
+  last entry of Part 1). What is left of the finding: `docs/DESIGN.md`
+  is still about 3,700 lines (section 8 alone about 1,350), because the
+  contract keeps every behaviour; only its history left. AGENTS.md
+  still has every agent read all of it and this file before changing
+  code. Letting an agent read sections 1 and 2 and the sections it
+  will change is the owner's rule to relax.
 - **Live UI testing shares the owner's screen.** Most of AGENTS.md's
   "Rules learned the hard way" guards against synthetic input landing
   in the wrong place. A macOS guest VM for those passes would remove
   the risk instead of guarding against it.
-- Smaller: `AppDelegate` (955 lines) holds launch, the quit paths,
-  menu bar mode and window management, and the quit paths already
-  need `scripts/check-quit.sh`; about 20 `NSLog` calls remain beside
-  two `Logger`s, although NSLog is `<private>` in `log show` on macOS
-  27 (10c, above); the load-sensitive flood tests run beside four
-  other test bundles in the gate. Seen in review on November 14, 2026:
-  a clean `xcodebuild … build-for-testing` into a fresh DerivedData
-  fails with "Unable to resolve module dependency: 'Armadale'" at
+- Smaller: `AppDelegate` (955 lines on November 12, 2026; about 1,150
+  two days later) holds launch, the quit paths, menu bar mode and
+  window management, and the quit paths already need
+  `scripts/check-quit.sh`; some 17 `NSLog` calls remain in the app
+  beside the `Logger`s, although NSLog is `<private>` in `log show` on
+  macOS 27 (10c, `docs/HISTORY.md`); the load-sensitive flood tests
+  run beside four other test bundles in the gate. Seen in review on
+  November 14, 2026: a clean `xcodebuild … build-for-testing` into a
+  fresh DerivedData fails with "Unable to resolve module dependency:
+  'Armadale'" at
   `ArmadaleAppTests/SidebarShownPathTests.swift:4` (`@testable import
   Armadale`), while the gate's `build test` passes from a fresh
   DerivedData; older, not looked into.
@@ -1295,31 +471,10 @@ decision on pane sizes and is a step of its own.
 Architecture review, second pass (November 14, 2026)
 
 The findings above were read against the code again and stand. Three
-are new and three add to ones above. Again from reading only: nothing
-was built or run, none is reproduced live, and none is started.
-Suggested order now: the instance lock first (small, and it closes one
-way into the orphan reclaim), then the orphan reclaim and the save
-scheduling, the schema rule and the documents as above; attaching
-restored sessions at launch stays a step of its own.
-- **New: nothing stops two Armadale processes sharing one state
-  directory.** There is no lock (no `flock`, no
-  `LSMultipleInstancesProhibited`), `StateLocation.directory` falls
-  back to the real `~/Library/Application Support/Armadale` whenever
-  `ARMADALE_STATE_DIR` is unset, and the scheme's Run action in
-  `project.yml` sets no environment, so isolation rests on AGENTS.md's
-  rule alone. A test build started without the variable while the
-  installed app runs loads the same `state.json` and attaches to the
-  same sessions; each process then saves its own model over the
-  other's (`StateStore.save`, last writer wins), a pane closed in one
-  ends a session the other shows, and a session created in the process
-  whose save loses is unreferenced at the next clean launch, where
-  `OrphanReclaimer` ends it. Possible: an exclusive `flock` on a file
-  in the state directory, taken in `AppDelegate.init` before
-  `StateStore.load` and held for the life of the process (a second
-  process explains and quits, or activates the first), and an
-  `ARMADALE_STATE_DIR` in the scheme's Run environment. Test builds
-  with their own state directory are unaffected. **Built November 14,
-  2026** (Status above).
+are new and three add to ones above. Again from reading only: none is
+reproduced live. The first new one, the instance lock, was built on
+November 14, 2026 (`docs/HISTORY.md`); attaching restored sessions at
+launch stays a step of its own.
 - **New: the status of a session never shown is the launch probe's
   answer, and is never refreshed.** For a restored session without a
   controller, `SessionRegistry.status(of:)` answers from `liveAtLaunch`
@@ -1332,10 +487,6 @@ restored sessions at launch stays a step of its own.
   status item's menu show. It is corrected when the tab is first
   shown. Same cause as "Restored sessions in tabs not shown yet are
   not attached", and attaching them at launch removes it.
-- **New: `docs/DESIGN.md`'s status paragraph is out of date.** Line 7
-  still says "Status (October 19, 2026). All nine steps", before step
-  10 and both releases (v0.1.0, v0.1.1). Small by itself; an example
-  for "The documents" above.
 - **Adds to "Restored sessions in tabs not shown yet are not
   attached".** A controller exists only inside a pane view
   (`SessionRegistry.panes` is `[SessionID: PaneView]`, and
@@ -1360,7 +511,7 @@ restored sessions at launch stays a step of its own.
   sessions created elsewhere" would still hold (these are Armadale's
   own). Owner decision; hosts are a separate question, since several
   Macs may share a host's `~/.armadale`. **Partly built November 14,
-  2026** (Status above): the reclaim now spares what it cannot account
+  2026** (`docs/HISTORY.md`): the reclaim now spares what it cannot account
   for, but nothing shows the spared sessions or offers them back; that
   part is still the owner's decision (open items, Session layer).
 - **Adds to "Save scheduling".** Besides a longest wait, the title and
@@ -1371,14 +522,15 @@ restored sessions at launch stays a step of its own.
   attached. `AppModel` is one `@Observable` object and
   `displayTitle(for:)` reads `sessions`, so every title change also
   re-evaluates the sidebar and tab bar views that show titles, in
-  every window; not measured. Not built: the longest wait (Status
-  above) bounds the delay, and titles still schedule saves.
+  every window; not measured. Not built: the longest wait
+  (`docs/HISTORY.md`) bounds the delay, and titles still schedule saves.
 
-## Investigations (October 19, 2026), decisions pending
+## Decisions pending
 
-Three things looked into after step 7. None is started; each needs an
-owner decision before it becomes a step. Details that belong to the
-design contract are in `docs/DESIGN.md` where noted.
+Looked into after step 7 (October 19, 2026). Each needs an owner
+decision before it becomes a step. Details that belong to the design
+contract are in `docs/DESIGN.md` where noted; the full accounts of the
+two macOS 27 investigations are in `docs/HISTORY.md`.
 
 ### A second renderer: Ghostty behind `TerminalSurface`
 
@@ -1415,120 +567,23 @@ ownership into the renderer.
 Proposed step: a `GhosttySurface` package implementing `TerminalSurface`
 over libghostty-spm's in-memory session, registered in `SurfaceRegistry`
 as a second renderer with SwiftTerm staying the default, then compared on
-real sessions. Decision needed: whether to spend a step on this before or
-after step 9 (Ship).
+real sessions. Decision needed: whether and when to spend a step on
+this.
 
 ### macOS 27: "Running in Background" after quit — tested, decided (step 8)
 
 Since macOS 27 the Dock keeps an app's icon with a light grey indicator
 and the tooltip "Running in Background" when processes that originate
 from the app are still alive after quit (Apple support article 125671).
-Tested live on October 19, 2026 (isolated state directory, fresh session
-each run, Dock driven through accessibility). Results:
-
-- **The Dock's "Stop Running in Background" ends every session.** It
-  sends SIGTERM to every process in the session tree at once (a trap in
-  the session shell and one in a background job both recorded TERM
-  before the daemon's own SIGHUP arrived). The daemon logs "SIGTERM
-  received, shutting down gracefully", unlinks its socket and SIGHUPs the
-  shell. No SIGKILL follows: a process that ignores SIGTERM survives,
-  orphaned, but the session is gone. The icon leaves the Dock once the
-  tree is dead; a quit with nothing left behind shows no indicator.
-- **A first-quit prompt exists.** On quit with a live session the
-  system asked the owner: "“Armadale” was closed. Allow this app to run
-  in the background in the future?", with Don't Allow / Allow. Every
-  user will see this on their first quit with a session running, and
-  the wording ("updating or syncing data") makes Don't Allow sound
-  harmless. What the disallowed state does was **tested on October 19,
-  2026 (evening)**: macOS ends every session process 1 to 5 s after any
-  quit, from the menu bar too (section below). The prompt's own Don't
-  Allow button was not pressed (the stored Allow cannot be cleared on
-  this Mac without `sudo sfltool resetbtm`, which resets every app);
-  it records the same "off" state as the switch. Apple's deployment
-  guide: "if background tasks are started by an app and remain active
-  after a user quits the app, the user is prompted to allow or not allow
-  the background tasks to remain active"; an MDM Service Management
-  profile can suppress the prompt by bundle id or team id.
-- **Disclaiming responsibility does not help.** With
-  `responsibility_spawnattrs_setdisclaim` on the `posix_spawn` in
-  `spawnOnPTY` (symbol via `dlsym`), every process in the tree became its
-  own responsible process (daemon, shell, client), yet the Dock still
-  showed the indicator and its stop item still killed the daemon. The
-  only effect was on privacy prompts: `ls ~/Desktop` from inside a
-  session produced "“ctty-exec-0.1.0” would like to access files in your
-  Desktop folder" (the installed helper copy's file name) instead of
-  Armadale. The change was reverted.
-- **A launchd job submitted from inside a session does not escape
-  either.** `launchctl submit` from the pane gave the job its own
-  coalition and responsibility, but after quit the Dock still showed
-  Armadale, and the stop item killed the job and removed its launchd
-  entry. The attribution is kept by launchd across fork, exec, disclaim
-  and `launchctl submit`; nothing a child does after spawn changes it.
-  Option 3 of the earlier plan (transient launchd agents started by the
-  app) is therefore out as well.
-
-What Apple says (developer forums, DTS replies on the macOS 26 version of
-this feature, thread 799162): apps should quit when told; background work
-that outlives the app must be visible, as a menu bar status item, a
-window, or an entry in System Settings › Login Items & Extensions.
-Keyboard Maestro's forum reports that its Engine avoids the Dock
-indicator when it runs as a login item rather than being launched by the
-editor. Against that, forum thread 835214 (macOS 27 beta, FB23203848)
-reports an `SMAppService` agent still giving the parent app the grey dot
-after quit, and thread 848726 reports turning an app off under Background
-App Activity sends its `SMAppService` daemon SIGTERM. Thread 847300: a
-background-only app (`LSUIElement`) now appears in the Dock with the
-"Running in Background" subtitle. No API, entitlement or Info.plist key
-opts out.
-
-Options considered (3 was chosen and became step 8):
-1. Keep the architecture, accept the indicator and the prompt, document
-   both, and make the sessions survivable: a visible "sessions are still
-   running" cue at quit (an alert, or a window that stays while sessions
-   are alive) so the first-quit prompt is understood, and a note in the
-   README. Does not stop a user clicking Don't Allow or Stop.
-2. Move session ownership out of the app's process tree into a
-   `SMAppService` login item or agent ("Armadale Sessions"): a small
-   server that launchd starts and that owns the persistence daemons; the
-   app attaches through it. It appears under Login Items & Extensions
-   with the app's name, which is Apple's sanctioned form, but thread
-   835214 suggests the Dock may still show the parent app, and a user
-   turning it off there still SIGTERMs it. Needs a prototype before it
-   becomes a step: register an agent, start a daemon from it, quit, and
-   see what the Dock and the toggle do.
-3. Do not quit: keep a status item while sessions are alive (the
-   "visible presence" exemption). **Prototyped and tested on October 19,
-   2026**, then built as step 8. The prototype: ⌘Q with live sessions shows an
-   alert, "N sessions are still running", with *Keep Running in Menu
-   Bar* (default), *End Sessions and Quit* (destructive) and *Cancel*.
-   Keep hides every window, switches the activation policy to accessory
-   and adds a status item whose menu shows the count, *Open Armadale*,
-   *Quit, Keep Sessions Running* and *End Sessions and Quit*. Observed:
-   - In menu bar mode Armadale is **not in the Dock at all**, still not
-     after 90 s, and no system dialog appeared. The daemon and its client
-     stay attached. *Open Armadale* brings the window and Dock icon back.
-   - *Quit, Keep Sessions Running* from the status menu quits from
-     accessory mode: the daemon survives and the Dock shows **no**
-     "Running in Background" item, checked at 3 s and 20 s. A quit from
-     the normal (regular) policy with the same daemon alive does show it.
-     The Dock decorates an existing tile; an accessory app has none.
-     Whether launchd still lists the daemon under Background App
-     Activity is unknown (needs root or System Settings).
-   - Relaunch reattaches the pane to the same session. *End Sessions and
-     Quit* kills every session (controllers for shown panes, backends for
-     the rest), the daemon logs the kill, the socket is removed, and the
-     app exits with nothing left; no Dock item.
-   - SIGTERM (logout) bypasses the alert and quits as before; the
-     `check-quit.sh` paths are unchanged in principle but were not rerun.
-   Open questions for making this a step: wording; whether a quit from
-   menu bar mode should be the only "keep running" quit; whether the
-   first-quit system prompt still appears for an accessory-mode quit
-   (answered below: no prompt was seen, and `loginwindow` treats the
-   exited accessory app as never user-visible);
-   the Settings window and notifications while in menu bar mode; the
-   `.terminateLater` note in DESIGN.md §8 (the prototype cancels the
-   quit, ends sessions in a Task, then calls terminate again, so it does
-   not depend on `.terminateLater`).
+Tested live on October 19, 2026: the Dock's "Stop Running in
+Background" ends every session; a first-quit system prompt asks whether
+to allow the app in the background; neither disclaiming responsibility
+on the spawn nor a launchd job submitted from inside a session escapes
+the attribution, and no API, entitlement or Info.plist key opts out.
+Of the options considered, the third (do not quit: keep a status item
+while sessions are alive) was chosen and became step 8; the second,
+moving session ownership into an `SMAppService` login item or agent,
+needs a prototype and was not tried.
 
 Still untested, in order of value: an `SMAppService` agent prototype
 (option 2), now also as a possible way out of the kill described in the
@@ -1538,54 +593,20 @@ leaves the ssh connection masters (`ControlPersist`, up to 10 minutes)
 as subordinate processes that show the Dock indicator or are killed;
 whether Background App Activity lists the daemons.
 
-### macOS 27: "Allow in the Background" switched off — tested, October 19, 2026 (evening)
+### macOS 27: "Allow in the Background" switched off — tested, decision deferred
 
-The two prompt cases left open above were tested with the Debug build of
-0892714 (ad hoc, real bundle id, launched through Launch Services with
-`open -n --env`, state in `/tmp/armadale-bgtest`), the owner switching
-Armadale off under System Settings › General › Login Items & Extensions
-› Allow in the Background for tests 1 to 3 and on again for test 4.
-Each run: one local shell session, quit, then the daemon watched for
-60 s and the unified log read (`log show`, subsystems
-`com.apple.launchservices:quitsupport` and
-`com.apple.backgroundtaskmanagement`).
-
-| Test | Switch | Quit | App gone | Daemon | Dock tile | Prompt |
-|---|---|---|---|---|---|---|
-| 1 | off | ⌘Q › Keep Running in Menu Bar › status menu › Quit, Keep Sessions Running | at once | SIGTERM 5 s after the quit | none | none |
-| 2 | off | SIGTERM (`pkill -x Armadale`, regular policy) | 0.6 s | SIGTERM 1 s after the quit, gone at 2.3 s | none seen | none |
-| 3 | off | as 2, with a TERM trap in the pane's shell | 0.6 s | gone at 1.7 s; the shell's trap started (its output file was created) and was cut off | none seen | none |
-| 4 | on | as 1 | at once | alive after 60 s | none | none |
-
-What the log shows. When the app process exits, `loginwindow` notes the
-"non-application coalition pids" (daemon, shells) and asks Background
-Task Management whether the app may run background tasks
-(`checkTasksAllowedInBackgroundForAppURL`). Switched off, the answer is
-"BTM said this application is not allowed to run background processes"
-and `loginwindow` calls `_LSForceQuitApplication` on the app's
-coalition, which SIGTERMs every remaining process; the daemon logs
-"SIGTERM received, shutting down gracefully" and the shell gets the
-signal directly as well (test 3). After a regular-policy quit the app
-"was foreground, and still has subordinate processes", and the kill is
-scheduled 1 s later. After a quit from menu bar mode the exited app "is
-non-foreground and never tracked", is dropped from the application
-list, and the check and kill come 5 s later with the words "is not
-allowed to run non-foreground and has never been user-visible, so
-killing the process and its subordinate processes". Switched on, the
-same quit logs only the "never tracked" line and nothing is touched.
-
-What it means. Menu bar mode avoids the Dock's "Running in Background"
-tile and its stop item, as step 8 intended, but not the allow decision:
-the sessions survive a quit only while Armadale is allowed in the
-background, whatever the quit. A user who answers Don't Allow on the
-first-quit prompt (or switches Armadale off later) loses every session
-a few seconds after each quit, with *Quit, Keep Sessions Running* in
-the status menu promising otherwise. While Armadale is running, in the
-menu bar or not, nothing is killed. There is no API for the app to read
-the decision (`SMAppService` covers login items, not this record), and
-no prompt appears for an accessory-mode quit, so the user is never told
-again. Remote sessions are not affected (no local process), except that
-their ssh masters are subordinate processes too (untested).
+Tested October 19, 2026 (evening), the owner switching Armadale off and
+on again under System Settings › General › Login Items & Extensions ›
+Allow in the Background. Switched off, macOS ends every session 5 s
+after a quit from menu bar mode and 1 s after a regular quit such as
+SIGTERM; switched on, nothing is touched. Menu bar mode avoids the
+Dock's "Running in Background" tile and its stop item, as step 8
+intended, but not the allow decision: the sessions survive a quit only
+while Armadale is allowed in the background, whatever the quit. There
+is no API for the app to read the decision, and no prompt appears for
+an accessory-mode quit, so the user is never told again. Remote
+sessions are not affected (no local process), except that their ssh
+masters are subordinate processes too (untested).
 
 Options for the owner: say so in the quit alert and the README
 (cheapest; the alert already explains menu bar mode), add it to the
@@ -1596,29 +617,29 @@ started.** What was recorded: `docs/DESIGN.md` section 8 ("Quit, Keep Sessions
 Running") and section 13; the README's "Quitting and the menu bar"
 gained one sentence.
 
-### The `ctty-exec` helper, for orientation
+### The `ctty-exec` helper
 
-Documented in README ("The `ctty-exec` helper") and `docs/DESIGN.md`
-section 7; summarised here because the two items above both touch it.
-It is Armadale's own small trampoline
-(`Packages/ArmadaleSessions/Sources/ctty-exec/main.swift`), shipped at
-`Contents/Helpers/ctty-exec`. Spawned on a fresh PTY, it claims the PTY as
-controlling terminal (`ioctl(TIOCSCTTY)`) and `execv`s the real program;
-with `--exit-file <path>` (October 23, 2026) it instead `posix_spawn`s it,
-stays as its parent out of the way of job control, and records how it
-ended in that file (DESIGN section 7, "Exit recorder").
-It exists because on macOS 27 `posix_spawn` with `SETSID` plus the slave on
-fds 0 to 2 no longer acquires a controlling terminal, so without it ^C
-(SIGINT) and resizes (SIGWINCH) never reach the program; `forkpty` would
-fix that but forks the multithreaded app, so it is only the fallback. The
-persistence helper also runs it inside each session to set the program's
-`argv[0]` (`-zsh` for a login shell) and to strip the helper's private
-environment (`--unset`). Being the first process in every session's tree,
-whatever responsibility it is spawned with flows down to daemon, shell and
-agent, which is why the macOS 27 disclaim would be set on its spawn.
+The orientation note is in `docs/HISTORY.md`; what the helper is and
+why it exists are in `docs/DESIGN.md` section 7 and the README ("The
+`ctty-exec` helper").
 
 ## State of this Mac that matters
 
+- **Looked at on November 14, 2026**, on the Mac that day's work was
+  done on, which may not be the Mac the entries below describe (the
+  checkout, the Claude Code cask and the build products were all new
+  that morning). There was no `~/Applications/Armadale.app` and no
+  Armadale in `/Applications`. Lima was not installed (`limactl` not on
+  PATH, no `~/.lima`), so there was no test host and the SSH
+  integration tests were skipped in every gate run that day. Codex was
+  not installed (nothing at `/opt/homebrew/bin/codex` or on PATH), so
+  nothing was checked against it. `/opt/homebrew/bin/claude` was
+  2.1.311, while `docs/DESIGN.md` §10 was checked against 2.1.292
+  (hooks) and 2.1.304 (flags) and is due a re-check. xcodegen was
+  installed from Homebrew, and `Vendor/zmx` had to be fetched. The
+  Developer ID certificate and the notary profile were not looked for.
+  The entries below were not re-verified that day, apart from the
+  privacy grants, which were made then.
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
   so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`
@@ -1639,8 +660,8 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   by the owner on October 19, 2026; the notary history under that account
   lists the accepted submissions). Debug builds never need either.
 - `~/Applications/Armadale.app` is whatever the owner last installed with
-  `scripts/install-release.sh` (0.1.0 build 4 was bumped on October 23,
-  2026, after the clean-exit change and before the empty-workspace one;
+  `scripts/install-release.sh` (by `docs/HISTORY.md`, 0.1.1 build 27,
+  the notarized release of November 5, 2026;
   `--skip-notarize --allow-existing-tag` builds a local, signed but
   unnotarized copy of a version whose tag exists). It has a different
   code identity from Debug builds, so privacy prompts from inside its
@@ -1666,6 +687,8 @@ agent, which is why the macOS 27 disclaim would be set on its spawn.
   keystrokes reset `HIDIdleTime`, so the idle gate only means
   something before the first one.
 - The Lima VM `default` is stopped and has no `~/.armadale` inside it.
-- Claude Code 2.1.292 and Codex 0.163.0 are installed; `docs/DESIGN.md`
-  §10 records what each offers and the source lines consulted. Re-check
-  when either is upgraded.
+- Claude Code 2.1.292 and Codex 0.163.0 were the versions installed
+  when `docs/DESIGN.md` §10 recorded what each offers and the source
+  lines consulted (its flag table was read from Claude Code 2.1.304).
+  Re-check when either is upgraded; see the first entry of this
+  section for what was installed on November 14, 2026.

@@ -20,8 +20,9 @@ struct PaneThemeBinding: Sendable {
     let current: @MainActor @Sendable () -> String?
     /// Gives the pane its own theme, or `nil` for the Settings choice.
     let choose: @MainActor @Sendable (String?) -> Void
-    /// Splits this pane (whichever pane is focused): `.horizontal` puts the
-    /// new pane right of it (Split Right), `.vertical` below it (Split Down).
+    /// Splits this pane (the one bound here, not whichever pane is focused):
+    /// `.horizontal` puts the new pane right of it (Split Right), `.vertical`
+    /// below it (Split Down).
     let split: @MainActor @Sendable (ArmadaleCore.Axis) -> Void
 
     init(
