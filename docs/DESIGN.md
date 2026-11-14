@@ -1862,8 +1862,11 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   the controllers' delegate, and records titles, directories, grid sizes
   and respawns in `AppModel`; a bell or notification reaches
   `AttentionCenter` whether or not the pane was ever shown. Its files, by
-  seam: `SessionRegistry.swift` (controllers, starting a shown pane's
-  session, status, closing and ending), `PaneViewStore.swift`,
+  seam: `SessionRegistry.swift` (stored state, controllers, starting a
+  shown pane's session, Retry), `SessionRegistry+Ending.swift` (clean
+  exits, closing and ending, Respawn All Ended),
+  `SessionRegistry+Status.swift` (status, close risk, the running count,
+  the header's content), `PaneViewStore.swift`,
   `SessionRegistry+LaunchAttach.swift` (section 4, "Restore at launch"),
   `SessionRegistry+Remote.swift` (backends and listings per host, host
   edits and removals, test connection and deploy),
@@ -3481,7 +3484,10 @@ armadale/
 ├── README.md                        build, run, test and release instructions
 ├── CLAUDE.md                        points at AGENTS.md
 ├── Armadale/                        app target (AppKit)
-│   ├── App/                         main.swift, ArmadaleApplication (the quit hook), AppDelegate,
+│   ├── App/                         main.swift, ArmadaleApplication (the quit hook), AppDelegate
+│   │                                (the type, its state, init, the delegate's entry points) with
+│   │                                AppDelegate+Launch, +Quit, +MenuBar, +Windows, +Actions,
+│   │                                +Attention (and the notification centre's delegate), +Saving,
 │   │                                MainMenu, MenuBarMode (QuitDecision, MenuBarText,
 │   │                                MenuBarStatusItem, AppActivation: quitting and menu bar mode),
 │   │                                InstanceLock (a second process on one state directory)
@@ -3496,8 +3502,10 @@ armadale/
 │   │                                PaneMenu (the pane context menu builder, PaneThemeBinding,
 │   │                                ActionMenuItem), PaneCardStyle + PaneHeaderView (pane cards:
 │   │                                geometry and borders, the header and its hosting view)
-│   ├── Sessions/                    SessionRegistry (a controller per session, start and status,
-│   │                                closing; RemoteSessionSupport), PaneViewStore (pane views),
+│   ├── Sessions/                    SessionRegistry (a controller per session, starting;
+│   │                                RemoteSessionSupport), SessionRegistry+Ending (closing and
+│   │                                ending), SessionRegistry+Status (status and close risk),
+│   │                                PaneViewStore (pane views),
 │   │                                SessionRegistry+LaunchAttach (restore at launch),
 │   │                                SessionRegistry+Remote (a backend and listing per host),
 │   │                                SessionRegistry+Delegate, GridSizeRecorder (last grid sizes),

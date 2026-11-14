@@ -1454,7 +1454,7 @@ open item "The documents" in `HANDOFF.md`, which was removed there. On
 the Mac used that day there was no installed Armadale, no Lima and no
 Codex (`HANDOFF.md`, "State of this Mac that matters").
 
-## November 14, 2026: restored sessions are attached at launch
+## November 14, 2026: restored sessions are attached at launch (7353b3a)
 
 November 14, 2026, after the documents split (implementer → reviewer
 loop on Opus 5.5: four implementer rounds and three review rounds, the
@@ -1602,6 +1602,29 @@ two accepted costs.
 available (no Lima on the Mac used). The checks to make are listed in
 `HANDOFF.md` under "From finished changes". Tests: 834 at this change
 (291 app + 281 core + 237 sessions + 13 + 12).
+
+## November 14, 2026: `AppDelegate` and `SessionRegistry` split into files
+
+November 14, 2026, straight after the change above and as its second
+commit (same implementer and reviewer, one round each; no live pass):
+the split the architecture review's second pass had asked for in that
+step, kept apart so that the review of the behaviour was not buried in
+moved lines. `AppDelegate.swift` (1,157 lines) keeps its stored state,
+`init` and the application delegate's entry points (277 lines), with
+`AppDelegate+Launch`, `+Quit`, `+MenuBar`, `+Windows`, `+Actions`,
+`+Attention` and `+Saving` beside it; `SessionRegistry.swift` (811
+lines after the fixes of the change above) keeps its state,
+controllers and starting (537), with `SessionRegistry+Ending` and
+`SessionRegistry+Status` added to the three files of the change above.
+**Code moved only**: no statement changed and nothing was reordered,
+checked against 7353b3a by three comparisons, two of which keep order
+(Part 2, section 11). 36 members of `AppDelegate` lost `private`
+because they are now used from another file; none in the registry.
+`docs/DESIGN.md` sections 8 and 11. The gate: 834 tests, as before,
+zero warnings. **Not run:** `scripts/check-quit.sh`, which launches
+the app; it is the check for the quit paths that moved, and it is on
+the list of live checks in `HANDOFF.md`. This closes the review's
+finding on the size of the two files, removed from `HANDOFF.md`.
 
 ---
 
@@ -2911,6 +2934,23 @@ passed with `--settings`.
 ---
 
 ## 11. Repository layout
+
+**November 14, 2026. `AppDelegate` and the rest of `SessionRegistry`
+split.** As the architecture review's second pass asked, `AppDelegate`
+(1,157 lines) was split into its main file and `AppDelegate+Launch`,
+`+Quit`, `+MenuBar`, `+Windows`, `+Actions`, `+Attention` and `+Saving`, and
+`SessionRegistry` (811 lines) gained `SessionRegistry+Ending` and
+`SessionRegistry+Status`. Mechanical: code moved between files in
+extensions, with `private` dropped only where a move across files needed
+it; no behaviour changed. Checked three times against 7353b3a, by the
+implementer as multisets of lines, and by the coordinator and the
+reviewer each with a comparison that keeps order (every line of every
+new file is in the old file in the same order; every member of the old
+files appears whole and contiguous in the new ones): the only
+differences are the extension wrappers, imports, the new files' header
+comments, the registry's comment listing its files, and 36 dropped
+`private`s, all in `AppDelegate` (22 stored properties, 13 methods and
+the file's logger).
 
 **November 14, 2026. The registry split.** `Sessions/` gained
 `PaneViewStore`, `SessionRegistry+LaunchAttach`, `SessionRegistry+Remote`,

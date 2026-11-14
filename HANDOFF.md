@@ -107,7 +107,9 @@ are in `docs/HISTORY.md`):
   contract, `docs/HISTORY.md` the change log and each section's
   history, and this file where things stand (fe20ea1).
 - November 14, 2026: restored sessions are attached at launch; the
-  session registry owns the controllers and is split into five files.
+  session registry owns the controllers (7353b3a).
+- November 14, 2026: `AppDelegate` and `SessionRegistry` split into
+  files, code moved only.
 
 ## Next
 
@@ -115,15 +117,13 @@ The owner gave the go-ahead on November 14, 2026 for the architecture
 review's items in the suggested order ("Architecture review" and its
 second pass, at the end of the open items), and then for attaching
 restored sessions at launch, with a decision on each of its four
-questions (`docs/HISTORY.md`, the last entry of Part 1). All are built.
-Two things are left of that last step:
-- **Its live checks.** No app was launched for it: the owner had not
-  said the Mac was free. The list is under "From finished changes"
-  below. Until they are done, treat the change as tested by the gate
-  only.
-- **The `AppDelegate` split**, a purely mechanical change the review
-  asked for in the same step ("Architecture review", Smaller). It
-  follows as its own commit.
+questions (`docs/HISTORY.md`, the last two entries of Part 1). All are
+built, the split of `AppDelegate` and `SessionRegistry` included. One
+thing is left of that last step: **its live checks.** No app was
+launched for it, because the owner had not said the Mac was free. The
+list is under "From finished changes" below. Until they are done,
+treat the change as tested by the gate only; what the checks find is
+fixed as changes of its own.
 
 Waiting for owner decisions:
 - **When the Mac is free** for the live checks above (with "Claude
@@ -514,7 +514,11 @@ From finished changes: not checked live, and found and not fixed
   - The saved sizes. A live resize writes `state.json` once, after it
     settles. A resize and then a quit within half a second keeps the
     new `gridSize`, for ⌘Q, SIGTERM, End Sessions and Quit and the
-    quit from menu bar mode. `scripts/check-quit.sh`.
+    quit from menu bar mode.
+  - `scripts/check-quit.sh`, for both changes of the day: the quit
+    path now flushes the sizes, and the split moved the quit code to
+    `AppDelegate+Quit.swift` (code moved only, but the script was not
+    run: it launches the app).
   - About twenty attached sessions in the app: memory, and CPU while
     they print.
   - A font size change, and a renderer change, while sessions are
@@ -551,9 +555,10 @@ above.
   "Rules learned the hard way" guards against synthetic input landing
   in the wrong place. A macOS guest VM for those passes would remove
   the risk instead of guarding against it.
-- Smaller: `AppDelegate` (955 lines on November 12, 2026; about 1,150
-  two days later) holds launch, the quit paths, menu bar mode and
-  window management, and the quit paths already need
+- Smaller: `AppDelegate`, which held launch, the quit paths, menu bar
+  mode and window management in one file of about 1,150 lines, was
+  split into files on November 14, 2026 (`docs/HISTORY.md`); the quit
+  paths, now in `AppDelegate+Quit.swift`, still need
   `scripts/check-quit.sh`; some 17 `NSLog` calls remain in the app
   beside the `Logger`s, although NSLog is `<private>` in `log show` on
   macOS 27 (10c, `docs/HISTORY.md`); the load-sensitive flood tests
@@ -572,9 +577,9 @@ are new and three add to ones above. Again from reading only: none is
 reproduced live. The first new one, the instance lock, was built on
 November 14, 2026, and so were the two on sessions never shown (the
 stale status, and the controllers kept inside pane views), with
-attaching restored sessions at launch (`docs/HISTORY.md`). Of the
-split that finding asked for, `SessionRegistry` is done and
-`AppDelegate` is next ("Next" above).
+attaching restored sessions at launch (`docs/HISTORY.md`). The split
+of `SessionRegistry` and `AppDelegate` that finding asked for followed
+as a second commit, code moved only.
 - **Adds to "Orphan reclaim".** It is the only code that ends sessions
   the user did not ask to end, and it does so by set difference
   against one file. Instead of only widening the hold-back, the rule
