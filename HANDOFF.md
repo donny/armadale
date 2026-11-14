@@ -103,7 +103,7 @@ are in `docs/HISTORY.md`):
   (d34d3af).
 - November 14, 2026: the documents split: `docs/DESIGN.md` holds the
   contract, `docs/HISTORY.md` the change log and each section's
-  history, and this file where things stand.
+  history, and this file where things stand (fe20ea1).
 
 ## Next
 
@@ -423,8 +423,10 @@ Findings from reading the documents and the code. Nothing was built or
 run, so none is reproduced live. Of its suggested order, the orphan
 reclaim, the save scheduling and the schema rule were built on November
 14, 2026, and the documents were split the same day
-(`docs/HISTORY.md`); attaching restored sessions at launch needs an
-owner decision on pane sizes and is a step of its own.
+(`docs/HISTORY.md`). The owner then kept the rule that every agent
+reads all of `docs/DESIGN.md` and this file before changing code, which
+closes the finding on the documents. Attaching restored sessions at
+launch needs an owner decision on pane sizes and is a step of its own.
 - **Restored sessions in tabs not shown yet are not attached.**
   `SessionRegistry.startIfNeeded` is called only for the panes of a
   window's selected tab (`ContentViewController.show`) and by
@@ -443,13 +445,6 @@ owner decision on pane sizes and is a step of its own.
   for what zmx 0.8.1 lacks. An attach-only flag, the program's exit
   status and a bounded client buffer, upstream or in a fork, would
   remove most of them.
-- **The documents.** Split on November 14, 2026 (`docs/HISTORY.md`,
-  last entry of Part 1). What is left of the finding: `docs/DESIGN.md`
-  is still about 3,700 lines (section 8 alone about 1,350), because the
-  contract keeps every behaviour; only its history left. AGENTS.md
-  still has every agent read all of it and this file before changing
-  code. Letting an agent read sections 1 and 2 and the sections it
-  will change is the owner's rule to relax.
 - **Live UI testing shares the owner's screen.** Most of AGENTS.md's
   "Rules learned the hard way" guards against synthetic input landing
   in the wrong place. A macOS guest VM for those passes would remove

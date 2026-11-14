@@ -1391,7 +1391,7 @@ boolean is no longer taken for a version. `docs/DESIGN.md` sections 3,
 8, 11 and 13; README. Tests: 761 at this change (248 app + 274 core +
 217 sessions + 13 + 9).
 
-## November 14, 2026: the documents split
+## November 14, 2026: the documents split (fe20ea1)
 
 The architecture review's finding, as recorded on November 12, 2026
 ("this file" is `HANDOFF.md`): **The documents.** `docs/DESIGN.md` is
@@ -1445,11 +1445,14 @@ section 4, "Ended"). Stale comments in the code that the reviews
 turned up were corrected with them, comments only.
 
 What it did not achieve: DESIGN is still about 3,700 lines, because
-the contract keeps every behaviour and only its history left. Whether
-an agent may read only the sections it changes is the owner's rule to
-relax (`HANDOFF.md`, open items, "The documents"). On the Mac used
-that day there was no installed Armadale, no Lima and no Codex
-(`HANDOFF.md`, "State of this Mac that matters").
+the contract keeps every behaviour and only its history left (section
+8 alone is about 1,350). Whether an agent may read sections 1 and 2
+and only the sections it changes was the owner's rule to relax. Asked
+the same day, after the commit, the owner kept it: every agent reads
+all of DESIGN and `HANDOFF.md` before changing code. That closed the
+open item "The documents" in `HANDOFF.md`, which was removed there. On
+the Mac used that day there was no installed Armadale, no Lima and no
+Codex (`HANDOFF.md`, "State of this Mac that matters").
 
 ---
 
