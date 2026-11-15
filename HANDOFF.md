@@ -78,7 +78,11 @@ in the heading or the text under it, their commits:
   notarized, stapled and installed in `~/Applications` on that Mac.
   Not tagged or published.
 - November 14, 2026: housekeeping: the state of a Mac moved out of
-  this file into `HANDOFF.local.md` (git-ignored); this file trimmed.
+  this file into `HANDOFF.local.md` (git-ignored); this file trimmed
+  (e926467).
+- November 14, 2026: hosts checked live: the limit of six at launch,
+  more than ten sessions on one host, an unreachable host coming
+  back; no code changed.
 
 ## Next
 
@@ -102,14 +106,14 @@ Waiting for owner decisions:
 - **Three decisions the coordinator made** when restored sessions
   were attached at launch (November 14, 2026), each the owner's to
   overrule: the launch holds at most six of a host's sessions (open
-  items, Remote; made without a test host); a session
-  never shown in the run does not start a sign-in by itself; and the
-  cost of heavy output in sessions not on screen is accepted as it is
-  (open items, Session layer).
-- **A live check on a host.** Nothing the app does with a host at
-  launch was checked live. It needs a Mac with the Lima VM
-  (`HANDOFF.local.md`); the SSH integration tests passed against one
-  on November 14, 2026, but they drive the session layer.
+  items, Remote; made without a test host, it held live on one later
+  that day); a session never shown in the run does not start a
+  sign-in by itself; and the cost of heavy output in sessions not on
+  screen is accepted as it is (open items, Session layer).
+- **A live check on a host that needs a sign-in.** What the app does
+  with a host at launch was checked live with key authentication
+  (`docs/HISTORY.md`, "hosts, checked live"). A host that asks for a
+  password was not: it needs a test host set up for that.
 - **Showing or re-adopting spared sessions** (open items, Session
   layer).
 - **A fork of the persistence helper** ("The persistence helper's
@@ -314,19 +318,19 @@ Remote
 - fish as a remote login shell is untested and likely mis-parses the nested
   quoting; sh, bash, zsh and tcsh are tested.
 - Agent forwarding (`-A`) is not supported; Windows hosts get plain shells.
-- How many sessions one connection to a host can carry was never
-  checked (November 14, 2026; no test host then). Every client of a host
-  shares one connection and sshd allows 10 sessions on one by default.
-  From reading the code, past that the kill, the listing and new panes
-  on that connection are refused too, and a refused kill is swallowed,
-  so a closed pane's session would keep running on the host. Since the
-  launch now attaches sessions in panes not shown, it holds at most
-  six of a host's sessions (the coordinator's decision; the owner may
-  overrule it); the rest wait until their pane is shown, and a pane the
-  user shows always starts, so ten shown panes on one host reach the
-  limit as they did before. To check on a host: nine or more restored
-  sessions, what the tenth client does, and that closing a pane still
-  ends its session there.
+- More than ten sessions on one host that asks for a password. Every
+  client of a host shares one connection and sshd allows 10 sessions
+  on one by default. Checked live with key authentication (November
+  14, 2026; `docs/HISTORY.md`, "hosts, checked live"): past ten, ssh
+  opens a connection of its own for each further client and for a
+  close's kill, so twelve panes attached and a closed pane's session
+  ended on the host. Not checked: a host that asks for a password,
+  where each of those connections would need its own sign-in; a kill
+  sent without one would fail, its failure is swallowed, and the
+  closed pane's session would keep running there. The launch holds at
+  most six of a host's sessions (the coordinator's decision; the owner
+  may overrule it); that held live, at launch and when an unreachable
+  host came back.
 - A pane on a host that was shown once and is now in another tab may
   still start a sign-in by itself when an automatic retry finds the
   host back and asking for a password; only sessions never shown in
@@ -446,14 +450,14 @@ From finished changes: not checked live, and found and not fixed
   staged with the helper and driven by accessibility actions, without
   a synthetic keystroke or click (`docs/HISTORY.md`, "the live checks
   of attaching at launch"). **Not checked:**
-  - Anything on a host (there was no test host at the time; the SSH
-    integration tests, run that evening, drive the session layer, not
-    the app's launch): the limit of six and what lies past sshd's ten
-    (Remote, above); a host that needs a password at launch starts no
-    client in a pane not shown until one tab signs in, then the rest
-    attach; a host unreachable at launch
-    and back asking for a password leaves those panes Disconnected
-    with ssh's message, and showing one reconnects it.
+  - On a host, what needs a sign-in: a host that needs a password at
+    launch starts no client in a pane not shown until one tab signs
+    in, then the rest attach; a host unreachable at launch and back
+    asking for a password leaves those panes Disconnected with ssh's
+    message, and showing one reconnects it. The rest was checked live
+    that evening with key authentication (`docs/HISTORY.md`, "hosts,
+    checked live"): the limit of six, more than sshd's ten, and an
+    unreachable host coming back.
   - What the eye would see. The sidebar's and the tab bar's glyphs and
     the purple counts are not in the accessibility tree, and Screen
     Recording was not granted. Attention was read from the Window
@@ -562,7 +566,9 @@ now also as a possible way out of the kill described in the next
 section; the prompt's Don't Allow button itself (needs a Mac with no
 stored decision; the switch records the same state); whether a quit
 leaves the ssh connection masters (`ControlPersist`, up to 10 minutes)
-as subordinate processes that show the Dock indicator or are killed;
+as subordinate processes that show the Dock indicator or are killed
+(seen November 14, 2026: a master outlives a quit by SIGTERM, its
+parent being launchd; the Dock was not looked at then);
 whether Background App Activity lists the daemons after a quit (needs
 root or the System Settings UI).
 

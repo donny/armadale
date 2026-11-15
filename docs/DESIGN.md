@@ -1119,9 +1119,12 @@ start (section 8); what each restored one gets:
   a session without a saved size. A pane the user shows always starts.
   Every client of a host shares one ssh connection, each attached session
   holds one of its sessions, and sshd allows 10 per connection by default
-  (`MaxSessions`); past it, by reading, control commands on that
-  connection would be refused too (a close's kill, listings, new panes).
-  The limit is unverified on a host. Listed: as above, gone sessions'
+  (`MaxSessions`). Past it the shared connection refuses another session
+  and ssh opens a connection of its own for that client or command, so
+  an eleventh pane attaches and a close's kill still reaches the host,
+  as long as the host lets a new connection in without the user (a key,
+  an agent). Where it asks for a password each of those would need a
+  sign-in; that case is not verified. Listed: as above, gone sessions'
   records read in one command.
   Unreachable: the attach attempt for sessions with a saved size, which
   leaves them Disconnected and retried, never ended. **Needs the user** (a
@@ -4009,11 +4012,13 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
   what the clients hold (up to 16 MB each) for 2 to 4 minutes. Quitting
   under that load took 0.05 to 0.65 s in these runs. On a host, every
   attached session is one more ssh session over the shared connection,
-  and sshd allows 10 per connection by default (`MaxSessions`), which a
-  host with ten or more restored sessions reaches at launch; not checked
-  on this Mac (no test host), so the launch keeps at most 6 of a host's
-  sessions attached for hidden panes (section 4); that number is
-  unverified too. A local session whose daemon is stopped is attached to a
+  and sshd allows 10 per connection by default (`MaxSessions`). The
+  launch keeps at most 6 of a host's sessions attached (section 4), so
+  only panes the user shows can pass ten; past it ssh opens a separate
+  connection for each further client or command. Both hold with key
+  authentication. On a host that asks for a password each separate
+  connection needs its own sign-in, and a close's kill sent without
+  one is lost; not verified. A local session whose daemon is stopped is attached to a
   client that shows nothing until it runs again, and is never taken for
   ended while its socket exists (section 4); a host has no such fallback.
 - **SwiftTerm under Swift 6.** It is not annotated for strict concurrency.

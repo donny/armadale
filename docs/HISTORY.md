@@ -2017,6 +2017,80 @@ sit in the same place). Termini is a useful reference for how small the
 patch is; briannadoubt's wrapper is unusable here without moving PTY
 ownership into the renderer.
 
+## November 14, 2026: hosts, checked live
+
+November 14, 2026, 20:12 to 20:20, with the owner's word that the Mac
+was free: what the app does with a host at launch, which the live
+checks of attaching at launch had left out for want of a test host.
+The Debug build of 76562b7 (the gate had passed on it), with its own
+state directory and defaults suite, against the Lima VM: Ubuntu
+26.10, OpenSSH with `MaxSessions 10` in its sshd configuration, key
+authentication. Twelve sessions were made on the VM with the helper
+copied there, each running `sleep`, and twelve tabs were written into
+`state.json`, each session with a saved size, the first tab selected.
+Nobody sent a synthetic keystroke or click: the build's own menu
+items (Window › Show Next Tab, File › Close Pane) and the close
+confirmation's button were pressed as accessibility actions by pid,
+and everything was read from process lists, `lsof`, the helper's
+listing on the VM and the window's accessibility tree. No code
+changed.
+
+What held.
+- **The limit of six at launch.** Within 3 s of the launch six
+  sessions had a client: the selected tab's and the first five in tab
+  order that were not shown. The other six had none, 16 s later
+  either. The six count the session on screen.
+- **Showing a tab.** Showing each of the five attached at launch
+  started nothing. Showing each of the other six started its client,
+  one per tab, up to twelve.
+- **Past sshd's ten.** The eleventh and twelfth clients attached like
+  the others. The first ten had no TCP connection of their own, and
+  one sshd session on the VM held ten ptys; the eleventh and twelfth
+  each had one. The shared connection had refused another session and
+  ssh had opened a connection of its own. So what the open item
+  feared, that past ten the kill, the listing and new panes would be
+  refused, does not happen where a new connection needs nobody to
+  sign in.
+- **Closing a pane with the shared connection full.** Close Pane
+  asked ("Close this pane?", "A process is still running in this
+  pane. Closing it will end the session."), and after Close the
+  session was gone from the VM within 3 s. Twice in a row, with ten
+  sessions on the shared connection both times.
+- **A quit.** SIGTERM with ten clients, and later with six: the
+  clients went and the ten sessions stayed on the VM.
+- **Unreachable at launch, then back.** With the host's port closed
+  (a copy of its ssh configuration with another port), no client was
+  started, and the pane on screen said "Reconnecting…", "Armadale lost
+  its connection to this session and keeps trying to reconnect. The
+  session may still be running." and ssh's own line, "ssh: connect to
+  host 127.0.0.1 port 9: Connection refused". The port was put back
+  while the build ran. Within 19 s six sessions had a client, the one
+  on screen and the first five in tab order, with nobody touching the
+  build; the other four stayed without one.
+
+What was found on the way.
+- The menu items of a build that is not the active app are disabled:
+  Show Next Tab did nothing eleven times until the build was brought
+  to the front, once. A build in the background can be read, and its
+  Clear All Attention pressed, but its tab commands cannot.
+- The first staging used session identifiers with the digits 0 and 1.
+  The build refused the file as it should (identifiers are 16
+  lowercase base32 characters), kept it as
+  `state.json.corrupt-<seconds>`, used `state.json.bak`, and said so
+  in its alert, with the path of the first bad identifier. The twelve
+  sessions on the VM were left alone.
+- After a quit the shared connection's master is still running
+  (`ControlPersist=600`), a child of launchd. Whether the Dock shows
+  "Running in Background" for it was not looked at.
+
+Not checked: a host that asks for a password (at launch, after being
+unreachable, and for the separate connections past ten, where a
+close's kill would be lost); the Disconnected placeholder once the
+retries give up; two hosts at once; what only the eye would see.
+`docs/DESIGN.md` sections 4 and 13 now say what happens past ten.
+`HANDOFF.md` keeps the password cases ("Next"; Remote; "Restored
+sessions attached at launch").
+
 ---
 
 # Part 2: the history of each design section
@@ -2601,6 +2675,15 @@ two).
 exactly `ESC[2J ESC[H` at the start of an attach, after
 `session "…" created\r\n` for a new session, which is what the remote
 classification looks for at the start of the stream or of a line.
+
+**More than ten sessions on one connection, seen live (November 14,
+2026).** Against OpenSSH on Ubuntu 26.10 with `MaxSessions 10`: ten
+clients went through the shared connection, and the eleventh and
+twelfth each got a TCP connection of their own, because ssh opens a
+new connection when the master refuses a session. A close's kill
+reached the host with the shared connection full. Key authentication
+only (Part 1, "hosts, checked live"). Before this, section 4 said
+from reading that control commands past ten would be refused.
 
 ## 7. Process plumbing (`ArmadaleSessions`)
 
