@@ -759,7 +759,7 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   by hand. `Vendor/dmgbuild` is installed. `scripts/release.sh
   --skip-notarize --allow-existing-tag` passed there on 6d07126. The
   notary profile `armadale-notary` was not looked for; the owner
-  creates it. `scripts/check-quit.sh` was not run against the Release
+  creates it. `scripts/check-quit.sh` passed against that Release
   app. The owner installed Lima 2.3.0 and made the VM `default`
   (Ubuntu 26.10, aarch64, vz; home mode 750); the six SSH integration
   tests passed against it, and it was cleaned and stopped afterwards.

@@ -1797,6 +1797,14 @@ What was run, and held.
   an attach; the connection is shared. 3.7 s. Afterwards `~/.armadale`
   was removed in the VM, its home was still mode 750, the shared
   connection was closed and the VM stopped.
+- `scripts/check-quit.sh` against the Release app of that dry run,
+  once the owner had said the Mac was free: the app exited 57 ms
+  after SIGTERM with the chooser up, 65 ms with a session attached
+  (no client left, the session still alive) and 56 ms with the
+  fallback alert up, saving its state each time. So a Developer ID
+  build with the hardened runtime launches and runs a session on that
+  Mac (section 11's concern about a restricted entitlement on a
+  helper). No system prompt was left on screen afterwards.
 
 What it found. The Developer ID Application certificate expires on
 February 1, 2027 because its issuer, "Developer ID Certification
@@ -1804,11 +1812,10 @@ Authority", expires that day; a release after it needs a certificate
 issued under Apple's newer Developer ID authority.
 
 Not done: notarization (the profile `armadale-notary` is the owner's
-to create on that Mac, and was not looked for), `scripts/check-quit.sh`
-against the Release app, and anything the app does with a host at
-launch: the SSH integration tests drive the session layer, so the
-host items under "Restored sessions attached at launch" in
-`HANDOFF.md` stay.
+to create on that Mac, and was not looked for), and anything the app
+does with a host at launch: the SSH integration tests drive the
+session layer, so the host items under "Restored sessions attached at
+launch" in `HANDOFF.md` stay.
 
 ---
 
