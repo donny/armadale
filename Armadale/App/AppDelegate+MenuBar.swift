@@ -65,11 +65,25 @@ extension AppDelegate {
     func auxiliaryWindowDidClose() {
         guard menuBarItem != nil else { return }
         Task { @MainActor [weak self] in
-            guard let self, self.menuBarItem != nil,
-                  self.settingsWindowController?.window?.isVisible != true,
-                  self.shortcutsWindowController?.window?.isVisible != true,
-                  self.acknowledgementsWindowController?.window?.isVisible != true
-            else { return }
+            self?.hideIfWindowlessInMenuBar()
+        }
+    }
+
+    /// Whether an app in menu bar mode hides: it is active with nothing to
+    /// type into once none of Settings, Keyboard Shortcuts or
+    /// Acknowledgements is on screen. Pure, for the tests.
+    nonisolated static func hidesInMenuBarMode(isInMenuBar: Bool, auxiliaryWindowVisible: Bool) -> Bool {
+        isInMenuBar && !auxiliaryWindowVisible
+    }
+
+    /// Hides the app by ``hidesInMenuBarMode(isInMenuBar:auxiliaryWindowVisible:)``:
+    /// after an auxiliary window closed, and after a quit from menu bar mode
+    /// that did not go through (docs/DESIGN.md section 8).
+    func hideIfWindowlessInMenuBar() {
+        let visible = settingsWindowController?.window?.isVisible == true
+            || shortcutsWindowController?.window?.isVisible == true
+            || acknowledgementsWindowController?.window?.isVisible == true
+        if Self.hidesInMenuBarMode(isInMenuBar: menuBarItem != nil, auxiliaryWindowVisible: visible) {
             NSApp.hide(nil)
         }
     }

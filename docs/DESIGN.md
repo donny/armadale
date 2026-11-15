@@ -653,6 +653,37 @@ persistence.
   and otherwise ignored. What the app does with them: section 8, "App
   lifecycle". Builds before this lock (0.1.0 and 0.1.1) take none, so a
   new build cannot detect an old one sharing its directory.
+- **The last quit.** `last-quit.json` beside `state.json` (`LastQuitRecord`,
+  `LastQuitStore`) records what each quit left running, for the check at
+  the next launch (section 8, "Background App Activity"). It is not part
+  of the state file, so `schemaVersion`, the fixtures and
+  `scripts/check-state-compat.sh` do not cover it; it has a `version` of
+  its own (1), and a file that cannot be decoded or has another version
+  counts as absent and is replaced at the next quit (so after going back
+  to an older build, a newer build's `lossSeenAt` is lost). Written atomically and synchronously in
+  `applicationWillTerminate`, after the state, under the same conditions
+  as the state save (the launch uses its state directory and may save:
+  `AppDelegate.lastQuitStore(plan:canSave:stateDirectory:)` is `nil`
+  otherwise, so a fatal or locked-out launch never reads, writes or
+  removes it). A write failure is logged (category `state`) and never
+  shown. Contents: `quit`, absent once the launch check has run on it,
+  with the time of the quit, its kind (`user`: a quit the user made that
+  went straight through, such as the status menu's Quit, Keep Sessions
+  Running, ⌘Q in menu bar mode or a quit with nothing running; `signal`:
+  SIGTERM; `system`: a quit Apple event with a reason; `endedSessions`:
+  the quit at the end of End Sessions and Quit), the boot time
+  (`kern.boottime`, seconds) and the login's audit session id
+  (`getaudit_addr`, `ai_asid`) at the quit (`LoginSession`), and the ids
+  of the local sessions of the persistent runtime that may be running
+  (`SessionRegistry.localSessionsThatMayOutliveQuit()`: local, with a
+  recorded runtime version, `CloseRisk.mayBeRunning`), taken in
+  `applicationShouldTerminate` before the clients are hung up (empty in
+  the plain PTY fallback and after End Sessions and Quit); and
+  `lossSeenAt`, absent when none, kept across quits
+  (`LastQuitRecord.atQuit`). The check removes `quit` whatever its
+  verdict, also when it is undetermined because the persistent runtime
+  is not available in that launch, and writes the file back, or removes
+  it when neither is left (`LastQuitCheck.recordAfterCheck`).
 
 SwiftData was considered and rejected: the state is a small tree that is
 easier to inspect, diff and migrate as JSON.
@@ -1210,7 +1241,16 @@ as `ctty-exec --unset ZMX_DIR --unset ZMX_NO_DETACH_KEY --unset ZMX_SESSION
 ### Housekeeping
 
 zmx writes one log per daemon to `ZMX_DIR/logs/<name>.log` plus a shared
-`zmx.log`, at debug level, each truncated at 2 MB but never deleted. At
+`zmx.log`, at debug level, each truncated at 2 MB but never deleted. One
+line of a session's log is read: a daemon that gets SIGTERM logs
+`[<epoch seconds>] [info] (default): SIGTERM received, shutting down
+gracefully session=a-<id>`, then `kill received` and `shutting down
+daemon` (zmx 0.8.1). The helper's own kill logs `kill received` and
+`shutting down daemon` with no SIGTERM line, and a program that ends logs
+only `shutting down daemon`. `ZmxRuntime.lastTerminationSignal(for:)` gives the time of
+the last such line, reading only the log's last 64 KB; the launch check
+after a quit uses it (section 8, "Background App Activity"), and
+`LocalZmxBackendTests` pins the wording against the bundled helper. At
 launch Armadale removes log files whose session ID is neither alive nor
 referenced by the model, where alive means listed by the probe and not
 just ended by the reclaim, or with a socket in the runtime directory
@@ -2816,13 +2856,17 @@ And for the dialog and Settings › Favorites:
   and every other live restored session follows once its location's first
   listing has answered, a few at a time (section 4, "Restore at launch"). When the local probe answers, the orphan reclaim
   runs, its result is recorded in the model and saved at once, and the log
-  and exit files are collected (section 4, "Housekeeping").
+  and exit files are collected (section 4, "Housekeeping"). Before
+  any of that, before a pane is closed, the last quit is checked when it
+  is due, and a loss it finds is told after the other launch alerts
+  ("Background App Activity" below).
 - A plain quit never kills sessions (with sessions running, the quit asks
   first; see "Quitting with running sessions" below; only *End Sessions
   and Quit* ends them). `applicationShouldTerminate` writes the grid sizes
   not yet recorded to the model, hangs every client up synchronously
   (SIGHUP and closing its terminal; no waiting; panes on screen or not)
-  and returns `.terminateNow`, then the state is saved synchronously. It never returns `.terminateLater`: SIGTERM's handler
+  and returns `.terminateNow`, then the state is saved synchronously,
+  followed by the last quit record (section 3, "The last quit"). It never returns `.terminateLater`: SIGTERM's handler
   would reply from inside a main-queue block, where AppKit's nested run
   loop starves the main actor, so the reply never comes and logout hangs.
   SIGTERM quits from the run loop, performed in the common **and
@@ -3066,7 +3110,7 @@ the menu bar.
   under Background App Activity in System Settings is not known.
   **The sessions survive only while Armadale is allowed to run in the
   background** (System Settings › General › Login Items & Extensions ›
-  Allow in the Background, the decision the first-quit prompt records).
+  Background App Activity, the decision the first-quit prompt records).
   With Armadale switched off there, `loginwindow` asks Background Task
   Management when the app exits, is told no, and force-quits the app's
   coalition, which SIGTERMs every daemon and shell: 5 s after a quit from
@@ -3074,8 +3118,9 @@ the menu bar.
   user-visible"), 1 s after a regular quit such as SIGTERM. No prompt
   appears for an accessory-mode quit, switched on or off. Switched on,
   nothing is touched. The app has no way to read that setting, so the
-  status menu's promise holds only under Allow; what to say about it is
-  an open point (section 13, `HANDOFF.md`).
+  status menu's promise holds only while Armadale is switched on; the app
+  detects the loss afterwards and tells the user, and asks before the
+  next such quit ("Background App Activity" below).
 - **End Sessions and Quit** ends every session that may be alive, then
   quits, each through its controller (`close()`: its backend's kill, then
   its client), attached or not, shown or not; unavailable sessions (no
@@ -3092,7 +3137,8 @@ the menu bar.
 
 Implementation: `App/MenuBarMode.swift` holds the pure rule,
 `QuitDecision.decide(running:preference:context:)` → *quit now*, *ask*,
-*keep in menu bar*, *end sessions* or *cancel*, the wording
+*keep in menu bar*, *end sessions*, *cancel* or *confirm leaving
+sessions* ("Background App Activity" below), the wording
 (`MenuBarText`), the status item (`MenuBarStatusItem`) and bringing the
 app forward (`AppActivation`, "Activation" below);
 `AppDelegate.applicationShouldTerminate` acts on the decision.
@@ -3123,7 +3169,9 @@ values `ask` / `keepInMenuBar` / `endSessions`, anything else reads as
 - **A quit while in menu bar mode** is a plain quit that keeps the
   sessions, whatever the preference: the status menu's *Quit, Keep
   Sessions Running*, and ⌘Q with the Settings window in front (an
-  accessory app still handles key equivalents).
+  accessory app still handles key equivalents). While a loss has been
+  seen, it asks first when it would leave local sessions running
+  ("Background App Activity" below).
 - **While End Sessions and Quit runs**, every other quit is cancelled
   (*cancel*) except a forced one. The kills run in one task group
   (controllers' `close()` and backend kills), so the wait is the bound
@@ -3187,6 +3235,124 @@ values `ask` / `keepInMenuBar` / `endSessions`, anything else reads as
   menu therefore omits *Quit, Keep Sessions Running* while the runtime is
   not persistent (checked each time the menu opens); *End Sessions and
   Quit* stays.
+
+### Background App Activity
+
+With Armadale switched off under System Settings › General › Login Items
+& Extensions › Background App Activity, macOS ends every local session a
+few seconds after Armadale quits ("Quit, Keep Sessions Running" above).
+No API reads that setting (ServiceManagement's `SMAppService` describes
+services an app registers). So Armadale detects the loss after the fact
+and tells the user; the wording is hedged on purpose: it says what
+happened and what makes macOS do it, never that the switch is off.
+`App/LastQuit.swift` holds the record and the pure rule,
+`App/AppDelegate+LastQuit.swift` the file reading around it and the
+alert, `BackgroundActivityText` (`App/MenuBarMode.swift`) the wording.
+
+- **The record.** Each quit that goes through writes `last-quit.json`
+  (section 3, "The last quit"): when, what kind, the boot and login
+  session, and the local persistent sessions it left running.
+- **The check** (`LastQuitCheck.verdict`, pure, tested as a table), once
+  per record, no earlier than 12 s after the recorded quit
+  (`LastQuitCheck.delay`). At launch, before any pane is closed, it runs
+  at once when that time has passed; a relaunch sooner than that (the
+  system's kill comes up to 5 s after the quit, so the sessions may still
+  be alive at launch) runs it when the time comes (at most 12 s later,
+  also when the clock was set back: `LastQuitCheck.schedule`). It needs only files: for each
+  recorded session whether it is alive by the local rule without a
+  listing (`ZmxRuntime.isAliveWithoutListing`: a socket and no exit
+  record) and the time of the last SIGTERM line in its helper log
+  (`ZmxRuntime.lastTerminationSignal(for:)`, section 4, "Housekeeping").
+  Verdicts:
+  - **undetermined** (nothing said, `lossSeenAt` unchanged): the quit's
+    kind is `system` or `endedSessions`; the boot time differs by more
+    than 60 s (compared without overflow: the file may hold anything) or
+    the audit session id differs, or either is unknown (the
+    Mac was restarted or the user logged out since, which ends sessions
+    anyway; `kern.boottime` moves a little when the clock is set); no
+    session was recorded; the persistent runtime is not available in this
+    launch; or no recorded session was ended by SIGTERM in the window and
+    none is alive.
+  - **ended**, with how many: at least one recorded session has its
+    SIGTERM line between 1 s before the quit (the log has whole seconds)
+    and 10 s after it. Not "every session": whether the force quit also
+    reaches sessions started by an earlier run of the app is not known.
+  - **survived**: none was ended that way and at least one is alive.
+  Then `quit` is removed from the file (so a crash cannot run the check
+  twice), `lossSeenAt` is set to the quit's time (ended) or cleared
+  (survived), the file is removed when neither is left, and one `state`
+  log line gives the verdict (with the reason when undetermined), whether
+  the check ran late, the kind, the number of sessions recorded and the
+  number ended. **A check that ran late never clears `lossSeenAt`**: its
+  *survived* leaves it as it was (*ended* still sets it). Whether macOS
+  still ends the old run's sessions when the app is running again within
+  5 s of the quit is not known; if it does not, a quick relaunch would
+  find them alive while the switch is still off.
+- **Telling the user.** On *ended*, an app-modal warning alert
+  (`runModal()`, after the other launch alerts; SIGTERM still quits under
+  it): "macOS ended N sessions after Armadale quit" ("1 session" for
+  one), that they were running when Armadale quit and macOS ended them a
+  few seconds later, that macOS does this when Armadale is switched off
+  in System Settings › General › Login Items & Extensions, under
+  Background App Activity, and that switching Armadale on there keeps
+  sessions running after a quit, or to keep Armadale running in the menu
+  bar instead. Buttons: **Open System Settings**
+  (`SMAppService.openSystemSettingsLoginItems()`; the default, answering
+  Return) and **Not Now** (Escape). It is shown every time a loss is
+  found; there is no "don't show again". A check that ran late shows the
+  same alert from the default run-loop mode (so after any alert already
+  up is answered), does not bring the app forward, shows nothing once a
+  quit is under way, and has no button that answers Return (it can come
+  up to 12 s after launch, while the user types into a pane; Escape still
+  answers Not Now): `BackgroundActivityText.lossAlert(ended:late:)`. A
+  late check that finds a loss decides whether to tell once, when the
+  alert would show: if the app is in menu bar mode then, no alert at all
+  (an accessory app's modal alert, shown while it is not active, may sit
+  behind other windows) and one more `state` line, "loss not told (menu
+  bar mode)"; `lossSeenAt` is set, so the next quit from the menu bar
+  asks.
+- **Before the next quit.** While `lossSeenAt` is set, any quit in menu
+  bar mode that would leave local persistent sessions to the system asks
+  first, unless it is forced (SIGTERM, the system's quit, a fatal launch)
+  or follows End Sessions and Quit: the status menu's *Quit, Keep
+  Sessions Running*; ⌘Q with Settings, Keyboard Shortcuts or
+  Acknowledgements in front; a quit Apple event without a reason
+  (AppleScript's `quit`; the Dock has no tile then) (`QuitDecision`
+  `.confirmLeavingSessions(atRisk:)`; the flag and the number of local
+  sessions at risk are in its `Context`). The alert, warning style,
+  brought forward like the quit question: "macOS may end N sessions when
+  Armadale quits", that after an earlier quit macOS ended sessions a few
+  seconds later (not "the last quit": `lossSeenAt` outlives undetermined
+  checks), where the switch is, and that if Armadale has been switched on
+  there since, the sessions will keep running. Buttons: **Open System
+  Settings** (default; the quit is cancelled and the app stays in the
+  menu bar), **Quit Anyway** (marked destructive, as End Sessions and
+  Quit is), **Cancel**. After Cancel (or Escape) the app hides again on
+  the next turn if none of Settings, Keyboard Shortcuts or
+  Acknowledgements is on screen, by the same rule as closing Settings in
+  menu bar mode (`AppDelegate.hidesInMenuBarMode`, "Closing Settings in
+  menu bar mode" above): the alert brought it forward, and an active
+  accessory app with no window would take keystrokes nowhere. With
+  Settings in front (⌘Q typed there) nothing is hidden. After Open System
+  Settings it does not hide: System Settings takes activation by itself,
+  and `NSApp.hide` hands activation to the previously active app, which
+  may land after System Settings and put it behind (from how hiding
+  works; not checked live). The ⌘Q question (Keep Running in Menu Bar / End Sessions
+  and Quit / Cancel) is unchanged: neither answer leaves sessions to the
+  system. Nothing is added to the status menu. Remote sessions do not
+  count (no local process).
+- **Known limits.** A loss is reported at the next launch, not
+  prevented. A crash or force quit of Armadale leaves no record, so
+  nothing is reported. A restart or logout between the loss and the next
+  launch gives *undetermined*. A loss a late check finds while the app is
+  in menu bar mode when its alert would show is not shown (above). A launch without the persistent runtime consumes
+  the record with *undetermined*. A `kill` by hand, or the Dock's "Stop Running in
+  Background", within 10 s of a quit is reported as if macOS's check had
+  done it. A session whose pane is closed or respawned before a late check
+  runs has lost its log. A quit within 12 s of the previous one, before
+  that one's check has run, replaces its record: that check never runs. A
+  later helper version may word its log differently; the test against
+  the bundled helper pins the line.
 
 ---
 
@@ -3781,7 +3947,7 @@ organisation name.
   identity (designated requirement) from the ad-hoc development build.
   Notification permission is kept per bundle identifier, so it carries
   over. Privacy (TCC) grants, which are keyed by the code requirement, may
-  need granting again, and macOS 27's stored "Allow in the Background"
+  need granting again, and macOS 27's stored Background App Activity
   decision may be asked again. Not a defect; noted for testing.
 
 **The DMG window.** Opening the DMG shows a laid-out Finder window
@@ -4038,18 +4204,24 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
   attribution across fork, exec, disclaim and job submission. Armadale
   asks before quitting with running sessions and otherwise stays in the
   menu bar (section 8). The findings are in `docs/HISTORY.md` (Part 1,
-  October 19, 2026); the open decision is in `HANDOFF.md`, "Decisions
-  pending". Menu bar mode
+  October 19, 2026). Menu bar mode
   avoids the Dock indicator and its stop item, and no prompt appears for
   a quit from it (with a decision stored), but the stored allow decision
   governs the sessions all the same. With Armadale switched off under
-  Allow in the Background (what Don't Allow on the first-quit prompt
+  Background App Activity (what Don't Allow on the first-quit prompt
   records), `loginwindow` force-quits the app's whole coalition 5 s after
   a menu bar mode quit and 1 s after a regular quit ("BTM said this
   application is not allowed to run background processes"), so every
-  local session dies; under Allow nothing is touched. No API reports the
-  decision. Open: whether the quit alert, the status menu or an
-  `SMAppService` login item should answer this (`HANDOFF.md`).
+  local session dies; switched on, nothing is touched. No API reports the
+  decision. Armadale detects the loss at the next launch from a record
+  written at quit and the helper's log, tells the user, and asks before
+  the next quit from menu bar mode that would leave local sessions to the
+  system (section 8, "Background App Activity"). It cannot prevent the
+  loss, and it misses one after a crash or force quit of Armadale, or
+  with a restart or logout before the next launch. The check depends on
+  the helper's wording of its SIGTERM log line, pinned by a test against
+  the bundled helper; a helper update that changes it silently turns
+  every verdict into *undetermined* or *survived*.
 - **Socket path length** on macOS (104 bytes) constrains where the runtime
   directory lives; handled with the fallback in section 4, "Isolation".
   zmx does not resolve symlinks, so a symlinked short directory is an

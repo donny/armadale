@@ -183,6 +183,26 @@ struct LaunchStateTests {
         try Data("partial".utf8).write(to: dir.url.appendingPathComponent(".state.json.\(UUID().uuidString).tmp"))
     }
 
+    /// A last quit record with a quit to check and a loss seen, which a
+    /// launch that uses the state directory would read and rewrite: a fatal
+    /// launch must leave it (docs/DESIGN.md section 8, "Background App
+    /// Activity").
+    private func addLastQuitRecord(in dir: Directory) throws {
+        let record = LastQuitRecord(
+            quit: LastQuitRecord.Quit(
+                time: Date(timeIntervalSince1970: 1_000), kind: .user, bootTime: 1, auditSessionID: 1,
+                sessions: [SessionID(raw: "aaaaaaaaaaaaaaaa")]),
+            lossSeenAt: Date(timeIntervalSince1970: 500))
+        try LastQuitStore(stateDirectory: dir.url).write(record)
+    }
+
+    /// A fatal plan has no last quit store, so nothing reads, rewrites or
+    /// removes the record.
+    private func expectNoLastQuitStore(_ loaded: AppDelegate.LoadedState, in dir: Directory) {
+        #expect(AppDelegate.lastQuitStore(
+            plan: AppDelegate.LaunchPlan(loaded), canSave: loaded.canSave, stateDirectory: dir.url) == nil)
+    }
+
     @Test func aNormalLaunchUsesTheStateDirectory() throws {
         let dir = try Directory()
         try StateStore.save(named("w"), to: dir.state)
@@ -190,6 +210,8 @@ struct LaunchStateTests {
         #expect(loaded.report == nil)
         let plan = AppDelegate.LaunchPlan(loaded)
         #expect(plan.usesStateDirectory)
+        #expect(AppDelegate.lastQuitStore(plan: plan, canSave: loaded.canSave, stateDirectory: dir.url)?.url
+            == dir.url.appendingPathComponent("last-quit.json"))
 
         // The persistent path is taken: the helper installer runs against
         // this directory. Whether it succeeds depends on the helpers the
@@ -228,6 +250,7 @@ struct LaunchStateTests {
         try StateStore.save(named("w"), to: dir.state)
         try addStaleTemporaryFile(in: dir)
         try addDecoyHelper(in: dir)
+        try addLastQuitRecord(in: dir)
         let before = try snapshot(dir.url)
         let refusal = try #require(InstanceLock.refusal(for: .heldByAnotherProcess(pid: 4242), stateDirectory: dir.url))
         let loaded = AppDelegate.launchState(refusal: refusal, stateURL: dir.state)
@@ -235,6 +258,7 @@ struct LaunchStateTests {
         #expect(!loaded.canSave)
         #expect(!AppDelegate.LaunchPlan(loaded).usesStateDirectory)
         expectNothingSetUp(AppDelegate.LaunchPlan(loaded), in: dir)
+        expectNoLastQuitStore(loaded, in: dir)
         #expect(try snapshot(dir.url) == before)
     }
 
@@ -244,11 +268,13 @@ struct LaunchStateTests {
         try StateStore.save(named("w"), to: StateStore.backupURL(for: dir.state))
         try addStaleTemporaryFile(in: dir)
         try addDecoyHelper(in: dir)
+        try addLastQuitRecord(in: dir)
         let before = try snapshot(dir.url)
         let loaded = AppDelegate.launchState(refusal: nil, stateURL: dir.state)
         #expect(loaded.report?.isFatal == true)
         #expect(!AppDelegate.LaunchPlan(loaded).usesStateDirectory)
         expectNothingSetUp(AppDelegate.LaunchPlan(loaded), in: dir)
+        expectNoLastQuitStore(loaded, in: dir)
         #expect(try snapshot(dir.url) == before)
     }
 
@@ -260,12 +286,14 @@ struct LaunchStateTests {
         try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: dir.state.path)
         defer { try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: dir.state.path) }
         try addDecoyHelper(in: dir)
+        try addLastQuitRecord(in: dir)
         let before = try snapshot(dir.url)
         let loaded = AppDelegate.launchState(refusal: nil, stateURL: dir.state)
         #expect(loaded.report?.isFatal == true)
         #expect(!loaded.canSave)
         #expect(!AppDelegate.LaunchPlan(loaded).usesStateDirectory)
         expectNothingSetUp(AppDelegate.LaunchPlan(loaded), in: dir)
+        expectNoLastQuitStore(loaded, in: dir)
         #expect(try snapshot(dir.url) == before)
     }
 

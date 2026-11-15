@@ -72,6 +72,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// End Sessions and Quit has finished; its quit goes straight through.
     var sessionsEnded = false
 
+    /// `last-quit.json` (docs/DESIGN.md section 8, "Background App
+    /// Activity"); `nil` for a launch that does not use its state directory.
+    let lastQuitStore: LastQuitStore?
+    /// When macOS was last found to have ended sessions after a quit, as
+    /// the record says and the launch check updates it: while set, a quit
+    /// from menu bar mode that leaves local sessions asks first.
+    var lossSeenAt: Date?
+    /// The quit under way, taken when ``applicationShouldTerminate(_:)``
+    /// lets it go through and written by ``applicationWillTerminate(_:)``.
+    var quitToRecord: LastQuitRecord.Quit?
+
     /// What to tell the user about the state file at launch.
     struct LoadReport {
         var message: String
@@ -107,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         self.stateURL = url
         self.mayReclaimOrphans = loaded.mayReclaimOrphans
         self.canSave = loaded.canSave
+        self.lastQuitStore = Self.lastQuitStore(plan: plan, canSave: loaded.canSave, stateDirectory: directory)
         self.loadReport = loaded.report
         let services = Self.launchServices(plan: plan, restoring: state.sessions)
         let sessions = services.sessions
@@ -178,6 +190,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return
         }
 
+        // Whether macOS ended the sessions the last quit left running
+        // (DESIGN §8, "Background App Activity"): files only, read before
+        // any pane closes and retires a session's log. Told after the other
+        // launch alerts; a check not due yet runs later by itself.
+        let endedAfterLastQuit = startLastQuitCheck()
         // Before any workspace is made: a fresh one has no restored sessions,
         // and one is made if these closes leave none.
         closePanesOfSessionsThatEndedCleanly()
@@ -209,6 +226,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     + "Reinstalling Armadale may fix this.",
                 style: .warning)
         }
+        if let ended = endedAfterLastQuit {
+            showSessionsEndedAfterQuit(ended, late: false)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -224,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let error = saver.lastError {
             NSLog("Armadale: failed to save state to %@: %@", stateURL.path, String(describing: error))
         }
+        writeLastQuitRecord()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

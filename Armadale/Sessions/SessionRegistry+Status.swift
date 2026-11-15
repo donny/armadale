@@ -71,6 +71,22 @@ extension SessionRegistry {
         QuitDecision.runningCount(model.sessions.map { riskItem(for: $0.id) })
     }
 
+    /// The local sessions of the persistent runtime that may still have a
+    /// live process (``CloseRisk/mayBeRunning(_:)``): what a quit that keeps
+    /// sessions leaves to the system (docs/DESIGN.md section 8, "Background
+    /// App Activity"). None in the plain PTY fallback, where a quit ends
+    /// them anyway; remote sessions leave no local process.
+    func localSessionsThatMayOutliveQuit() -> [SessionID] {
+        guard sessionsSurviveQuit else { return [] }
+        return model.sessions.filter { Self.mayOutliveQuit($0, risk: riskItem(for: $0.id)) }.map(\.id)
+    }
+
+    /// One session's part of ``localSessionsThatMayOutliveQuit()``: local,
+    /// made by the persistent runtime, and possibly running.
+    nonisolated static func mayOutliveQuit(_ session: Session, risk: CloseRisk.Item) -> Bool {
+        session.remoteHostID == nil && RestorePolicy.isPersistent(session) && CloseRisk.mayBeRunning(risk)
+    }
+
     func riskItem(for id: SessionID) -> CloseRisk.Item {
         let controller = controllers[id]
         return CloseRisk.Item(

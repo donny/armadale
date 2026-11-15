@@ -48,6 +48,36 @@ struct QuitDecisionTests {
         }
     }
 
+    /// After macOS was found to have ended sessions once (Background App
+    /// Activity), a quit from menu bar mode that would leave local sessions
+    /// to the system asks first; nothing else changes.
+    @Test func aQuitFromMenuBarModeAsksWhileALossHasBeenSeen() {
+        let atRisk = QuitDecision.Context(isInMenuBar: true, lossSeen: true, localAtRisk: 3)
+        for choice in Choice.allCases {
+            #expect(QuitDecision.decide(running: 4, preference: choice, context: atRisk) == .confirmLeavingSessions(atRisk: 3))
+        }
+        // No loss seen, or no local session left to the system (remote ones
+        // only, the fallback runtime, nothing running): a plain quit.
+        let noLoss = QuitDecision.Context(isInMenuBar: true, lossSeen: false, localAtRisk: 3)
+        #expect(QuitDecision.decide(running: 3, preference: .ask, context: noLoss) == .quitNow)
+        let remoteOnly = QuitDecision.Context(isInMenuBar: true, lossSeen: true, localAtRisk: 0)
+        #expect(QuitDecision.decide(running: 2, preference: .ask, context: remoteOnly) == .quitNow)
+        // Forced quits never ask; End Sessions and Quit's own quit and its
+        // run are unchanged.
+        let forced = QuitDecision.Context(isForced: true, isInMenuBar: true, lossSeen: true, localAtRisk: 3)
+        #expect(QuitDecision.decide(running: 3, preference: .ask, context: forced) == .quitNow)
+        let ended = QuitDecision.Context(isInMenuBar: true, sessionsEnded: true, lossSeen: true, localAtRisk: 1)
+        #expect(QuitDecision.decide(running: 1, preference: .ask, context: ended) == .quitNow)
+        let ending = QuitDecision.Context(isInMenuBar: true, isEndingSessions: true, lossSeen: true, localAtRisk: 1)
+        #expect(QuitDecision.decide(running: 1, preference: .ask, context: ending) == .cancel)
+        // Outside menu bar mode the ⌘Q question is unchanged: neither answer
+        // leaves sessions to the system.
+        let regular = QuitDecision.Context(lossSeen: true, localAtRisk: 2)
+        #expect(QuitDecision.decide(running: 2, preference: .ask, context: regular) == .ask(running: 2))
+        #expect(QuitDecision.decide(running: 2, preference: .keepInMenuBar, context: regular) == .keepInMenuBar)
+        #expect(QuitDecision.decide(running: 2, preference: .endSessions, context: regular) == .endSessions)
+    }
+
     @Test func endingSessionsCancelsOtherQuitsThenQuitsItself() {
         let ending = QuitDecision.Context(isEndingSessions: true)
         #expect(QuitDecision.decide(running: 2, preference: .ask, context: ending) == .cancel)
@@ -127,12 +157,73 @@ struct QuitDecisionTests {
             MenuBarText.settings, MenuBarText.quitKeepingSessions, MenuBarText.endSessionsAndQuit,
             MenuBarText.toolTip(attentionTotal: 0, isRunning: true), MenuBarText.toolTip(attentionTotal: 2, isRunning: true),
             MenuBarText.ending,
-        ] + Choice.allCases.map(\.title)
+        ] + Choice.allCases.map(\.title) + backgroundActivityTexts
         for text in visible {
             #expect(!text.lowercased().contains("zmx"), "the persistence runtime is never named: \(text)")
         }
         #expect(Choice.allCases.map(\.title) == ["Ask", "Keep running in the menu bar", "End sessions"])
         #expect(MenuBarText.ending == "Ending sessions…")
+    }
+
+    private var backgroundActivityTexts: [String] {
+        [
+            BackgroundActivityText.lossMessage(ended: 1), BackgroundActivityText.lossMessage(ended: 3),
+            BackgroundActivityText.lossInformative(ended: 1), BackgroundActivityText.lossInformative(ended: 3),
+            BackgroundActivityText.quitMessage(atRisk: 1), BackgroundActivityText.quitMessage(atRisk: 3),
+            BackgroundActivityText.quitInformative(atRisk: 1), BackgroundActivityText.quitInformative(atRisk: 3),
+            BackgroundActivityText.openSettingsButton, BackgroundActivityText.notNowButton,
+            BackgroundActivityText.quitAnywayButton, BackgroundActivityText.cancelButton,
+        ]
+    }
+
+    @Test func backgroundActivityWording() {
+        #expect(BackgroundActivityText.lossMessage(ended: 1) == "macOS ended 1 session after Armadale quit")
+        #expect(BackgroundActivityText.lossMessage(ended: 3) == "macOS ended 3 sessions after Armadale quit")
+        #expect(BackgroundActivityText.quitMessage(atRisk: 1) == "macOS may end 1 session when Armadale quits")
+        #expect(BackgroundActivityText.quitMessage(atRisk: 3) == "macOS may end 3 sessions when Armadale quits")
+        let path = "System Settings › General › Login Items & Extensions, under Background App Activity"
+        for text in [1, 3].flatMap({ [BackgroundActivityText.lossInformative(ended: $0), BackgroundActivityText.quitInformative(atRisk: $0)] }) {
+            #expect(text.contains(path), "\(text)")
+            #expect(!text.contains("Allow in the Background"), "the name on macOS 13 to 26")
+            #expect(!text.contains(".."), "\(text)")
+        }
+        #expect(BackgroundActivityText.lossInformative(ended: 1).hasPrefix("It was running when Armadale quit"))
+        #expect(BackgroundActivityText.lossInformative(ended: 2).hasPrefix("They were running when Armadale quit"))
+        #expect(BackgroundActivityText.lossInformative(ended: 2).hasSuffix("keep Armadale running in the menu bar instead."))
+        let quitText = "After an earlier quit, macOS ended sessions a few seconds later. It does this when Armadale is "
+            + "switched off in System Settings › General › Login Items & Extensions, under Background App Activity. "
+            + "If you have switched Armadale on there since, the "
+        #expect(BackgroundActivityText.quitInformative(atRisk: 1) == quitText + "session will keep running.")
+        #expect(BackgroundActivityText.quitInformative(atRisk: 2) == quitText + "sessions will keep running.")
+        #expect(BackgroundActivityText.openSettingsButton == "Open System Settings")
+        #expect(BackgroundActivityText.notNowButton == "Not Now")
+        #expect(BackgroundActivityText.quitAnywayButton == "Quit Anyway")
+    }
+
+    /// At launch Open System Settings answers Return; a late alert (up to
+    /// 12 s after launch, maybe while typing into a pane) has no button that
+    /// does. Not Now answers Escape in both.
+    @Test func theLossAlertsKeys() {
+        let atLaunch = BackgroundActivityText.lossAlert(ended: 2, late: false)
+        #expect(atLaunch.message == "macOS ended 2 sessions after Armadale quit")
+        #expect(atLaunch.informative == BackgroundActivityText.lossInformative(ended: 2))
+        #expect(atLaunch.buttons == ["Open System Settings", "Not Now"])
+        #expect(atLaunch.openSettingsKey == "\r")
+        #expect(atLaunch.notNowKey == "\u{1b}")
+        let late = BackgroundActivityText.lossAlert(ended: 1, late: true)
+        #expect(late.message == "macOS ended 1 session after Armadale quit")
+        #expect(late.buttons == atLaunch.buttons)
+        #expect(late.openSettingsKey.isEmpty, "a stray Return does nothing")
+        #expect(late.notNowKey == "\u{1b}")
+    }
+
+    /// A quit from menu bar mode that does not go through, like closing
+    /// Settings there, hides the app when no window of its own is left.
+    @Test func hidingInMenuBarMode() {
+        #expect(AppDelegate.hidesInMenuBarMode(isInMenuBar: true, auxiliaryWindowVisible: false))
+        #expect(!AppDelegate.hidesInMenuBarMode(isInMenuBar: true, auxiliaryWindowVisible: true), "⌘Q typed in Settings")
+        #expect(!AppDelegate.hidesInMenuBarMode(isInMenuBar: false, auxiliaryWindowVisible: false))
+        #expect(!AppDelegate.hidesInMenuBarMode(isInMenuBar: false, auxiliaryWindowVisible: true))
     }
 
     // MARK: Activation
@@ -294,6 +385,63 @@ struct RegistryQuitTests {
         #expect(remaining == restored.subtracting([first]))
         await registry.endAllSessions(only: remaining)
         #expect(Set(await backend.killed) == restored)
+    }
+
+    /// What a quit leaves to the system (Background App Activity): local
+    /// sessions of the persistent runtime that may be running; none in the
+    /// fallback.
+    @Test func localSessionsThatMayOutliveQuit() throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let workspace = model.newWorkspace(name: "W")
+        model.fillEmptyPanes()
+        let group = try #require(model.workspace(workspace)?.selectedTabGroupID)
+        _ = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
+        _ = try #require(model.newTab(in: group))
+        model.fillEmptyPanes()
+        let ids = model.sessionIDs(in: workspace)
+        #expect(ids.count == 3)
+        // Two made by the persistent runtime, one by the plain PTY fallback
+        // of an earlier run (no runtime version).
+        model.setRuntimeVersion("0.8.1", for: ids[0])
+        model.setRuntimeVersion("0.8.1", for: ids[1])
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        func registry(alive: Set<SessionID>, persistent: Bool) -> SessionRegistry {
+            SessionRegistry(
+                model: model,
+                runtime: SessionRuntimeSetup(
+                    backend: KillRecordingBackend(alive: alive), makeOutputFilter: { IdentityOutputFilter() },
+                    isPersistent: persistent),
+                restoredSessionIDs: Set(ids), settings: settings)
+        }
+        let persistent = registry(alive: Set(ids), persistent: true)
+        #expect(Set(persistent.localSessionsThatMayOutliveQuit()) == [ids[0], ids[1]])
+        #expect(persistent.runningSessionCount() == 3, "the quit question still counts every one")
+        let fallback = registry(alive: Set(ids), persistent: false)
+        #expect(fallback.localSessionsThatMayOutliveQuit().isEmpty)
+    }
+
+    /// One session's part of what a quit leaves to the system: local, made
+    /// by the persistent runtime, possibly running; each condition matters.
+    @Test func whichSessionMayOutliveAQuit() {
+        func session(_ location: Location = .local, version: String? = "0.8.1") -> Session {
+            Session(location: location, profileID: Profile.shell.id, launch: LaunchSpec(), workingDirectory: "/",
+                    runtimeVersion: version)
+        }
+        let running = CloseRisk.Item(status: .running, mayExist: true)
+        #expect(SessionRegistry.mayOutliveQuit(session(), risk: running))
+        #expect(!SessionRegistry.mayOutliveQuit(session(.remote(host: HostID.generate())), risk: running),
+                "remote: no local process")
+        #expect(!SessionRegistry.mayOutliveQuit(session(version: nil), risk: running), "the plain PTY fallback's")
+        #expect(!SessionRegistry.mayOutliveQuit(session(), risk: CloseRisk.Item(status: .ended, mayExist: true)), "ended")
+        #expect(!SessionRegistry.mayOutliveQuit(session(), risk: CloseRisk.Item(status: .pending, mayExist: false)),
+                "created in this run and never started")
+        #expect(!SessionRegistry.mayOutliveQuit(session(), risk: CloseRisk.Item(status: .unavailable, mayExist: true)))
+        #expect(SessionRegistry.mayOutliveQuit(session(), risk: CloseRisk.Item(status: .pending, mayExist: true)),
+                "restored, not yet probed")
+        #expect(SessionRegistry.mayOutliveQuit(session(), risk: CloseRisk.Item(status: .ended, mayExist: true, isRunning: true)),
+                "its client still reports a process")
     }
 
     @Test func nothingRunningInAFreshModel() {

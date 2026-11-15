@@ -3,6 +3,7 @@ import ArmadaleCore
 import ArmadaleSessions
 import Observation
 import os
+import ServiceManagement
 import UserNotifications
 
 /// The quit paths (docs/DESIGN.md section 8, "Quitting with running
@@ -42,16 +43,37 @@ extension AppDelegate {
         // Running sessions (docs/DESIGN.md section 8): ask, stay in the menu
         // bar, or end them first. Neither waits here: staying cancels the
         // quit, and ending them cancels it and quits again when done.
+        let isSystemQuit = Self.isSystemQuit(NSAppleEventManager.shared().currentAppleEvent)
+        let localSessions = registry.localSessionsThatMayOutliveQuit()
         let decision = QuitDecision.decide(
             running: registry.runningSessionCount(),
             preference: settings.preferences.quitWithRunningSessions,
             context: QuitDecision.Context(
-                isForced: isForcedQuit || Self.isSystemQuit(NSAppleEventManager.shared().currentAppleEvent),
+                isForced: isForcedQuit || isSystemQuit,
                 isInMenuBar: menuBarItem != nil,
-                isEndingSessions: isEndingSessions, sessionsEnded: sessionsEnded))
+                isEndingSessions: isEndingSessions, sessionsEnded: sessionsEnded,
+                lossSeen: lossSeenAt != nil, localAtRisk: localSessions.count))
         switch decision {
         case .quitNow:
             break
+        case .confirmLeavingSessions(let atRisk):
+            let answer = askBeforeLeavingSessions(atRisk)
+            if answer == .alertSecondButtonReturn { break }  // Quit Anyway
+            // Open System Settings or Cancel: the quit is cancelled and the
+            // app stays in the menu bar.
+            if answer == .alertFirstButtonReturn {
+                // System Settings takes activation by itself; hiding would
+                // hand it to the previously active app, which may land after
+                // System Settings and put it behind.
+                SMAppService.openSystemSettingsLoginItems()
+            } else {
+                // The alert brought the app forward; with no window of its
+                // own left on screen it hides again, so keystrokes go back to
+                // the app that had them (as when Settings closes). On the
+                // next turn, once this quit has been answered.
+                Task { @MainActor [weak self] in self?.hideIfWindowlessInMenuBar() }
+            }
+            return .terminateCancel
         case .ask(let running):
             switch askAboutRunningSessions(running) {
             case .alertFirstButtonReturn: enterMenuBarMode()
@@ -70,6 +92,15 @@ extension AppDelegate {
         }
         // Windows closing because the app quits must stay "open" for next launch.
         isTerminating = true
+        // Before the clients hang up: which local sessions this quit leaves
+        // running, for the check at the next launch (DESIGN §8, "Background
+        // App Activity"); written with the state in `applicationWillTerminate`.
+        quitToRecord = LastQuitRecord.Quit(
+            time: Date(),
+            kind: Self.kindOfQuit(isSignal: isForcedQuit, isSystem: isSystemQuit, sessionsEnded: sessionsEnded),
+            bootTime: LoginSession.bootTime(),
+            auditSessionID: LoginSession.auditSessionID(),
+            sessions: localSessions)
         // Quitting never ends sessions: hang up every client now (SIGHUP and
         // closing its terminal are synchronous; the session daemons keep
         // running) and quit at once. Never `.terminateLater`: a quit that
@@ -91,6 +122,35 @@ extension AppDelegate {
         else { return false }
         let keyword = AEKeyword(kAEQuitReason)
         return event.attributeDescriptor(forKeyword: keyword) != nil || event.paramDescriptor(forKeyword: keyword) != nil
+    }
+
+    /// The kind of a quit that goes through, for ``LastQuitRecord``: SIGTERM
+    /// (`isForcedQuit`; a fatal launch writes no record) before a quit
+    /// Apple event with a reason, then End Sessions and Quit's own quit;
+    /// anything else is the user's.
+    nonisolated static func kindOfQuit(isSignal: Bool, isSystem: Bool, sessionsEnded: Bool) -> LastQuitRecord.Kind {
+        if isSignal { return .signal }
+        if isSystem { return .system }
+        if sessionsEnded { return .endedSessions }
+        return .user
+    }
+
+    /// The question before a quit from menu bar mode while a loss has been
+    /// seen (docs/DESIGN.md section 8, "Background App Activity"). Returns
+    /// the button: first Open System Settings, second Quit Anyway.
+    private func askBeforeLeavingSessions(_ atRisk: Int) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = BackgroundActivityText.quitMessage(atRisk: atRisk)
+        alert.informativeText = BackgroundActivityText.quitInformative(atRisk: atRisk)
+        alert.addButton(withTitle: BackgroundActivityText.openSettingsButton)
+        // The answer that may lose sessions, marked as End Sessions and Quit is.
+        alert.addButton(withTitle: BackgroundActivityText.quitAnywayButton).hasDestructiveAction = true
+        alert.addButton(withTitle: BackgroundActivityText.cancelButton)
+        // An accessory app answering its status menu: in front, as the quit
+        // question is.
+        AppActivation.bringForward()
+        return alert.runModal()
     }
 
     /// The quit question (docs/DESIGN.md section 8). Returns the button:

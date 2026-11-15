@@ -18,6 +18,12 @@ enum QuitDecision: Equatable, Sendable {
     /// An End Sessions and Quit is already under way and will quit when it
     /// is done; this quit is cancelled.
     case cancel
+    /// A quit from menu bar mode would leave local sessions to the system
+    /// after macOS was found to have ended them once (docs/DESIGN.md
+    /// section 8, "Background App Activity"): ask first, with Open System
+    /// Settings, Quit Anyway and Cancel. Carries the number of local
+    /// sessions at risk.
+    case confirmLeavingSessions(atRisk: Int)
 
     /// Where the app is when the quit arrives.
     struct Context: Equatable, Sendable {
@@ -32,6 +38,13 @@ enum QuitDecision: Equatable, Sendable {
         var isEndingSessions = false
         /// End Sessions and Quit has finished; this is its own quit.
         var sessionsEnded = false
+        /// macOS was found to have ended sessions after an earlier quit
+        /// (`lossSeenAt` in ``LastQuitRecord``).
+        var lossSeen = false
+        /// Local persistent sessions that may be running and would be left
+        /// to the system by a quit that keeps them (remote ones leave no
+        /// local process).
+        var localAtRisk = 0
     }
 
     static func decide(
@@ -39,7 +52,10 @@ enum QuitDecision: Equatable, Sendable {
     ) -> QuitDecision {
         if context.isForced || context.sessionsEnded { return .quitNow }
         if context.isEndingSessions { return .cancel }
-        if context.isInMenuBar || running == 0 { return .quitNow }
+        if context.isInMenuBar {
+            return context.lossSeen && context.localAtRisk > 0 ? .confirmLeavingSessions(atRisk: context.localAtRisk) : .quitNow
+        }
+        if running == 0 { return .quitNow }
         switch preference {
         case .ask: return .ask(running: running)
         case .keepInMenuBar: return .keepInMenuBar
@@ -138,6 +154,73 @@ enum MenuBarText {
         default: "Armadale: \(attentionTotal) sessions need attention"
         }
     }
+}
+
+/// The user-visible wording about macOS ending sessions after a quit
+/// (docs/DESIGN.md section 8, "Background App Activity"). Armadale cannot
+/// read the setting, so it says what happened and what makes macOS do it.
+enum BackgroundActivityText {
+    /// Where the switch is, as System Settings names it on macOS 27.
+    static let settingPath = "System Settings › General › Login Items & Extensions, under Background App Activity"
+
+    private static func sessions(_ count: Int) -> String {
+        count == 1 ? "1 session" : "\(count) sessions"
+    }
+
+    /// The alert at launch after a loss.
+    static func lossMessage(ended: Int) -> String {
+        "macOS ended \(sessions(ended)) after Armadale quit"
+    }
+
+    static func lossInformative(ended: Int) -> String {
+        let what = ended == 1
+            ? "It was running when Armadale quit, and macOS ended it a few seconds later."
+            : "They were running when Armadale quit, and macOS ended them a few seconds later."
+        return what + " macOS does this when Armadale is switched off in \(settingPath). "
+            + "Switch Armadale on there to keep sessions running after a quit, "
+            + "or keep Armadale running in the menu bar instead."
+    }
+
+    /// The question before a quit from menu bar mode, while a loss has been
+    /// seen.
+    static func quitMessage(atRisk: Int) -> String {
+        "macOS may end \(sessions(atRisk)) when Armadale quits"
+    }
+
+    static func quitInformative(atRisk: Int) -> String {
+        "After an earlier quit, macOS ended sessions a few seconds later. "
+            + "It does this when Armadale is switched off in \(settingPath). "
+            + (atRisk == 1
+                ? "If you have switched Armadale on there since, the session will keep running."
+                : "If you have switched Armadale on there since, the sessions will keep running.")
+    }
+
+    /// The loss alert as shown: at launch, Open System Settings is the
+    /// default button (Return); a late one (the check had to wait, up to
+    /// 12 s after launch, while the user may be typing into a pane) has no
+    /// button that answers Return. Not Now answers Escape in both.
+    struct LossAlert: Equatable, Sendable {
+        var message: String
+        var informative: String
+        /// Open System Settings, then Not Now.
+        var buttons: [String]
+        /// The first button's key equivalent: Return, or none.
+        var openSettingsKey: String
+        /// The second button's key equivalent: Escape.
+        var notNowKey: String
+    }
+
+    static func lossAlert(ended: Int, late: Bool) -> LossAlert {
+        LossAlert(
+            message: lossMessage(ended: ended), informative: lossInformative(ended: ended),
+            buttons: [openSettingsButton, notNowButton],
+            openSettingsKey: late ? "" : "\r", notNowKey: "\u{1b}")
+    }
+
+    static let openSettingsButton = "Open System Settings"
+    static let notNowButton = "Not Now"
+    static let quitAnywayButton = "Quit Anyway"
+    static let cancelButton = "Cancel"
 }
 
 /// Menu bar mode's status item: the three-pane glyph (a template image from

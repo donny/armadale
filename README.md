@@ -253,7 +253,7 @@ the test process without the prefix.
 
 | Variable | Effect |
 |---|---|
-| `ARMADALE_STATE_DIR=/dir` | State directory: `state.json` with its backups `state.json.bak` (before the latest save) and `state.json.launch.bak` (as the latest clean launch read it; to start fresh, remove all three; one that cannot be read at all, or was written by a newer Armadale, stops the launch wherever it is in that order), `armadale.lock`, `bin/` (helper copies) and `run/` (sessions). Use a short path (such as `/tmp/armadale-dev`) so socket paths stay under the limit. Only one Armadale process can use a state directory at a time (see below). |
+| `ARMADALE_STATE_DIR=/dir` | State directory: `state.json` with its backups `state.json.bak` (before the latest save) and `state.json.launch.bak` (as the latest clean launch read it; to start fresh, remove all three; one that cannot be read at all, or was written by a newer Armadale, stops the launch wherever it is in that order), `armadale.lock`, `last-quit.json` (what the last quit left running; see "Quitting and the menu bar"), `bin/` (helper copies) and `run/` (sessions). Use a short path (such as `/tmp/armadale-dev`) so socket paths stay under the limit. Only one Armadale process can use a state directory at a time (see below). |
 | `ARMADALE_BACKEND=ephemeral` | Plain PTY sessions that end when the app quits (tests, debugging). |
 | `ARMADALE_ZMX=/path/to/zmx` | zmx binary to bundle-install and test with, instead of the app's `Contents/Helpers/zmx` or `Vendor/zmx`. |
 | `ARMADALE_CTTY_EXEC=/path/to/ctty-exec` | `ctty-exec` to use (see below). |
@@ -394,10 +394,22 @@ ends every session at once. A quit from menu bar mode leaves no Dock item.
 Sessions survive a quit only while Armadale is allowed to run in the
 background: if you answered Don't Allow to that prompt, or switched
 Armadale off under System Settings › General › Login Items & Extensions
-› Allow in the Background, macOS ends every session a few seconds after
-Armadale quits, from the menu bar too. Keep it allowed, or keep Armadale
-running. Details in docs/DESIGN.md section 8, "Quitting with running
-sessions".
+› Background App Activity, macOS ends every local session a few seconds
+after Armadale quits, from the menu bar too. Keep it allowed, or keep
+Armadale running. Armadale cannot read that setting, so it watches for
+the result instead: each quit records which local sessions it left
+running, and when the next launch finds that macOS ended them a few
+seconds after the quit, Armadale says so, with a button that opens
+System Settings at Login Items & Extensions. From then on, any quit
+while Armadale is in the menu bar that would leave local sessions
+running (such as Quit, Keep Sessions Running) asks first (**Open System
+Settings**, **Quit Anyway** or Cancel), until a later quit's sessions
+are found still running.
+A loss is reported at the next launch, not prevented. What it cannot
+catch: a crash or force quit of Armadale (nothing is recorded), and a
+restart or logout before the next launch. Details in docs/DESIGN.md
+section 8, "Quitting with running sessions" and "Background App
+Activity".
 
 ## Settings and themes
 
@@ -576,7 +588,7 @@ build/release/Armadale.xcarchive/Products/Applications/Armadale.app`.
 A Developer ID build has a different code identity from a development
 build. Notification permission is kept per bundle identifier and carries
 over; privacy grants, which macOS ties to the code identity, and macOS
-27's "Allow in the Background" decision may be asked for again.
+27's Background App Activity decision may be asked for again.
 
 ## Layout
 

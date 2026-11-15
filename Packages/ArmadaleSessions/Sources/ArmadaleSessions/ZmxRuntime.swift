@@ -199,6 +199,50 @@ public struct ZmxRuntime: Sendable, Hashable {
     }
 }
 
+// MARK: Termination by signal
+
+extension ZmxRuntime {
+    /// How much of a session's log the termination reader looks at: the
+    /// helper truncates its logs at 2 MB, and the line sought is among the
+    /// last a dying daemon writes.
+    public static let terminationLogTail = 65_536
+
+    /// When session `id`'s daemon last logged that it received SIGTERM, to
+    /// the second: what the system's force quit after a quit, the Dock's
+    /// "Stop Running in Background" or a `kill` by hand leave behind
+    /// (docs/DESIGN.md section 4, "Housekeeping", and section 8, "Background
+    /// App Activity"). The helper's own kill and a program that ends leave
+    /// no such line. `nil` when the log is missing or holds none. Reads only
+    /// the log's last ``terminationLogTail`` bytes.
+    public func lastTerminationSignal(for id: SessionID) -> Date? {
+        let path = logDirectory + "/" + Self.sessionName(for: id) + ".log"
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(Self.terminationLogTail) ? size - UInt64(Self.terminationLogTail) : 0
+        guard (try? handle.seek(toOffset: start)) != nil, let data = try? handle.readToEnd() else { return nil }
+        return Self.lastTerminationSignal(inLog: String(decoding: data, as: UTF8.self), sessionName: Self.sessionName(for: id))
+    }
+
+    /// The time of the last line of the form `[<epoch seconds>] [info]
+    /// (default): SIGTERM received, shutting down gracefully session=<name>`
+    /// in a helper log (helper 0.8.1's wording, pinned by a test against the
+    /// bundled helper). Lines for another session, and a first line cut by
+    /// reading only the tail, are ignored.
+    static func lastTerminationSignal(inLog text: some StringProtocol, sessionName: String) -> Date? {
+        var last: Date?
+        for line in text.split(whereSeparator: \.isNewline) {
+            guard line.hasPrefix("["), let close = line.firstIndex(of: "]"),
+                  let seconds = Int64(line[line.index(after: line.startIndex)..<close]),
+                  line.contains("SIGTERM received"),
+                  line.trimmingCharacters(in: .whitespaces).hasSuffix("session=" + sessionName)
+            else { continue }
+            last = Date(timeIntervalSince1970: TimeInterval(seconds))
+        }
+        return last
+    }
+}
+
 // MARK: Exit statuses
 
 extension ZmxRuntime {

@@ -235,6 +235,73 @@ struct ZmxRuntimeTests {
         #expect(throws: ZmxRuntime.SetupError.self) { try ZmxRuntime(directory: base + "/file").prepare() }
     }
 
+    /// The helper's log line after SIGTERM to the daemon (helper 0.8.1;
+    /// `LocalZmxBackendTests` pins it against the real helper), as the
+    /// launch check after a quit reads it (docs/DESIGN.md section 8,
+    /// "Background App Activity").
+    @Test func theLastTerminationSignalIsReadFromTheLog() {
+        let name = "a-aaaaaaaaaaaaaaaa"
+        let log = """
+            [1794717100] [info] (default): daemon started session=\(name)
+            [1794717105] [debug] (default): client connected session=\(name)
+            [1794717111] [info] (default): SIGTERM received, shutting down gracefully session=\(name)
+            [1794717111] [info] (default): shutting down daemon session=\(name)
+
+            """
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: log, sessionName: name) == Date(timeIntervalSince1970: 1_794_717_111))
+        // The last one counts; another session's line, a cut first line and
+        // the helper's own kill do not.
+        let mixed = """
+            4717000] [info] (default): SIGTERM received, shutting down gracefully session=\(name)
+            [1794717050] [info] (default): SIGTERM received, shutting down gracefully session=\(name)
+            [1794717060] [info] (default): SIGTERM received, shutting down gracefully session=a-bbbbbbbbbbbbbbbb
+            [1794717070] [info] (default): kill received session=\(name)
+            [1794717071] [info] (default): shutting down daemon session=\(name)
+            """
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: mixed, sessionName: name) == Date(timeIntervalSince1970: 1_794_717_050))
+        let none = """
+            [1794717070] [info] (default): kill received session=\(name)
+            [1794717071] [info] (default): shutting down daemon session=\(name)
+            """
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: none, sessionName: name) == nil)
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: "", sessionName: name) == nil)
+        // A tail that starts mid-line: its only SIGTERM line is the cut one,
+        // whose time is gone, so nothing is found.
+        let cut = """
+            94717111] [info] (default): SIGTERM received, shutting down gracefully session=\(name)
+            [1794717111] [info] (default): shutting down daemon session=\(name)
+            """
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: cut, sessionName: name) == nil)
+        let cutToDigits = "1794717111] [info] (default): SIGTERM received, shutting down gracefully session=\(name)"
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: cutToDigits, sessionName: name) == nil)
+        // The last line without a trailing newline still counts.
+        let unterminated = "[1794717100] [info] (default): daemon started session=\(name)\n"
+            + "[1794717111] [info] (default): SIGTERM received, shutting down gracefully session=\(name)"
+        #expect(ZmxRuntime.lastTerminationSignal(inLog: unterminated, sessionName: name) == Date(timeIntervalSince1970: 1_794_717_111))
+        #expect(ZmxRuntime.lastTerminationSignal(
+            inLog: "[x] [info] (default): SIGTERM received, shutting down gracefully session=\(name)", sessionName: name) == nil)
+    }
+
+    @Test func onlyTheLogsTailIsRead() throws {
+        let directory = "/tmp/armadale-test-\(getpid())-\(String(UInt32.random(in: 0...UInt32.max), radix: 36))"
+        defer { if directory.hasPrefix("/tmp/armadale-test-") { try? FileManager.default.removeItem(atPath: directory) } }
+        let runtime = ZmxRuntime(directory: directory)
+        try FileManager.default.createDirectory(atPath: runtime.logDirectory, withIntermediateDirectories: true)
+        let id = SessionID.generate()
+        let name = ZmxRuntime.sessionName(for: id)
+        #expect(runtime.lastTerminationSignal(for: id) == nil, "no log")
+        let line = "[1794717111] [info] (default): SIGTERM received, shutting down gracefully session=\(name)\n"
+        let filler = String(repeating: "[1794717000] [debug] (default): client connected session=\(name)\n", count: 3000)
+        let path = runtime.logDirectory + "/\(name).log"
+        // At the end of a log larger than the tail: found.
+        try (filler + line).write(toFile: path, atomically: true, encoding: .utf8)
+        #expect((filler + line).utf8.count > ZmxRuntime.terminationLogTail)
+        #expect(runtime.lastTerminationSignal(for: id) == Date(timeIntervalSince1970: 1_794_717_111))
+        // Further back than the tail: not read.
+        try (line + filler).write(toFile: path, atomically: true, encoding: .utf8)
+        #expect(runtime.lastTerminationSignal(for: id) == nil)
+    }
+
     private func permissions(_ path: String) throws -> Int {
         try #require(FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int)
     }

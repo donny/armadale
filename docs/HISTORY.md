@@ -2091,6 +2091,101 @@ retries give up; two hosts at once; what only the eye would see.
 `HANDOFF.md` keeps the password cases ("Next"; Remote; "Restored
 sessions attached at launch").
 
+## November 14, 2026: sessions macOS ends after a quit are detected and told
+
+The decision deferred on October 19, 2026 ("Allow in the Background"
+switched off, above) was made on November 14, 2026, and built the same
+evening. With Armadale switched off under System Settings › General ›
+Login Items & Extensions › Background App Activity, macOS ends every
+local session 1 to 5 s after any quit, and until now Armadale said
+nothing: the next launch just showed ended panes.
+
+What was checked before the options went to the owner (the evidence is
+in Part 2, sections 4 and 8).
+- **No API reads the setting.** Apple's ServiceManagement
+  documentation and the header in the macOS 27.2 SDK have nothing that
+  tells an app whether it may run in the background;
+  `SMAppService.status` describes an item the app registered.
+- **The section's name.** On macOS 27.2.1 the Login Items pane's own
+  strings call it "Background App Activity", as Apple's support
+  article 125671 does. "Allow in the Background", which the repository
+  used, was its name on macOS 13 to 26.
+- **What a session ended by the system leaves behind.** Sessions were
+  staged with the persistence helper alone and ended in different
+  ways: a daemon that gets SIGTERM writes a dated "SIGTERM received"
+  line to its log; the helper's own kill and a program that ends do
+  not. The exit recorder writes nothing in that case, and the state
+  file held no quit time and no list of the sessions alive at a quit.
+
+The options, and the owner's choice. Detect the loss after the fact and
+tell; only say it, in the quit alert, the status menu and the README; or
+a registered background item (`SMAppService`), prototyped first in a
+throwaway app, either only to read the switch through its `status` or
+to own the sessions. The owner chose the first ("Detect and tell").
+The second would have told everyone at every quit, in an alert whose
+answers the switch does not affect. The third keeps no session alive
+with the switch off either (an agent that is switched off does not
+run); it could at best let the app know before a loss, and is not
+tested.
+
+What was built (`docs/DESIGN.md` section 3, "The last quit", and
+section 8, "Background App Activity").
+- **A record at quit**, `last-quit.json` beside the state file: the
+  time, the kind of quit, the boot and the login session, and the local
+  sessions it left running. It is not part of the state file, so the
+  schema is untouched.
+- **A check at the next launch**, from files only, no earlier than 12 s
+  after the quit: *ended* when a recorded session's log has the SIGTERM
+  line within 10 s of the quit, *survived* when none has and one is
+  alive, otherwise nothing is said (the system's own quit, a restart or
+  a logout since, nothing recorded).
+- **An alert after a loss**, "macOS ended N sessions after Armadale
+  quit", with Open System Settings and Not Now. It says what happened
+  and what makes macOS do it, never that the switch is off.
+- **A question before the next quit that would leave local sessions**
+  from menu bar mode, while a loss has been seen: Open System Settings,
+  Quit Anyway, Cancel. It stops when a later quit's sessions are found
+  alive. The ⌘Q question is unchanged.
+- The README and DESIGN name the switch as macOS 27.2 shows it.
+
+How it was checked. An implementer and a separate reviewer (both Opus
+5.5), three implementer rounds and two review rounds. The reviewer ran
+the gate itself in both rounds, staged a session with the helper to
+check the log line, read NSAlert's key equivalents from a script that
+shows no window, and tried six mutations: the two of the first round
+survived and their gaps were closed, the four of the second were all
+caught. The coordinating session's gate on the final tree: 861 tests
+(315 app, 281 core, 240 sessions, 13 and 12), no compiler warning, no
+process left. The SSH integration tests did not run (no host was set).
+The app was never launched.
+
+What the reviews found, all fixed (Part 2, section 8, has each).
+- Cancel on the new question left an active menu bar app with no
+  window, so keystrokes went nowhere: the app hides again, as it does
+  when Settings is closed in menu bar mode.
+- The alert of a check that had to wait can appear up to 12 s after
+  launch, while the user types: no button answers Return there, and
+  Not Now answers Escape in both alerts.
+- A damaged record (a boot time of `Int64.min`) would have crashed
+  every launch.
+- The question said "the last quit", which the record does not always
+  show.
+- A check that had to wait must not clear the warning: whether macOS
+  still ends the old run's sessions when the app is running again
+  within 5 s is not known.
+
+Not checked live: both alerts and their buttons, the hide after
+Cancel, a SIGTERM quit under the new alerts, the record at each kind
+of quit, and the whole loop with the switch off and on again. It needs
+the owner at the switch, and a test build started through Launch
+Services, as on October 19, 2026. The known limits (a crash of
+Armadale, a restart or logout before the next launch, a `kill` by hand
+within 10 s of a quit) are in DESIGN section 8.
+
+In `HANDOFF.md`, "macOS 27: 'Allow in the Background' switched off" is
+removed from "Decisions pending" and from "Next". What stays there: the
+live check, and the `SMAppService` prototype as an untested option.
+
 ---
 
 # Part 2: the history of each design section
@@ -2282,6 +2377,16 @@ intents were added. `defaultWorkingDirectory` stays, as the home directory
 a blank request directory means.
 
 ## 3. Persistence of layout: `StateStore`
+
+**November 14, 2026. `last-quit.json`, beside the state file.** The record
+of what a quit left running (section 8, "Background App Activity") was
+kept out of `state.json` on purpose: it changes at every quit and every
+launch check, nothing in the layout depends on it, and keeping it apart
+leaves the state file's schema, the fixtures and
+`scripts/check-state-compat.sh` untouched. It carries a version of its
+own; a file of another version counts as absent, like a damaged one. A
+fatal or locked-out launch never touches it (`LaunchStateTests` stage one
+in each fatal case and compare the directory before and after).
 
 **November 14, 2026. `Session.gridSize` at schema 2, no bump.** Applying
 the version rule: 0.1.0 and 0.1.1 refuse every schema-2 file by version,
@@ -2508,6 +2613,28 @@ is a small tree that is easier to inspect, diff and migrate as JSON.
   grep ZMX` in a pane prints nothing.
 
 ### Housekeeping
+- **November 14, 2026. The SIGTERM line in a session's log.** Five
+  sessions staged with the vendored helper (0.8.1) alone, in a scratch
+  runtime directory, were ended in different ways and their logs read
+  (no app). SIGTERM to the daemon, what `loginwindow`'s force quit sends
+  (as do the Dock's "Stop Running in Background", a shutdown and a `kill`
+  by hand), logs `[1794717111] [info] (default): SIGTERM received,
+  shutting down gracefully session=a-term`, then `kill received`, then
+  `shutting down daemon`, also when daemon and shell get it together;
+  the helper's own kill logs `kill received` and `shutting down daemon`
+  with no SIGTERM line; a program that ends (its shell killed with
+  SIGKILL) logs only `shutting down daemon`. (The first account of the
+  probe said the SIGTERM line was followed by `shutting down daemon`
+  only; the reviewer's staging and a second probe the same day showed
+  the `kill received` between them.) The helper's
+  listing writes `client connected` / `client disconnected` into every
+  live daemon's log, so a log's modification time is not the time of
+  death while the daemon lives; a dead one is never written again. The
+  recorder writes no exit record once it has passed SIGHUP or SIGTERM
+  on, so a session the system ended has none. The line is read with
+  only the log's tail (the helper truncates at 2 MB), and
+  `LocalZmxBackendTests` sends SIGTERM to a real daemon (the parent of
+  the pid the helper's `ls` prints) to pin the wording.
 - **November 14, 2026, live checks. A queued kill.** After the pane of a
   stopped daemon was closed (one `sessions` log line), `kill -CONT` made
   the daemon take the kill it had queued and end; the helper then
@@ -3389,6 +3516,96 @@ accessory app.
 **Step 8. Settings › General height.** Settings › General is 520 pt tall
 (was 330, which already scrolled the last section out of view).
 
+**November 14, 2026. "Allow in the Background" is now "Background App
+Activity".** The repository named the switch by its macOS 13 to 26 name.
+On macOS 27.2.1 (build 26B131) the Login Items pane's own strings
+(`LoginItems.appex`, `Localizable.loctable`, English) have "Open at
+Login", "Background App Activity", "Extensions", "Legacy Background
+Tasks" and "Managed Background Apps", and no "Allow in the Background";
+Apple's support article 125671 (September 14, 2026, "Starting in macOS
+27") says "Under Background App Activity" (the Mac User Guide says "App
+Background Activity"). DESIGN and the README now use the on-screen name.
+
+### Background App Activity
+
+**November 14, 2026. Detect and tell (owner's choice).** The switch's
+effect (section 8, "Quit, Keep Sessions Running"; Part 1, October 19,
+2026, evening) was an open decision since October 19, 2026. On November
+14, 2026 Apple's ServiceManagement documentation (the framework page,
+`SMAppService`, `SMAppService.Status`, `openSystemSettingsLoginItems()`,
+`agent(plistName:)`, `statusForLegacyPlist(at:)`) and the macOS 27.2
+SDK's `SMAppService.h` were checked: every symbol is macOS 13.0 (the
+newest, `SMAppServiceErrorDomain`, macOS 15.0), nothing for macOS 26 or
+27, and `status` describes a service the app registered, so no API reads
+the app's own background allowance. Three options went to the owner:
+detect the loss after the fact and tell (chosen); only say it in the quit
+alert and the status menu; or a registered background item
+(`SMAppService`), prototyped first in a throwaway app, which even at
+best would only let the app know before the loss, since an agent that
+is switched off does not run either. The coordinating session decided
+the details: the record at quit, the rule and its windows (1 s before
+the quit, for the log's whole seconds, to 10 s after it, against the
+measured 1 s and 5 s; the check no earlier than 12 s after the quit),
+the wording, and which quits ask (only a quit from menu bar mode that
+leaves local sessions; the ⌘Q question already never leaves sessions to
+the system).
+
+False alarms and misses looked at then: the system's own quit carries a
+reason, and a restart or logout changes the boot time or the audit
+session id (undetermined, not a loss); sessions the user ended go
+through the helper's kill (no SIGTERM line) or are not in the record; a
+program that finished by itself has an exit record and no SIGTERM line.
+The Dock's stop item or a `kill` by hand within 10 s of a quit is
+reported as a loss (rare; the Dock item exists only after a quit from
+the regular policy). A crash or force quit of Armadale leaves no record.
+A relaunch within 5 s of a quit from the menu bar would find the
+sessions still alive, which is why the check waits until 12 s after the
+quit. Whether the force quit also ends sessions started by an earlier
+run of the app (their daemons are in that run's coalition) is not
+known: every test on October 19, 2026 used a fresh session, so *ended*
+needs one recorded session ended that way, not all of them.
+
+Two details came from the implementation. `kern.boottime` moves when the
+clock is set, so two boot times within 60 s count as the same boot; a
+restart moves it by the Mac's whole uptime. A quit within 12 s of the
+previous one, before that one's check has run, replaces its record, so
+that check never runs (accepted: the window is the 12 s itself).
+
+The review of the same day changed six things (coordinator's
+decisions). A quit question answered with Cancel or Open System
+Settings left an active accessory app with no window, so after Cancel
+the app now hides again by the rule closing Settings uses. After Open
+System Settings it does not (the second review): System Settings takes
+activation by itself, and `NSApp.hide` hands activation to the
+previously active app, which may land after System Settings and put it
+behind; reasoned from how hiding works, not checked live. The late loss
+alert can come up to 12 s after launch, while the user types into a
+pane: Return there does nothing, and in menu bar mode no alert is shown
+at all (an inactive accessory app's alert may sit behind other
+windows), decided once, when the alert would show (the second review
+found that deciding at the check as well missed a user who had left
+menu bar mode meanwhile); Not Now answers Escape in both alerts. A hand-edited boot time of `Int64.min`
+trapped in the subtraction at every launch, since the quit is removed
+only after the verdict; the comparison is overflow-safe now, and the
+file's other numbers were checked: the decoder refuses non-finite
+seconds and out-of-range integers, dates are only compared or offset in
+floating point, and the wait is capped and never NaN. The quit
+question's text said "After the last quit that left sessions running",
+which the record does not show (`lossSeenAt` outlives undetermined
+checks); it now says "After an earlier quit". Quit Anyway is marked
+destructive. And a check that ran late never clears `lossSeenAt`:
+**not known** is whether macOS still ends the old run's sessions when
+the app is running again within 5 s of the quit (every test on October
+19, 2026 relaunched later); if it does not, a quick relaunch would find
+them alive and clear the flag while the switch is still off.
+
+Nothing of this was checked live: it needs the owner to say the Mac is
+free and to switch Armadale off, then on again, under Background App
+Activity, with a test build started through Launch Services (`open -n
+--env …`), as on October 19, 2026 (started by its binary path from an
+agent's shell it would belong to the agent's app). The switch governs
+the owner's installed app too (same bundle identifier).
+
 
 ## 9. Keyboard shortcuts
 
@@ -3685,6 +3902,13 @@ owner's request) on October 24. The build order is complete.
 ---
 
 ## 13. Risks and open points
+
+**November 14, 2026: the background switch, detected.** The open point
+of October 19, 2026 (what to do about Armadale switched off under what
+is now called Background App Activity) was decided for "detect and
+tell" (section 8, "Background App Activity"): the loss is found at the
+next launch and the user told, not prevented. The `SMAppService`
+prototype stays untested; it could at best tell the app before a loss.
 
 **November 14, 2026. Attaching every restored session at launch.** The
 risk was recorded with the change: the cost of hidden attached sessions

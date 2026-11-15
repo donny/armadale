@@ -23,7 +23,11 @@ state directory, a safer orphan reclaim and save schedule, state file
 schema 2, and restored sessions attached at launch. That last change
 was checked live the same day on a test build, except on a host (there
 was none) and for what the accessibility tree does not show ("From
-finished changes" below). The last gate run: 834 tests, zero warnings.
+finished changes" below). The same evening Armadale learned to detect
+that macOS ended the sessions a quit left running (Armadale switched
+off under Background App Activity) and to say so; that change is not
+checked live ("From finished changes" below) and is not in the
+installed 0.1.2. The last gate run: 861 tests, zero warnings.
 **Armadale 0.1.2 (28) is built, notarized and stapled from 76562b7
 (November 14, 2026) and installed on the owner's Mac, but not
 released: no tag, no GitHub Release, no fixture ("Next" below).**
@@ -83,13 +87,17 @@ in the heading or the text under it, their commits:
 - November 14, 2026: hosts checked live: the limit of six at launch,
   more than ten sessions on one host, an unreachable host coming
   back; no code changed.
+- November 14, 2026: sessions macOS ends after a quit are detected
+  and told (Background App Activity); the owner's choice among three
+  options. Not checked live.
 
 ## Next
 
 Nothing is in progress. Everything the owner gave the go-ahead for on
 November 14, 2026 is built, and checked live where the Mac was free
-(`docs/HISTORY.md`, the entries of that day). What comes next waits
-for the owner.
+(`docs/HISTORY.md`, the entries of that day), except the detection of
+sessions macOS ends after a quit, which waits for its live check
+(below). What comes next waits for the owner.
 
 Waiting for owner decisions:
 - **Publishing 0.1.2.** The notarized DMG of 76562b7 exists only on
@@ -101,8 +109,10 @@ Waiting for owner decisions:
   the GitHub Release with the DMG under both names, and add the tag's
   state fixture (README, "Releasing", steps 4 and 5). If anything is
   committed to the app before then, bump the build number and build
-  again instead. The release notes should say that 0.1.2 writes state
-  file schema 2, which 0.1.0 and 0.1.1 refuse.
+  again instead; the detection of sessions macOS ends after a quit
+  (November 14, 2026) was committed after 76562b7, so a release that
+  has it is a new build. The release notes should say that 0.1.2
+  writes state file schema 2, which 0.1.0 and 0.1.1 refuse.
 - **Three decisions the coordinator made** when restored sessions
   were attached at launch (November 14, 2026), each the owner's to
   overrule: the launch holds at most six of a host's sessions (open
@@ -124,11 +134,20 @@ Waiting for owner decisions:
   repository is public now and https://armadale.dev is live, so a feed
   has a home (GitHub Releases or the site); whether a later version
   gets an updater is the owner's call.
-- **macOS 27's "Allow in the Background" switch:** what step 8 should
-  say or do about it, since it ends every session a few seconds after
-  any quit when it is off, from the menu bar too (tested October 19,
-  2026, evening; "Decisions pending" below). The owner deferred that
-  decision on October 19, 2026; it is an open item, not started.
+- **The live check of the Background App Activity detection.** The
+  owner chose "detect and tell" on November 14, 2026 and it is built
+  (`docs/HISTORY.md`, "sessions macOS ends after a quit are detected
+  and told"), but nothing of it has run in the app. The check needs
+  the owner to say the Mac is free and to switch Armadale off, then on
+  again, under System Settings › General › Login Items & Extensions ›
+  Background App Activity; the steps are under "From finished changes"
+  below. That switch governs the installed app too (same bundle
+  identifier), so no session that matters should be running in it
+  then.
+- **An `SMAppService` prototype**, optional ("Decisions pending"
+  below): whether a registered background item's `status` follows the
+  same switch, which would let Armadale know before a loss instead of
+  after.
 - Any of the open items below.
 
 ## Open items carried forward
@@ -479,6 +498,40 @@ From finished changes: not checked live, and found and not fixed
 
   **Found and not fixed:** heavy output in sessions not on screen
   (Session layer, above; accepted as it is).
+- Sessions macOS ends after a quit, detected and told (November 14,
+  2026; `docs/DESIGN.md` section 8, "Background App Activity").
+  **Nothing of it is checked live**: the app was never launched with
+  it. It was checked by unit tests, by a test through the real
+  persistence helper (the SIGTERM line in a session's log) and by
+  reading. To check, with the owner's word that the Mac is free and
+  the owner at the switch:
+  - Start the test build through Launch Services (`open -n --env
+    ARMADALE_STATE_DIR=… --env ARMADALE_DEFAULTS_SUITE=… <the Debug
+    app>`), as on October 19, 2026: started by its binary path from an
+    agent's shell it belongs to the agent's app, and macOS would judge
+    that app, not Armadale.
+  - Switched off: a session started in the build, the build quit by
+    SIGTERM to its pid, relaunched after 12 s. Expected: the alert
+    "macOS ended 1 session after Armadale quit", the `state` log line
+    "last quit check: ended (1) after a signal quit, 1 session(s)
+    recorded, 1 ended by SIGTERM", and
+    `last-quit.json` holding only `lossSeenAt`. Then from menu bar
+    mode, Quit, Keep Sessions Running: the question "macOS may end 1
+    session when Armadale quits", with Cancel hiding the app again and
+    Open System Settings opening Login Items & Extensions in front.
+  - Switched on again: Quit Anyway, relaunch after 12 s. Expected: no
+    alert, "survived" in the log, `last-quit.json` gone, and no
+    question at the next quit from the menu bar.
+  - Also not seen: the alert of a check that had to wait (a relaunch
+    within 12 s; no button should answer Return), a SIGTERM quit under
+    either new alert (within 2 s), and whether macOS still ends the
+    old run's sessions when the app is running again within 5 s.
+  Known limits, accepted (DESIGN section 8): a crash or force quit of
+  Armadale leaves no record; a restart or logout before the next
+  launch says nothing; a `kill` by hand or the Dock's "Stop Running in
+  Background" within 10 s of a quit is reported as macOS's doing; a
+  quit within 12 s of the previous one drops that one's check; the
+  first loss is reported, not prevented.
 
 Architecture review (November 12 and 14, 2026): what is left
 
@@ -560,11 +613,9 @@ status item (step 8). The test of October 19, 2026 and the options
 considered are in `docs/HISTORY.md` ("macOS 27, 'Running in
 Background' after quit").
 
-Still untested, in order of value: an `SMAppService` agent prototype
-(option 2 there: session ownership moved into a login item or agent),
-now also as a possible way out of the kill described in the next
-section; the prompt's Don't Allow button itself (needs a Mac with no
-stored decision; the switch records the same state); whether a quit
+Still untested, in order of value: an `SMAppService` prototype (the
+next section); the prompt's Don't Allow button itself (needs a Mac
+with no stored decision; the switch records the same state); whether a quit
 leaves the ssh connection masters (`ControlPersist`, up to 10 minutes)
 as subordinate processes that show the Dock indicator or are killed
 (seen November 14, 2026: a master outlives a quit by SIGTERM, its
@@ -572,29 +623,33 @@ parent being launchd; the Dock was not looked at then);
 whether Background App Activity lists the daemons after a quit (needs
 root or the System Settings UI).
 
-### macOS 27: "Allow in the Background" switched off — tested, decision deferred
+### macOS 27: a registered background item (`SMAppService`) — untested
 
-Tested October 19, 2026 (evening), the owner switching Armadale off and
-on again under System Settings › General › Login Items & Extensions ›
-Allow in the Background. Switched off, macOS ends every session 5 s
-after a quit from menu bar mode and 1 s after a regular quit such as
-SIGTERM; switched on, nothing is touched. Menu bar mode avoids the
-Dock's "Running in Background" tile and its stop item, as step 8
-intended, but not the allow decision: the sessions survive a quit only
-while Armadale is allowed in the background, whatever the quit. There
-is no API for the app to read the decision, and no prompt appears for
-an accessory-mode quit, so the user is never told again. Remote
-sessions are not affected (no local process), except that their ssh
-masters are subordinate processes too (untested).
+With Armadale switched off under Background App Activity, macOS ends
+every local session a few seconds after any quit (tested October 19,
+2026). What Armadale does about it was decided and built on November
+14, 2026: it detects the loss at the next launch and says so
+(`docs/DESIGN.md` section 8, "Background App Activity";
+`docs/HISTORY.md`, "sessions macOS ends after a quit are detected and
+told"). That reports a loss; it cannot prevent the first one, because
+no API reads the setting.
 
-Options for the owner: say so in the quit alert and the README
-(cheapest; the alert already explains menu bar mode), add it to the
-status menu's wording, or prototype the `SMAppService` agent (option 2
-above) to see whether a login item's processes escape the check.
-**Decision deferred by the owner (October 19, 2026): open item, nothing
-started.** What was recorded: `docs/DESIGN.md` section 8 ("Quit, Keep Sessions
-Running") and section 13; the README's "Quitting and the menu bar"
-gained one sentence.
+What is left to decide is whether to prototype a registered background
+item, in a throwaway app with its own bundle identifier so that
+Armadale's stored decision is not touched. Two sizes:
+- **Only to read the switch.** A do-nothing item registered through
+  `SMAppService`; its `status` is `requiresApproval` when the user has
+  switched the item off. If macOS 27 keeps one switch per app for a
+  registered item and for processes left after a quit (not known), the
+  app could know before a loss and say so at the quit. The prototype
+  is small and needs the owner at the switch a few times.
+- **Session ownership moved into an agent** (option 2 of October 19,
+  2026). The largest change considered: a new bundled executable,
+  signing and the release pipeline, existing sessions to migrate. A
+  developer forum thread (835214, macOS 27 beta) reports such an agent
+  still giving the app the Dock's grey dot after a quit.
+Neither keeps a session alive with the switch off: an agent that is
+switched off does not run.
 
 ## State of this Mac that matters
 

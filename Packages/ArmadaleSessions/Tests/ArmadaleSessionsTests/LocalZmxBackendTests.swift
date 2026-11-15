@@ -145,6 +145,43 @@ final class LocalZmxBackendTests {
         #expect(await backend.resolveExit(of: attached) == .ended(exitStatus: nil))
     }
 
+    /// What macOS's force quit after a quit leaves behind, with the bundled
+    /// helper (docs/DESIGN.md section 8, "Background App Activity"): SIGTERM
+    /// to the daemon logs the line the launch check reads, at the time it
+    /// came, and no exit record; the helper's own kill logs no such line.
+    @Test func aDaemonEndedBySIGTERMLogsTheLineTheLaunchCheckReads() async throws {
+        let runtime = sandbox.runtime
+        let session = sandbox.session()
+        let handle = try await backend.create(session, size: size)
+        let output = OutputCollector(handle.output)
+        await output.wait { $0.contains(ZmxSandbox.prompt) }
+        await handle.terminate()
+        await output.waitForEnd()
+        let daemon = try daemonPID(of: session.id)
+        let before = Date()
+        #expect(Darwin.kill(daemon, SIGTERM) == 0)
+        #expect(await eventually {
+            !runtime.hasSocket(for: session.id) && runtime.lastTerminationSignal(for: session.id) != nil
+        })
+        let after = Date()
+        let logged = try #require(runtime.lastTerminationSignal(for: session.id))
+        // Whole seconds in the log.
+        #expect(logged >= before.addingTimeInterval(-1) && logged <= after, "\(logged) not in \(before)…\(after)")
+        #expect(runtime.recordedExitStatus(for: session.id) == nil, "the recorder writes nothing after SIGTERM")
+        #expect(!runtime.isAliveWithoutListing(session.id))
+
+        let killed = sandbox.session()
+        let other = try await backend.create(killed, size: size)
+        let otherOutput = OutputCollector(other.output)
+        await otherOutput.wait { $0.contains(ZmxSandbox.prompt) }
+        try await backend.kill(killed.id)
+        await otherOutput.waitForEnd()
+        #expect(await eventually { !runtime.hasSocket(for: killed.id) })
+        let log = try String(contentsOfFile: runtime.logDirectory + "/\(ZmxRuntime.sessionName(for: killed.id)).log", encoding: .utf8)
+        #expect(log.contains("kill received"), "\(log.suffix(500))")
+        #expect(runtime.lastTerminationSignal(for: killed.id) == nil)
+    }
+
     /// A backend like the sandbox's, changed by `change`.
     private func backend(_ change: (inout LocalZmxBackend.Configuration) -> Void) -> LocalZmxBackend {
         var configuration = sandbox.backend.configuration
