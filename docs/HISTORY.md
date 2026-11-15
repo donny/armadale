@@ -1811,11 +1811,26 @@ February 1, 2027 because its issuer, "Developer ID Certification
 Authority", expires that day; a release after it needs a certificate
 issued under Apple's newer Developer ID authority.
 
-Not done: notarization (the profile `armadale-notary` is the owner's
-to create on that Mac, and was not looked for), and anything the app
-does with a host at launch: the SSH integration tests drive the
-session layer, so the host items under "Restored sessions attached at
-launch" in `HANDOFF.md` stay.
+The notary profile, later that evening. The owner created
+`armadale-notary` on that Mac from an App Store Connect API key
+instead of an Apple ID and an app-specific password; the release
+script names the profile only, so either kind works. The first
+attempt failed at "Validating your credentials" with HTTP 403, "A
+required agreement is missing or has expired", until the owner had
+accepted an updated agreement in the developer account; a failed
+attempt stores nothing. `xcrun notarytool history --keychain-profile
+armadale-notary`, the script's own check, then listed the account's
+earlier submissions. One wrong turn on the way: the agent looked for
+the profile with `security find-generic-password` under the service
+`com.apple.gke.notary.tool`, found nothing, and said so, although
+the profile existed; on macOS 27 the profile is not an item that
+command or `security dump-keychain` can see. `notarytool history`
+answering "No Keychain password item found for profile" is the test.
+
+Not done: a notarized build (nothing was submitted to Apple from that
+Mac), and anything the app does with a host at launch: the SSH
+integration tests drive the session layer, so the host items under
+"Restored sessions attached at launch" in `HANDOFF.md` stay.
 
 ---
 

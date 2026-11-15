@@ -758,9 +758,14 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   Developer Relations - G3" intermediate. No trust setting is changed
   by hand. `Vendor/dmgbuild` is installed. `scripts/release.sh
   --skip-notarize --allow-existing-tag` passed there on 6d07126. The
-  notary profile `armadale-notary` was not looked for; the owner
-  creates it. `scripts/check-quit.sh` passed against that Release
-  app. The owner installed Lima 2.3.0 and made the VM `default`
+  owner then created the notary profile `armadale-notary` there, from
+  an App Store Connect API key, and `xcrun notarytool history
+  --keychain-profile armadale-notary` (the release script's own
+  check) answers with the account's earlier submissions; nothing has
+  been submitted from that Mac yet. Test a profile that way: on macOS
+  27 it is not an item `security find-generic-password` or
+  `dump-keychain` can see. `scripts/check-quit.sh` passed against that
+  Release app. The owner installed Lima 2.3.0 and made the VM `default`
   (Ubuntu 26.10, aarch64, vz; home mode 750); the six SSH integration
   tests passed against it, and it was cleaned and stopped afterwards.
 - Background App Activity: on October 19, 2026 the owner answered
