@@ -112,7 +112,9 @@ are in `docs/HISTORY.md`):
 - November 14, 2026: `AppDelegate` and `SessionRegistry` split into
   files, code moved only (8d6bb99).
 - November 14, 2026: the live checks of attaching at launch;
-  `scripts/check-quit.sh` uses defaults suites of its own.
+  `scripts/check-quit.sh` uses defaults suites of its own (cdfc8b0).
+- November 14, 2026: the Dock badge and notifications checked live,
+  also for a session in a tab not shown; no code changed.
 
 ## Next
 
@@ -380,11 +382,13 @@ Agents
   agent profiles".
 
 Menu bar mode (step 8), from its review
-- The Dock badge could not be seen for Armadale on this Mac in any mode,
-  before or after step 8 (the Dock's `AXStatusLabel` stays empty with
-  attention pending). Probably the app's badge setting in System
-  Settings › Notifications; the code path (`NSApp.dockTile.badgeLabel`)
-  is unchanged. Check on a Mac where badges show.
+- The Dock badge could not be seen for Armadale on the Mac used for
+  step 8, in any mode, before or after it (the Dock's `AXStatusLabel`
+  stayed empty with attention pending). On the Mac used on November
+  14, 2026 it shows once notifications are allowed, through the same
+  code path (`docs/HISTORY.md`, "the Dock badge and notifications,
+  checked live"). What is left is the first Mac's own setting: System
+  Settings › Notifications › Armadale › "Badge application icon".
 - Not exercised live: a real logout, restart or shutdown (the quit
   event's reason is unit-tested with synthetic events only); a
   notification click reopening from menu bar mode (code path only);
@@ -501,8 +505,8 @@ From finished changes: not checked live, and found and not fixed
 - Restored sessions attached at launch (November 14, 2026). Checked
   live the same day on the Debug build with its own state directory,
   staged with the helper and driven by accessibility actions, without
-  a synthetic keystroke or click (`docs/HISTORY.md`, the last entry of
-  Part 1). **Not checked:**
+  a synthetic keystroke or click (`docs/HISTORY.md`, "the live checks
+  of attaching at launch"). **Not checked:**
   - Anything on a host (none on the Mac used): the limit of six and
     what lies past sshd's ten (Remote, above); a host that needs a
     password at launch starts no client in a pane not shown until one
@@ -516,9 +520,11 @@ From finished changes: not checked live, and found and not fixed
     from the quit question's count and from Respawn All Ended becoming
     enabled, and whether a terminal fills its card from the pty sizes
     alone.
-  - The Dock badge (its `AXStatusLabel` stayed empty, as on the other
-    Mac) and notifications: macOS asked for the permission after the
-    first bell and nobody answered ("State of this Mac that matters").
+  - A click on a notification for a session in a tab not shown since
+    the launch: it should select the tab and focus the pane. The Dock
+    badge and the banner themselves were seen later that day
+    (`docs/HISTORY.md`, "the Dock badge and notifications, checked
+    live").
   - The Disconnected placeholder of a session whose daemon does not
     answer; how many attaches are in flight at once (the order was
     read from process ids: the selected tab's client first, then three
@@ -540,9 +546,9 @@ reads all of `docs/DESIGN.md` and this file before changing code, which
 closes the finding on the documents. Attaching restored sessions at
 launch was built the same day, after the owner's decisions; that
 finding and the two of the second pass that went with it are quoted
-in `docs/HISTORY.md` (the last entry of Part 1), and what the change
-leaves open is under Session layer, Hierarchy and UI, and Remote
-above.
+in `docs/HISTORY.md` ("restored sessions are attached at launch"),
+and what the change leaves open is under Session layer, Hierarchy
+and UI, and Remote above.
 - **The persistence helper's workarounds.** Create's double attach,
   attach-only through `/usr/bin/true`, telling the cases apart by a
   client's first bytes within 2 s, the RIS filter, the flood reattach
@@ -726,12 +732,14 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   identifier), at about 15:26. The agent did not answer it, and it was
   gone when that run ended; a prompt still up when the app quits
   counts as a denial (`docs/DESIGN.md` §10). At about 17:30 the same
-  day the owner said they had allowed notifications for Armadale.
-  That is the owner's word and no agent has confirmed it:
-  `~/Library/Preferences/com.apple.ncprefs.plist` has no entry for
-  Armadale and was last modified on September 20, 2025, so it says
-  nothing either way. No notification and no Dock badge has been seen
-  live on that Mac yet. That Mac has one display, at scale 1.0.
+  day the owner said they had allowed notifications for Armadale, and
+  a live check a few minutes later confirmed it: a banner and the
+  Dock badge "1" at a bell (`docs/HISTORY.md`, "the Dock badge and
+  notifications, checked live"). The setting cannot be read from
+  `~/Library/Preferences/com.apple.ncprefs.plist` on macOS 27: with
+  notifications allowed it had no entry for Armadale and was last
+  modified on September 20, 2025. That Mac has one display, at scale
+  1.0.
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
   so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`

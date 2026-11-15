@@ -1696,6 +1696,65 @@ sections 4, 8 and 13. No code changed: the implementer's gate run on
 this tree passed with the same 834 tests, and the coordinator's own
 last run is the one on 8d6bb99.
 
+## November 14, 2026: the Dock badge and notifications, checked live
+
+November 14, 2026, about 17:35, once the owner had allowed
+notifications for Armadale on the Mac used that day and said it was
+free: the two things the live checks above could not see. The Debug
+build of cdfc8b0 (HEAD was 193d3fd, documents only; the gate had
+passed on cdfc8b0 with 834 tests ten minutes earlier), with its own
+state directory and defaults suite, staged the way
+`scripts/check-quit.sh` stages its second scenario: a first launch
+for the helper and a state file, a session made with the helper
+whose program rings the bell every 10 s, and that session written
+into `state.json`. The suite had "Only for agent profiles" off
+(`notifyOnlyForAgents`), because the session is a shell and with the
+default nothing is posted for one. Nobody sent a synthetic keystroke
+or click: the Dock item's `AXStatusLabel` and the static texts of
+Notification Center's banner window were read through System Events
+about once a second, and Window › Clear All Attention was pressed as
+an accessibility action on the build's own menu, by pid.
+
+Two runs, and both held.
+- **The session in the selected tab, Armadale in the background.**
+  The build was launched with `open -g` and was never the active app.
+  At the first bell after the attach, three seconds after the launch,
+  the badge read "1" and a banner was up with "Shell", "Workspace /
+  Main" and "Finished": the profile's name, the workspace and tab
+  group, and the body of a bell (section 10). Each later bell brought
+  a new banner, up for about 5 s, and the badge stayed "1". Clear All
+  Attention, pressed while a banner was up, emptied the badge and
+  took the banner off the screen within a second; the next bell
+  raised both again.
+- **The session in a tab not shown, Armadale in front.** The session
+  was in a second tab, not selected, with a saved size; the selected
+  tab was an empty pane; the build was launched in front and stayed
+  the active app. The session's client was running within a second
+  of the launch, and the first bell after that gave the same badge
+  and banner. This is the path the change of that day added: a
+  session attached at launch whose pane has never been shown.
+
+In both runs, once the session had been ended with the test
+directory's helper and attention cleared, the badge was empty and no
+banner came in the 12 s or more that were watched. Afterwards no
+process, directory, defaults file, Dock item or banner was left.
+
+What it adds. In the live checks above, with the permission prompt
+unanswered, the same `AXStatusLabel` stayed empty with attention
+pending; with notifications allowed it shows, which agrees with
+section 10 (a registered app's badge follows its notification
+settings). The setting cannot be read from
+`~/Library/Preferences/com.apple.ncprefs.plist` on macOS 27: with
+notifications allowed that file had no entry for Armadale.
+
+Not checked: what the banner looks like (Screen Recording is not
+granted), the sound, Notification Center's list, a click on a
+notification, menu bar mode, and anything on a host. In `HANDOFF.md`
+this replaces the item on the Dock badge and notifications under
+"Restored sessions attached at launch" with the click on a
+notification, and the step 8 item on the badge now says what is left
+on the first Mac. No code changed.
+
 ---
 
 # Part 2: the history of each design section
@@ -3051,7 +3110,10 @@ and the notify helper were built in step 7.
 registered with UserNotifications only shows its Dock badge while its
 "Badge application icon" setting is on. (Verified live: a plain process's
 `NSDockTile` badge shows without any permission; Armadale's did not until
-the setting was on.)
+the setting was on.) Seen again on November 14, 2026 on another Mac: no
+badge with attention pending while the permission prompt was unanswered,
+and the badge once the owner had allowed notifications (Part 1, "the
+Dock badge and notifications, checked live").
 
 **Claude Code hooks without a terminal, verified live.** Hooks
 (`hooks.Stop`, `hooks.Notification`, … in settings) run commands. Verified
