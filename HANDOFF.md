@@ -20,11 +20,12 @@ menu) were reworked, a clean exit closes its pane, menu bar mode and the
 quit alert activate the app again, and on November 14, 2026 the
 findings of an architecture review were built: one Armadale process per
 state directory, a safer orphan reclaim and save schedule, state file
-schema 2, and restored sessions attached at launch. That last change is
-reviewed and tested but **not checked live**: the Mac was not free
-("From finished changes" below has the list). The last gate run: 834
-tests, zero warnings. What each change was, how it was checked and what
-was found on the way is in `docs/HISTORY.md`.
+schema 2, and restored sessions attached at launch. That last change
+was checked live the same day on a test build, except on a host (there
+was none) and for what the accessibility tree does not show ("From
+finished changes" below). The last gate run: 834 tests, zero warnings.
+What each change was, how it was checked and what was found on the way
+is in `docs/HISTORY.md`.
 
 | Step | Commit | What it added |
 |---|---|---|
@@ -109,29 +110,30 @@ are in `docs/HISTORY.md`):
 - November 14, 2026: restored sessions are attached at launch; the
   session registry owns the controllers (7353b3a).
 - November 14, 2026: `AppDelegate` and `SessionRegistry` split into
-  files, code moved only.
+  files, code moved only (8d6bb99).
+- November 14, 2026: the live checks of attaching at launch;
+  `scripts/check-quit.sh` uses defaults suites of its own.
 
 ## Next
 
-The owner gave the go-ahead on November 14, 2026 for the architecture
-review's items in the suggested order ("Architecture review" and its
-second pass, at the end of the open items), and then for attaching
-restored sessions at launch, with a decision on each of its four
-questions (`docs/HISTORY.md`, the last two entries of Part 1). All are
-built, the split of `AppDelegate` and `SessionRegistry` included. One
-thing is left of that last step: **its live checks.** No app was
-launched for it, because the owner had not said the Mac was free. The
-list is under "From finished changes" below. Until they are done,
-treat the change as tested by the gate only; what the checks find is
-fixed as changes of its own.
+Nothing is in progress. The owner gave the go-ahead on November 14,
+2026 for the architecture review's items in the suggested order
+("Architecture review" and its second pass, at the end of the open
+items), and then for attaching restored sessions at launch, with a
+decision on each of its four questions (`docs/HISTORY.md`, the last
+three entries of Part 1). All are built, the split of `AppDelegate`
+and `SessionRegistry` included, and the live checks were made once the
+owner said the Mac was free. What comes next waits for the owner.
 
 Waiting for owner decisions:
-- **When the Mac is free** for the live checks above (with "Claude
-  Code" switched on under Accessibility; "State of this Mac that
-  matters").
-- **The limit of six sessions per host that the launch holds** (open
-  items, Remote): the coordinator's decision, made without a test
-  host; the owner may overrule it once it is checked on one.
+- **Three decisions the coordinator made in that step**, each the
+  owner's to overrule: the launch holds at most six of a host's
+  sessions (open items, Remote; made without a test host); a session
+  never shown in the run does not start a sign-in by itself; and the
+  cost of heavy output in sessions not on screen is accepted as it is
+  (open items, Session layer).
+- **A test host.** Nothing of that step was checked on a host; Lima is
+  not installed on the Mac used ("State of this Mac that matters").
 - **Showing or re-adopting spared sessions** (open items, Session
   layer, and "Adds to Orphan reclaim").
 - **A fork of the persistence helper** ("The persistence helper's
@@ -224,13 +226,16 @@ Session layer
   not shown too, and Respawn All Ended there starts a new session
   while the old daemon keeps running unreferenced (from the code; no
   test host).
-- A local session whose daemon never answers (stopped, deadlocked) is
-  never ended: at launch it is attached and shows nothing until the
-  daemon answers; closing its pane sends a kill that fails or times
-  out, and the daemon keeps running with no pane. One line in the log
-  (category `sessions`) names it. Nothing kills it by pid (November
-  14, 2026; unit-tested against the real helper, not staged in the
-  app).
+- A local session whose daemon does not answer (stopped, deadlocked)
+  is never ended: at launch it is attached and shows nothing until the
+  daemon answers, and a client that goes away is attached again. When
+  its pane is closed the kill fails or times out, one line in the log
+  (category `sessions`) names the session, and the daemon keeps
+  running with no pane until it runs again; then it takes the queued
+  kill and ends. Nothing kills it by pid, so one that never runs again
+  stays (November 14, 2026; seen live with `kill -STOP` and
+  `kill -CONT`). Not seen live: the Disconnected placeholder for it
+  (two lost clients within the reattach allowance).
 - A restored session without a saved size is not attached until its
   pane is shown once (the owner's decision, November 14, 2026: no
   program is resized on a guess). That is every session saved by 0.1.1
@@ -239,11 +244,19 @@ Session layer
   question's count are the launch listing's answer, never refreshed.
   The same holds for a host's sessions beyond the limit of six (Remote)
   and for a host that needs a sign-in.
-- Not measured (November 14, 2026): what a fleet of busy agents costs
-  the main actor now that sessions in tabs never visited are attached
-  and parse their output too, as visited ones always did. Memory was
-  measured in a test harness only: about 1.3 MB per attached session
-  in the app's process and a 2.4 MB client each.
+- Heavy output in sessions that are not on screen costs the main
+  thread, as it always did for a tab visited once and left; since
+  November 14, 2026 sessions in tabs never visited are attached and
+  pay it too. Measured that day with five such sessions each printing
+  50 MB: an optimized build stays at about 90 % CPU while the output
+  lasts and is idle 2 s after it ends, with accessibility round trips
+  of about 0.2 s; a Debug build cannot keep up (round trips of about
+  9 s, and 2 to 4 minutes of parsing after the output has ended, during
+  which a quit can take seconds). Accepted as it is (the coordinator's
+  decision); `docs/HISTORY.md` Part 2, section 8, has the numbers and
+  four options that were not built. Twenty attached idle sessions: a
+  footprint of 55 MB and no CPU (Debug build). Not measured: a real
+  release build, and real agents at work.
 - A clean launch of an unchanged state file still writes `state.json`
   once or twice in its first seconds, with the same content (seen
   November 14, 2026; not the reclaim, which saves only when it changed
@@ -266,12 +279,15 @@ Session layer
 Hierarchy and UI
 - One SIGWINCH reaches a full-screen program at every attach, a
   relaunch included, whatever the size: the persistence helper sends
-  it to a program on the alternate screen (measured November 14, 2026
-  through the real helper; a program at a prompt attached at its own
-  size gets none). It cannot be removed on Armadale's side. The one
-  path of Armadale's own that could add a resize at a prompt, a size
-  sent again after connecting with only its pixel size changed, is
-  gone. Not looked at in the app.
+  it to a program on the alternate screen, and it cannot be removed on
+  Armadale's side. A program at a prompt gets none at a relaunch at an
+  unchanged size (November 14, 2026: through the real helper, and live
+  in 12 and then 5 relaunches, one of the sessions made by Armadale
+  itself), which was the old item "one extra SIGWINCH after relaunch".
+  The exception found on the way: a session that the helper's own
+  `send` or `run` command has touched can get one at every later
+  attach. Armadale never uses them, but a test that stages sessions
+  with them will see it (`docs/HISTORY.md` Part 2, section 4).
 - A font or size change while a session is attached and its pane has
   not been shown in this run can give two resizes when the pane is
   first shown (the font applied on entering the window, then the
@@ -482,53 +498,36 @@ From finished changes: not checked live, and found and not fixed
   reconnect ordering of the show sequence.
 - Help › Acknowledgements (November 5 and 9, 2026). Minor: a reopened
   window keeps its scroll position.
-- Restored sessions attached at launch (November 14, 2026). **Nothing
-  was checked live** (the Mac was not free): it is tested by the gate,
-  through the real helper in the package tests, and by three review
-  rounds. To do on a test build with its own state directory:
-  - Attention from a tab not visited. Three tabs; in one that is not
-    selected run `sleep 20; printf '\a'`; quit and relaunch before it
-    rings: ◐ on that tab, the Dock badge and a notification, without
-    visiting it. Again with `printf '\e]777;notify;T;B\a'`. And none
-    from the replay alone: a relaunch with idle tabs raises nothing.
-  - The glyph and the count. In a tab not selected a program that dies
-    after the relaunch (`sleep 20; kill -9 $$`): its tab goes to ○
-    without being visited, and the quit question's and the status
-    menu's count drop by one. A clean `exit` there closes its tab.
-  - The size. In a tab not selected run `trap 'echo WINCH $(stty
-    size)' WINCH; while :; do sleep 1; done`, quit and relaunch: no new
-    line. Show the tab with the window unchanged: none. Resize the
-    window from another tab, then show it: one. With vim there
-    instead: one redraw per attach (the helper's).
-  - The order. Twelve tabs, the selected one last in the sidebar: its
-    pane is attached first, at its laid-out size.
-  - A state file from 0.1.1 (no sizes): the tabs not shown have no
-    client until shown; after one quit they have sizes.
-  - A stopped daemon (`kill -STOP` of the daemon, the parent of the
-    pid the helper's listing prints), then a relaunch: the pane is not
-    Session Ended; after `kill -CONT` it fills in. Ending its client
-    while it is stopped gives Disconnected, never ended. Closing its
-    pane leaves one line in the log.
-  - Respawn All Ended after the tabs were visited and the window
-    resized: every terminal fills its card and `stty size` agrees.
-  - The saved sizes. A live resize writes `state.json` once, after it
-    settles. A resize and then a quit within half a second keeps the
-    new `gridSize`, for ⌘Q, SIGTERM, End Sessions and Quit and the
-    quit from menu bar mode.
-  - `scripts/check-quit.sh`, for both changes of the day: the quit
-    path now flushes the sizes, and the split moved the quit code to
-    `AppDelegate+Quit.swift` (code moved only, but the script was not
-    run: it launches the app).
-  - About twenty attached sessions in the app: memory, and CPU while
-    they print.
-  - A font size change, and a renderer change, while sessions are
-    attached in tabs not shown.
-  - On a host (none on the Mac used): the limit of six and what lies
-    past sshd's ten (Remote, above); a host that needs a password at
-    launch starts no client in a pane not shown until one tab signs
-    in, then the rest attach; a host unreachable at launch and back
-    asking for a password leaves those panes Disconnected with ssh's
-    message, and showing one reconnects it.
+- Restored sessions attached at launch (November 14, 2026). Checked
+  live the same day on the Debug build with its own state directory,
+  staged with the helper and driven by accessibility actions, without
+  a synthetic keystroke or click (`docs/HISTORY.md`, the last entry of
+  Part 1). **Not checked:**
+  - Anything on a host (none on the Mac used): the limit of six and
+    what lies past sshd's ten (Remote, above); a host that needs a
+    password at launch starts no client in a pane not shown until one
+    tab signs in, then the rest attach; a host unreachable at launch
+    and back asking for a password leaves those panes Disconnected
+    with ssh's message, and showing one reconnects it.
+  - What the eye would see. The sidebar's and the tab bar's glyphs and
+    the purple counts are not in the accessibility tree, and Screen
+    Recording was not granted. Attention was read from the Window
+    menu's items and from Next Pane Needing Attention, the ended state
+    from the quit question's count and from Respawn All Ended becoming
+    enabled, and whether a terminal fills its card from the pty sizes
+    alone.
+  - The Dock badge (its `AXStatusLabel` stayed empty, as on the other
+    Mac) and notifications: macOS asked for the permission after the
+    first bell and nobody answered ("State of this Mac that matters").
+  - The Disconnected placeholder of a session whose daemon does not
+    answer; how many attaches are in flight at once (the order was
+    read from process ids: the selected tab's client first, then three
+    more, the rest within about 60 ms); a renderer change (there is
+    one renderer); the size check after a launch through Finder or
+    `open` (every launch was by the binary's path).
+
+  **Found and not fixed:** heavy output in sessions not on screen
+  (Session layer, above; accepted as it is).
 
 Architecture review (November 12, 2026)
 
@@ -721,6 +720,15 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   Developer ID certificate and the notary profile were not looked for.
   The entries below were not re-verified that day, apart from the
   privacy grants, which were made then.
+- **Notifications on that Mac (November 14, 2026).** During the live
+  checks macOS asked whether Armadale may send notifications, after
+  the first bell of a test build (which has the app's bundle
+  identifier), at about 15:26. The agent did not answer it, and it was
+  gone when that run ended. A prompt still up when the app quits
+  counts as a denial (`docs/DESIGN.md` §10), so notifications and the
+  Dock badge may be off for Armadale on that Mac until the owner
+  allows them under System Settings › Notifications. Not looked at
+  afterwards. That Mac has one display, at scale 1.0.
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
   so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`

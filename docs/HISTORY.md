@@ -1603,7 +1603,7 @@ available (no Lima on the Mac used). The checks to make are listed in
 `HANDOFF.md` under "From finished changes". Tests: 834 at this change
 (291 app + 281 core + 237 sessions + 13 + 12).
 
-## November 14, 2026: `AppDelegate` and `SessionRegistry` split into files
+## November 14, 2026: `AppDelegate` and `SessionRegistry` split into files (8d6bb99)
 
 November 14, 2026, straight after the change above and as its second
 commit (same implementer and reviewer, one round each; no live pass):
@@ -1625,6 +1625,76 @@ zero warnings. **Not run:** `scripts/check-quit.sh`, which launches
 the app; it is the check for the quit paths that moved, and it is on
 the list of live checks in `HANDOFF.md`. This closes the review's
 finding on the size of the two files, removed from `HANDOFF.md`.
+
+## November 14, 2026: the live checks of attaching at launch
+
+November 14, 2026, late afternoon, once the owner had said the Mac was
+free: the live checks of the two changes above, on the Debug build of
+8d6bb99 with its own state directory and defaults suite. The reviewer
+made three passes and the implementer one; no code changed. Nobody
+sent a synthetic keystroke or click: sessions were made with the
+helper and tabs written into `state.json`, the app was driven by
+accessibility actions on its own elements by pid (sidebar rows, the
+window's size, menu items, alert buttons), and everything was read
+from files, process lists, the log, the helper's listing and the
+accessibility tree. Screen Recording was not granted, so nothing was
+seen as a picture.
+
+What was checked, and held. A bell and an OSC 777 notification from
+tabs not shown since the relaunch raised attention (the Window menu's
+attention items became enabled, and Next Pane Needing Attention went
+to the right tab), and the replay alone raised none. The quit question
+went from 8 running sessions to 7 when a program died in a tab not
+shown, Respawn All Ended became enabled, and a clean exit there closed
+its tab. A program at a prompt got no SIGWINCH at a relaunch at its
+saved size and none when its tab was then shown with the window
+unchanged; a real window resize gave exactly one, and a full-screen
+program one per attach, the helper's. With thirteen tabs and the last
+selected, the selected tab's client started first, then three more,
+then the rest. With every saved size removed from the state file, only
+the tab on screen had a client until another was shown, and a quit
+saved sizes for those two. A stopped daemon's session was attached,
+counted as running and never ended, also when its client was killed
+twice; its pane closed left one line in the log. Respawn All Ended
+after the tabs had been visited and the window resized created each
+session at its pane's size. The new size was saved after a resize
+followed within 0.2 s by SIGTERM, by Keep Running in Menu Bar and then
+Quit, Keep Sessions Running, and by End Sessions and Quit; five resize
+steps wrote `state.json` once. `scripts/check-quit.sh` passed (about
+60 ms each). Twenty attached idle sessions: a footprint of 55 MB and
+no CPU. A font size change while sessions were attached in tabs never
+shown gave one resize when one was shown.
+
+What was found. First, one SIGWINCH per relaunch at an unchanged size
+in the reviewer's first pass, none in the implementer's twelve
+relaunches; the reviewer's third pass traced it to its own staging: a
+session the helper's `send` or `run` has touched gets one at every
+later attach, and sessions only Armadale ever attached to, one of them
+made by Armadale itself, got none (Part 2, section 4). Second, five
+sessions in tabs never shown, each printing 50 MB, kept the Debug
+build at 100 % CPU for minutes after the output had ended, with
+accessibility round trips of seconds; measured, this is the cost of
+any attached session that is not on screen (a tab visited once and
+left costs the same), the flood handling does trigger, and an
+optimized build of the same tree is idle 2 s after the output ends
+(Part 2, section 8). The coordinator accepted it as it is; four
+options are recorded there, none built. Third, `scripts/check-quit.sh`
+launched without a defaults suite and so used the real defaults domain
+(it had left nothing behind); each of its launches has a suite of its
+own now, removed at the end with literal paths, and it passed again.
+Fourth, a kill that a stopped daemon could not answer is not lost:
+when the daemon ran again it took the kill and ended, which
+`docs/DESIGN.md` section 4 now says.
+
+Not checked, and listed in `HANDOFF.md`: anything on a host; what only
+the eye would see (the glyphs and the purple counts are not in the
+accessibility tree); the Dock badge and notifications. On the last:
+macOS asked for the notification permission after the first bell,
+nobody answered, and it may now be recorded as a denial on that Mac
+(`HANDOFF.md`, "State of this Mac that matters"). `docs/DESIGN.md`
+sections 4, 8 and 13. No code changed: the implementer's gate run on
+this tree passed with the same 834 tests, and the coordinator's own
+last run is the one on 8d6bb99.
 
 ---
 
@@ -1933,6 +2003,38 @@ is a small tree that is easier to inspect, diff and migrate as JSON.
   having had a client.
 
 ### Session lifecycle
+- **November 14, 2026, live checks. One SIGWINCH per relaunch at an
+  unchanged size: an effect of the test's staging.** In the reviewer's
+  first live run every pane's program on the primary screen (a shell
+  trapping WINCH, in a tab not shown and in the shown one) logged one
+  SIGWINCH at each relaunch, with rows, columns and pixels unchanged
+  (`TIOCGWINSZ` before and after); a plain attach of the helper at that
+  size caused none. The implementer then relaunched the same build
+  (8d6bb99) twelve times and saw none: a tab not shown and the shown
+  one, a plain `sh` loop, an interactive `zsh -f` and a login `zsh`,
+  quits by SIGTERM and through the quit alert and the status menu, the
+  app frontmost or not, the helper's per-session log showing the same
+  `init resize` and `resize` at every attach. A change of the client's
+  environment (the helper's tracked variables) was excluded on the way.
+  The reviewer's second run found the difference by changing one thing
+  at a time, on six sessions with the helper's log and `TIOCGWINSZ`
+  read immediately before and after each launch. Sessions that only
+  attaches had ever touched logged nothing in five relaunches: two made
+  as Armadale's create makes them (one shown, one never shown), and one
+  made by Armadale itself through Respawn All Ended, in a tab not shown
+  at its saved size, in two. Every session the helper's `send` or `run`
+  had touched logged one SIGWINCH at every relaunch. The decisive one
+  logged nothing at its attach in the first run, got a single `send` of
+  a space while the app was not running, and logged one at every
+  relaunch after that; the helper's log and the pty's size were the
+  same in both groups, so what the helper keeps is not visible (a pixel
+  size of zero from the `send` client is a guess). All three loggers of
+  the first run had been started with `send` or made with `run`. One
+  thing does not fit and was not followed up: the implementer's two
+  `zsh` sessions had their loops typed in with `send` and logged
+  nothing; whether those loggers worked was not checked with a real
+  resize. Armadale never runs `send`, `run`, `print` or `write`, so
+  DESIGN section 4 states the rule with this as its exception.
 
 - **November 14, 2026. Restore at launch.** Until November 14, 2026 a
   restored session was attached only when its pane was first shown ("the
@@ -2011,6 +2113,11 @@ is a small tree that is easier to inspect, diff and migrate as JSON.
   grep ZMX` in a pane prints nothing.
 
 ### Housekeeping
+- **November 14, 2026, live checks. A queued kill.** After the pane of a
+  stopped daemon was closed (one `sessions` log line), `kill -CONT` made
+  the daemon take the kill it had queued and end; the helper then
+  answered that the session was not found. So the daemon keeps running
+  only while it does not answer.
 - **November 14, 2026, third review. Housekeeping keeps counting every
   socket.** When the exit record joined the rule for "gone", the orphan
   reclaim and the log and exit-file collection were left counting every
@@ -2232,6 +2339,54 @@ notifications from `SessionController` to the app's `AttentionCenter`.
 
 
 ## 8. Windows and views
+
+**November 14, 2026, live checks. Floods in sessions not on screen.** The
+reviewer saw a Debug build at about 100 % CPU for minutes with 20 attached
+sessions, five in tabs never shown each running `yes | head -c 50000000`,
+accessibility round trips of 3 to 4 s and a SIGTERM quit of about 5 s.
+Measured the same day (isolated state, Debug build from DerivedData and
+the same configuration built with `SWIFT_OPTIMIZATION_LEVEL=-O` and whole
+module optimization into its own DerivedData; CPU from `ps` time deltas
+every 2 s; accessibility round trip: one `get name of window 1`):
+
+| Build, tabs | CPU while producing | Output ended | Idle after the end | Round trip under load | Flood reattaches | Quit under load |
+|---|---|---|---|---|---|---|
+| Debug, never shown | about 100 % | about 120 s | about 137 s | about 9 s | 20 (clients reach the limit about every 25 s) | 94 ms |
+| Debug, visited once | about 100 % | about 130 s | about 252 s | about 9 s | 20 | 641 ms |
+| Optimized, never shown | about 90 % | about 118 s | 2 s | about 0.2 s | none | 52 ms |
+| Optimized, visited once | about 90 % | about 120 s | 2 s | about 0.2 s | none | 65 ms |
+
+So it is not new: a tab visited once and left (what a hidden attached
+session was before restore at launch) costs the same; the step widened who
+pays it to sessions never shown. The minutes after the output in the Debug
+build are the backlog the clients hold below the flood limit (16 MB each,
+by footprint): the flood handling does trigger (each client was dropped
+about every 25 s while the output lasted), and what is under the limit
+when the output ends is parsed in full, at the Debug build's speed. The
+optimized build keeps up, so its clients never reach the limit. No defect
+was found in the flood watch or the output pump; the quit was not seen
+waiting on the feed (0.05 to 0.65 s). The reviewer's 5 s quit was not
+reproduced, and it was taken at another moment: about four minutes
+after the floods had ended, with the Debug build still parsing its
+backlog (one feed call held the main thread for seconds at a time in a
+`sample`), timed by polling once a second. A quit waits for the feed in
+progress to return, so that figure is an upper bound for the Debug
+build under that backlog. Accepted as it is (the coordinator's
+decision, the owner's to overrule): a release build is optimized.
+Options not built, should a release build ever show it: a lower flood
+limit for sessions not on screen (more of their output skipped into the
+replay); feeding them at a capped rate (attention arrives late, and it
+ends in more reattaches); a light scanner for BEL, OSC 9 / 777 and the
+title in place of a full terminal for sessions not on screen, the
+surface rebuilt by a replay when shown; parsing off the main actor
+(SwiftTerm is not thread-safe).
+
+**November 14, 2026, live checks. `check-quit.sh` with suites.** Each of
+the script's launches now uses a defaults suite of its own, removed at the
+end. Run against the Debug build: chooser 67 ms, normal 64 ms, alert 136 ms;
+and again after its cleanup was changed to literal paths in `rm`
+(AGENTS.md): 57, 62 and 54 ms, nothing left behind, no real defaults
+domain created.
 
 **November 14, 2026, review of restore at launch.** Fixed after an
 adversarial review (no blocker found): `setGridSize` reached terminals

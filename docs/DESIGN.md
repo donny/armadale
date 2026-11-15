@@ -844,8 +844,13 @@ every attach, at the size it already has too (a forced redraw), so a
 full-screen program redraws once per attach, whatever Armadale does. A
 program on the primary screen gets none at an attach whose window size is
 the one it has, and one when it differs, the pixel size included (measured
-November 14, 2026, `docs/HISTORY.md`). This is why a controller never sends
-a pixel size alone (section 7).
+November 14, 2026, through the helper and in the app, `docs/HISTORY.md`).
+This is why a controller never sends a pixel size alone (section 7). The
+exception is a session that the helper's own `send` or `run` command has
+touched: from then on its program can get one SIGWINCH at every attach,
+at an unchanged size too. Armadale never uses those commands, so this
+only concerns a session someone has driven with the helper by hand (a
+test's staging, say).
 
 A session that is on the alternate screen when Armadale reattaches (vim,
 less, an agent's full-screen UI) is replayed as that screen only: zmx sends
@@ -1091,8 +1096,10 @@ start (section 8); what each restored one gets:
   is killed by pid, and one log line names the session and the kind of
   error, never its text (`os.Logger`, subsystem
   `com.tinylittleapps.armadale`, category `sessions`;
-  `LocalZmxBackend.Configuration.onUnansweredKill`); the daemon may keep
-  running with no pane. Hosts have no such fallback: a daemon a host's
+  `LocalZmxBackend.Configuration.onUnansweredKill`). The kill is not lost:
+  the daemon keeps running with no pane only while it does not answer, and
+  when it runs again it takes the kill and ends (seen live after
+  `kill -CONT`: the helper then answers that the session is not found). Hosts have no such fallback: a daemon a host's
   listing leaves out is taken as gone.
 - **Pacing** (`LaunchAttachQueue`, pure, tested): at most **4** local
   attaches in flight and **2** per host. Attaches made for panes on screen
@@ -2821,7 +2828,9 @@ And for the dialog and Settings › Favorites:
   clicks OK; the terminate path (`applicationShouldTerminate` →
   `.terminateNow`, then the synchronous save) runs from inside the modal
   session. `scripts/check-quit.sh` checks three cases, each a SIGTERM
-  that must quit within 2 s: a fresh launch with the chooser up and no
+  that must quit within 2 s, each launch with a defaults suite of its own
+  (so the real defaults domain is not used; the suites are deleted at the
+  end): a fresh launch with the chooser up and no
   sheet (the pane is saved empty); a launch attached to a session the
   helper created beforehand (no client left, the daemon alive); and the
   fallback alert up (the state saved on the way out). AppKit's
@@ -3988,7 +3997,16 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
   session in the app (controller and SwiftTerm surface, whose own
   scrollback is SwiftTerm's default of 500 lines) and 2.4 MB per client
   process; the daemons (about 8.7 MB each) existed before. Busy agents in
-  tabs nobody looks at cost the main actor their output. On a host, every
+  tabs nobody looks at cost the main actor their output, as any attached
+  session not on screen always did (a tab visited once and left costs the
+  same; measured November 14, 2026, `docs/HISTORY.md` section 8). With five
+  hidden sessions each printing 50 MB, an optimized build stays at about
+  90 % CPU while the output lasts and is idle 2 s after it ends, with
+  accessibility round trips of about 0.2 s; a Debug build cannot keep up,
+  its clients grow to the flood limit and are reattached again and again,
+  round trips take about 9 s, and after the output ends it still parses
+  what the clients hold (up to 16 MB each) for 2 to 4 minutes. Quitting
+  under that load took 0.05 to 0.65 s in these runs. On a host, every
   attached session is one more ssh session over the shared connection,
   and sshd allows 10 per connection by default (`MaxSessions`), which a
   host with ten or more restored sessions reaches at launch; not checked

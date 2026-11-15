@@ -25,7 +25,10 @@
 #
 # Uses the scratch state directories /tmp/armadale-quitcheck and
 # /tmp/armadale-quitcheck2, which must not exist yet, and removes them at the
-# end. Armadale must not be running.
+# end; each scenario's launch uses a defaults suite of its own
+# (armadale-quitcheck-chooser, -normal, -alert), so the real defaults domain
+# is never touched, and the suites are deleted at the end. Armadale must
+# not be running.
 set -euo pipefail
 
 APP="${1:?usage: scripts/check-quit.sh /path/to/Armadale.app}"
@@ -52,6 +55,13 @@ cleanup() {
     fi
     sleep 1
     rm -rf /tmp/armadale-quitcheck /tmp/armadale-quitcheck2
+    # Literal paths: no variable in an `rm` path (AGENTS.md).
+    defaults delete armadale-quitcheck-chooser >/dev/null 2>&1 || true
+    defaults delete armadale-quitcheck-normal >/dev/null 2>&1 || true
+    defaults delete armadale-quitcheck-alert >/dev/null 2>&1 || true
+    rm -f ~/Library/Preferences/armadale-quitcheck-chooser.plist \
+        ~/Library/Preferences/armadale-quitcheck-normal.plist \
+        ~/Library/Preferences/armadale-quitcheck-alert.plist
 }
 trap cleanup EXIT
 
@@ -96,7 +106,7 @@ print(windows.filter { (\$0[kCGWindowOwnerPID as String] as? Int32) == $1
 
 # --- 1. Quit with the New Session chooser up --------------------------------
 mkdir -p /tmp/armadale-quitcheck
-open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck "$APP"
+open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck --env ARMADALE_DEFAULTS_SUITE=armadale-quitcheck-chooser "$APP"
 pid=""
 windows=0
 for _ in $(seq 1 30); do
@@ -162,7 +172,7 @@ state["sessions"] = [{
 }]
 json.dump(state, open(path, "w"))
 PY
-open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck "$APP"
+open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck --env ARMADALE_DEFAULTS_SUITE=armadale-quitcheck-normal "$APP"
 attached=""
 for _ in $(seq 1 75); do
     if pgrep -f "attach $session /usr/bin/true" >/dev/null; then attached=yes; break; fi
@@ -193,7 +203,7 @@ fi
 # --- 3. Quit while the fallback alert is up ------------------------------
 mkdir -p /tmp/armadale-quitcheck2
 touch /tmp/armadale-quitcheck2/bin   # a file where the helper directory should be
-open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck2 "$APP"
+open -n --env ARMADALE_STATE_DIR=/tmp/armadale-quitcheck2 --env ARMADALE_DEFAULTS_SUITE=armadale-quitcheck-alert "$APP"
 pid=""
 alert="no"
 for _ in $(seq 1 20); do
