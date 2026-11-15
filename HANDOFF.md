@@ -724,11 +724,14 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   checks macOS asked whether Armadale may send notifications, after
   the first bell of a test build (which has the app's bundle
   identifier), at about 15:26. The agent did not answer it, and it was
-  gone when that run ended. A prompt still up when the app quits
-  counts as a denial (`docs/DESIGN.md` §10), so notifications and the
-  Dock badge may be off for Armadale on that Mac until the owner
-  allows them under System Settings › Notifications. Not looked at
-  afterwards. That Mac has one display, at scale 1.0.
+  gone when that run ended; a prompt still up when the app quits
+  counts as a denial (`docs/DESIGN.md` §10). At about 17:30 the same
+  day the owner said they had allowed notifications for Armadale.
+  That is the owner's word and no agent has confirmed it:
+  `~/Library/Preferences/com.apple.ncprefs.plist` has no entry for
+  Armadale and was last modified on September 20, 2025, so it says
+  nothing either way. No notification and no Dock badge has been seen
+  live on that Mac yet. That Mac has one display, at scale 1.0.
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
   so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`
