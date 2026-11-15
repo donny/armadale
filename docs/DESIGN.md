@@ -3111,6 +3111,12 @@ the menu bar.
   **The sessions survive only while Armadale is allowed to run in the
   background** (System Settings › General › Login Items & Extensions ›
   Background App Activity, the decision the first-quit prompt records).
+  While no decision is stored (Armadale is not in that list yet) nothing
+  is ended: about 30 s after the first quit that leaves sessions behind,
+  macOS adds Armadale to the list, switched on, and posts a notification
+  (macOS 27.2.1; a later quit posts none). One entry governs copies of
+  the app at different paths that share Armadale's bundle identifier
+  (seen with two ad hoc builds; a Developer ID build was not tried).
   With Armadale switched off there, `loginwindow` asks Background Task
   Management when the app exits, is told no, and force-quits the app's
   coalition, which SIGTERMs every daemon and shell: 5 s after a quit from
@@ -3284,10 +3290,11 @@ alert, `BackgroundActivityText` (`App/MenuBarMode.swift`) the wording.
   log line gives the verdict (with the reason when undetermined), whether
   the check ran late, the kind, the number of sessions recorded and the
   number ended. **A check that ran late never clears `lossSeenAt`**: its
-  *survived* leaves it as it was (*ended* still sets it). Whether macOS
-  still ends the old run's sessions when the app is running again within
-  5 s of the quit is not known; if it does not, a quick relaunch would
-  find them alive while the switch is still off.
+  *survived* leaves it as it was (*ended* still sets it). After a quit
+  from menu bar mode macOS does not end the old run's sessions when the
+  app is running again before its check, 5 s after the quit: a quick
+  relaunch finds them alive while the switch is still off (checked live;
+  after a regular quit the kill comes within 1 s, before any relaunch).
 - **Telling the user.** On *ended*, an app-modal warning alert
   (`runModal()`, after the other launch alerts; SIGTERM still quits under
   it): "macOS ended N sessions after Armadale quit" ("1 session" for
@@ -3336,8 +3343,9 @@ alert, `BackgroundActivityText` (`App/MenuBarMode.swift`) the wording.
   Settings in front (⌘Q typed there) nothing is hidden. After Open System
   Settings it does not hide: System Settings takes activation by itself,
   and `NSApp.hide` hands activation to the previously active app, which
-  may land after System Settings and put it behind (from how hiding
-  works; not checked live). The ⌘Q question (Keep Running in Menu Bar / End Sessions
+  may land after System Settings and put it behind (checked live with
+  Finder in front: System Settings came forward at Login Items, and the
+  app stayed in the menu bar). The ⌘Q question (Keep Running in Menu Bar / End Sessions
   and Quit / Cancel) is unchanged: neither answer leaves sessions to the
   system. Nothing is added to the status menu. Remote sessions do not
   count (no local process).

@@ -110,7 +110,12 @@ is active, so for clicks on Armadale's own status menu in that state the
 check is: screen unlocked and at least 20 s of HID idle time (`ioreg -c
 IOHIDSystem`, `HIDIdleTime`). `osascript -e 'quit app "Armadale"'`
 behaves like ⌘Q and returns "User canceled" when the quit alert's answer
-cancels the quit; that is expected.
+cancels the quit; that is expected. Much can be driven by pid with no
+synthetic event at all: an alert's buttons and the status menu's items
+answer an accessibility press (`AXPress`; the status menu's items are
+under the app's `AXExtrasMenuBar` without the menu being open), and
+`NSRunningApplication(processIdentifier:)?.terminate()` sends one
+process the quit event that ⌘Q's question answers.
 
 Which process macOS holds responsible decides what an agent may do. A
 session run from the Claude desktop app runs its commands under the
@@ -134,6 +139,24 @@ settings are untouched; afterwards remove the directory, `defaults delete`
 the suite and delete `~/Library/Preferences/armadale-<name>.plist`. AppKit
 panels still write a few keys to the real `com.tinylittleapps.armadale`
 domain; that is accepted.
+
+**A test build must keep its environment.** `open -n --env …` gives the
+environment to that one launch only. After a quit from the regular
+policy that leaves a session running, the Dock keeps the app's tile
+("Running in Background"), and a click on it starts the build again
+through Launch Services *without* that environment: on the owner's real
+state directory and settings. That happened twice within five minutes
+on November 14, 2026. For a live test that quits a build while sessions
+run, use a copy that carries the environment itself: copy the Debug app
+to a short path under `/tmp`, add `LSEnvironment` with
+`ARMADALE_STATE_DIR` and `ARMADALE_DEFAULTS_SUITE` to its `Info.plist`,
+sign it ad hoc again with the build's entitlements (`codesign --force
+--sign - --entitlements …`), and after the first launch check that the
+process holds the lock in the test directory (`lsof -p <pid> | grep
+armadale.lock`). Remove the copy afterwards. A build started by its
+binary path from an agent's shell belongs to the agent's app, so
+macOS's background rules judge that app, not Armadale: a test of those
+rules needs a Launch Services launch.
 
 **Two apps with one name.** The owner's installed
 `~/Applications/Armadale.app` may be running while a test build runs,

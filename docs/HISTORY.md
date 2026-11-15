@@ -2186,6 +2186,90 @@ In `HANDOFF.md`, "macOS 27: 'Allow in the Background' switched off" is
 removed from "Decisions pending" and from "Next". What stays there: the
 live check, and the `SMAppService` prototype as an untested option.
 
+## November 14, 2026: the background detection, checked live
+
+November 14, 2026, 22:00 to 22:17, with the owner's word that the Mac
+was free and the owner at the switch (System Settings › General › Login
+Items & Extensions › Background App Activity). The Debug build of
+14ec35c, with its own state directory, started through Launch Services.
+Nobody sent a synthetic keystroke or click: buttons, the alerts and the
+status menu's items were pressed as accessibility actions by pid, quits
+were SIGTERM to the pid or `NSRunningApplication.terminate()` (a quit
+Apple event without a reason), and everything was read from the
+accessibility tree, the record file, the helper's log and the unified
+log. No code changed.
+
+**What went wrong first: a test build ran on the real state
+directory, twice.** After a quit from the regular policy that leaves a
+session, the Dock keeps Armadale's tile ("Running in Background"). A
+click on it starts the app through Launch Services *without* the
+environment `open -n --env …` had given it, so the Debug build opened
+on `~/Library/Application Support/Armadale`: at 22:00:55 (ended by
+SIGKILL to its pid at 22:02:28) and at 22:05:07 (quit a second later).
+The unified log shows the Dock asking for both launches; the owner did
+not remember clicking. No session was running there and none was lost;
+what the two runs left in that directory is in that Mac's
+`HANDOFF.local.md`. From then on the test used a copy of the build with the test
+environment in its own `Info.plist` (`LSEnvironment`, signed ad hoc
+again), which every Launch Services launch honours, a Dock click
+included (the copy's process carried a marker variable that only the
+`Info.plist` set). `AGENTS.md` has the rule now.
+
+What held (the wording of every alert as in DESIGN section 8).
+- **Survived, macOS allowing.** A SIGTERM quit with one session;
+  relaunched 66 s later: no alert, "last quit check: survived after a
+  signal quit, 1 session(s) recorded, 0 ended by SIGTERM",
+  `last-quit.json` gone, the pane attached again.
+- **Ended, switched off.** The same quit: the daemon logged "SIGTERM
+  received" 1 s later and was gone. Relaunched 27 s later: the alert
+  "macOS ended 1 session after Armadale quit", "last quit check: ended
+  (1) after a signal quit, 1 session(s) recorded, 1 ended by SIGTERM",
+  the file holding only `lossSeenAt`, the pane showing Session Ended.
+  Open System Settings brought System Settings forward at Login Items;
+  on a second loss Not Now closed the alert, whose default button was
+  Open System Settings.
+- **The question before a quit from the menu bar.** With the loss seen
+  and a session running in menu bar mode, a quit Apple event and the
+  status menu's Quit, Keep Sessions Running each raised "macOS may end
+  1 session when Armadale quits", in front of the app that was active.
+  Cancel left Armadale in the menu bar and that app was in front again;
+  Open System Settings brought System Settings forward over Finder;
+  Quit Anyway quit.
+- **A quick relaunch, switched off.** After Quit Anyway and a relaunch
+  1 s later the session stayed alive (15 s watched): "last quit check
+  (late): survived after a user quit", and `lossSeenAt` was kept.
+- **The late alert.** A SIGTERM quit, relaunched 3 s later: the alert
+  came 12 s after the quit, "last quit check (late): ended (1)", with
+  no default button and Not Now as its cancel button.
+- **SIGTERM under the alert** quit at once (within the 10 ms the probe
+  resolves) and wrote the record: a signal quit, no sessions,
+  `lossSeenAt` carried over. The next launch said "undetermined (no
+  sessions recorded)" and kept it.
+- **Switched on again.** Quit, Keep Sessions Running asked (the loss
+  was still remembered); Quit Anyway; the session was alive 14 s later;
+  relaunched: "survived after a user quit", no alert, the file gone.
+  The next Quit, Keep Sessions Running quit without a question, and the
+  Dock showed no tile.
+
+What was found on the way.
+- With no decision stored macOS ends nothing; it registers the app and
+  posts a notification about 30 s after the first such quit (Part 2,
+  section 8). So on a new Mac the first loss can only come after the
+  user has answered that notification or used the switch.
+- A quick relaunch after a quit from the menu bar keeps the sessions
+  even with the switch off (Part 2, section 8).
+- The status menu's items are in the accessibility tree without the
+  menu being opened (`AXExtrasMenuBar`), and pressing one there runs
+  its action: no click on the status item is needed.
+
+Not checked: what the notification's Don't Allow does to sessions
+running at that moment; the Developer ID build (whether the installed
+app shares the entry); the question with ⌘Q typed in Settings; the
+late check in menu bar mode; a real keystroke into the late alert; a
+restart or logout between a loss and the next launch. Afterwards: no
+process, no test directory, modifier flags 0, the owner's switch on
+again.
+
 ---
 
 # Part 2: the history of each design section
@@ -3599,12 +3683,35 @@ the app is running again within 5 s of the quit (every test on October
 19, 2026 relaunched later); if it does not, a quick relaunch would find
 them alive and clear the flag while the switch is still off.
 
-Nothing of this was checked live: it needs the owner to say the Mac is
-free and to switch Armadale off, then on again, under Background App
-Activity, with a test build started through Launch Services (`open -n
---env …`), as on October 19, 2026 (started by its binary path from an
-agent's shell it would belong to the agent's app). The switch governs
-the owner's installed app too (same bundle identifier).
+**November 14, 2026, 22:00 to 22:17. Checked live** (Part 1, "the
+background detection, checked live", has the run). What it settled for
+this section:
+- *Ended*, *survived* and *undetermined* each came out as designed,
+  with the alert, the log line and the record file to match. Switched
+  off, the daemon logged its SIGTERM line 1 s after a SIGTERM quit.
+- **A quick relaunch saves the sessions.** Switched off, after Quit
+  Anyway from menu bar mode and a relaunch 1 s later, the session was
+  still alive 15 s after the quit and Background Task Management logged
+  no check for that exit: `loginwindow`'s check, 5 s after an
+  accessory-mode quit, does not come when the app is running again. So
+  the late check said *survived* with the switch off, and `lossSeenAt`
+  stayed only because a late check never clears it; the second review's
+  rule was needed.
+- After Open System Settings on the quit question, System Settings came
+  to the front over Finder with the app left in the menu bar; after
+  Cancel the app that was active before was in front again.
+- The late alert has no default button (`AXDefaultButton` absent) and
+  Not Now as its cancel button; the launch-time alert has Open System
+  Settings as its default.
+- **With no decision stored nothing is ended.** Armadale was not in the
+  Background App Activity list on that Mac. At the first quit that left
+  a session, Background Task Management answered "record not found
+  (-95)" and nothing was touched; 32 s after the exit it registered the
+  app and posted a notification, and Armadale was in the list from then
+  on, switched on. A later quit of a copy at another path posted none,
+  and the one entry governed both copies (both ad hoc, same bundle
+  identifier). What the notification's own choice does was not seen
+  (the owner used the switch).
 
 
 ## 9. Keyboard shortcuts
