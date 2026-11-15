@@ -1755,6 +1755,61 @@ this replaces the item on the Dock badge and notifications under
 notification, and the step 8 item on the badge now says what is left
 on the first Mac. No code changed.
 
+## November 14, 2026: the release pipeline and the SSH tests on a second Mac
+
+November 14, 2026, evening. The owner wanted to sign, notarize and
+release from the Mac used that day. That morning it had no signing
+identity, no dmgbuild and no test host, so `scripts/release.sh`
+stopped at its preflight and the SSH integration tests had been
+skipped in every gate run. Nothing in the repository changed apart
+from these documents.
+
+What was set up. The owner imported the team's certificates with
+their keys. The Developer ID Application identity was valid at once;
+the Apple Development and Apple Distribution certificates were shown
+in red as "not trusted" because the keychain held only the Worldwide
+Developer Relations intermediate that expired in February 2023, and
+both were issued by its successor, G3. The owner added Apple's G3
+intermediate and all three identities became valid. No trust setting
+had been changed by hand, which matters: an "Always Trust" set on a
+certificate makes `codesign` fail later. The agent read the keychain
+(`security find-identity`, `find-certificate`, `dump-trust-settings`)
+and changed nothing in it. `scripts/fetch-dmgbuild.sh` installed the
+pinned dmgbuild. No Homebrew software was missing for a release
+(`xcodegen` and `gh` were there). The owner installed Lima and made
+the VM `default`.
+
+What was run, and held.
+- `scripts/release.sh --skip-notarize --allow-existing-tag` on
+  6d07126: 78 s. The app, the persistence helper and `ctty-exec`
+  signed by the Developer ID identity with the hardened runtime and
+  secure timestamps, the helper universal, the helpers without
+  entitlements; the DMG built by dmgbuild, signed and verified;
+  Gatekeeper answered "Unnotarized Developer ID" for both, as it
+  should without notarization. Nothing was submitted to Apple. The
+  app's signature was verified once more by hand (`codesign --verify
+  --deep --strict`; chain Developer ID Application, Developer ID
+  Certification Authority, Apple Root CA).
+- The six tests of `SSHIntegrationTests` against the Lima VM (Ubuntu
+  26.10, aarch64): deploy, create, attach and kill; the shell's exit
+  status recorded on the host; a killed upload installs nothing; a
+  truncated helper is replaced; a missing session is not created by
+  an attach; the connection is shared. 3.7 s. Afterwards `~/.armadale`
+  was removed in the VM, its home was still mode 750, the shared
+  connection was closed and the VM stopped.
+
+What it found. The Developer ID Application certificate expires on
+February 1, 2027 because its issuer, "Developer ID Certification
+Authority", expires that day; a release after it needs a certificate
+issued under Apple's newer Developer ID authority.
+
+Not done: notarization (the profile `armadale-notary` is the owner's
+to create on that Mac, and was not looked for), `scripts/check-quit.sh`
+against the Release app, and anything the app does with a host at
+launch: the SSH integration tests drive the session layer, so the
+host items under "Restored sessions attached at launch" in
+`HANDOFF.md` stay.
+
 ---
 
 # Part 2: the history of each design section

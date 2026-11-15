@@ -114,7 +114,10 @@ are in `docs/HISTORY.md`):
 - November 14, 2026: the live checks of attaching at launch;
   `scripts/check-quit.sh` uses defaults suites of its own (cdfc8b0).
 - November 14, 2026: the Dock badge and notifications checked live,
-  also for a session in a tab not shown; no code changed.
+  also for a session in a tab not shown; no code changed (6d07126).
+- November 14, 2026: the Mac used that day set up for releases and
+  host tests; a signing dry run and the SSH integration tests passed
+  there; no code changed.
 
 ## Next
 
@@ -355,7 +358,7 @@ Remote
   quoting; sh, bash, zsh and tcsh are tested.
 - Agent forwarding (`-A`) is not supported; Windows hosts get plain shells.
 - How many sessions one connection to a host can carry was never
-  checked (November 14, 2026; no test host). Every client of a host
+  checked (November 14, 2026; no test host then). Every client of a host
   shares one connection and sshd allows 10 sessions on one by default.
   From reading the code, past that the kill, the listing and new panes
   on that connection are refused too, and a refused kill is swallowed,
@@ -507,7 +510,10 @@ From finished changes: not checked live, and found and not fixed
   staged with the helper and driven by accessibility actions, without
   a synthetic keystroke or click (`docs/HISTORY.md`, "the live checks
   of attaching at launch"). **Not checked:**
-  - Anything on a host (none on the Mac used): the limit of six and
+  - Anything on a host (none on the Mac used at the time; it has a
+    Lima VM since that evening, "State of this Mac that matters", and
+    the SSH integration tests pass there, but those drive the session
+    layer, not the app's launch): the limit of six and
     what lies past sshd's ten (Remote, above); a host that needs a
     password at launch starts no client in a pane not shown until one
     tab signs in, then the rest attach; a host unreachable at launch
@@ -740,6 +746,23 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   notifications allowed it had no entry for Armadale and was last
   modified on September 20, 2025. That Mac has one display, at scale
   1.0.
+- **That Mac set up for releases and host tests (November 14, 2026,
+  evening; `docs/HISTORY.md`, "the release pipeline and the SSH tests
+  on a second Mac").** The owner imported the Developer ID Application
+  certificate for team YJ8LXVCB3T with its key: issued July 26, 2026,
+  it expires on February 1, 2027, the day its issuer "Developer ID
+  Certification Authority" expires, so a release after that day needs
+  a new certificate. The Developer ID Installer, Apple Distribution
+  and Apple Development certificates came with it; the last two were
+  shown as not trusted until the owner added Apple's "Worldwide
+  Developer Relations - G3" intermediate. No trust setting is changed
+  by hand. `Vendor/dmgbuild` is installed. `scripts/release.sh
+  --skip-notarize --allow-existing-tag` passed there on 6d07126. The
+  notary profile `armadale-notary` was not looked for; the owner
+  creates it. `scripts/check-quit.sh` was not run against the Release
+  app. The owner installed Lima 2.3.0 and made the VM `default`
+  (Ubuntu 26.10, aarch64, vz; home mode 750); the six SSH integration
+  tests passed against it, and it was cleaned and stopped afterwards.
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
   so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`
