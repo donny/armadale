@@ -32,3 +32,6 @@ xcuserdata/
 
 # Release artifacts (scripts/release.sh)
 /build/
+
+# The state of the Mac at hand (AGENTS.md, "Test hosts and tools"); one per Mac
+/HANDOFF.local.md

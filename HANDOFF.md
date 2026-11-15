@@ -43,56 +43,9 @@ is in `docs/HISTORY.md`.
 | 9 Ship | cb63ef7 | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
 | 10 New Session | 507a52a, 9168f0b, 18faf87 | empty panes, the New Session dialog, favorites, the chooser in every new pane (October 24, 2026) |
 
-Since the build order (changes to the app and its scripts; the
-investigations, the step 10 design and other documents-only commits
-are in `docs/HISTORY.md`):
-- October 18, 2026: the app icon, "Panes" (bbf81a4).
-- October 19, 2026: `scripts/install-release.sh` (cf9305c).
-- October 19, 2026: Armadale 0.1.0 build 1, from 72cf014 (untagged).
-- October 19, 2026: About panel copyright holder (f3855aa); sidebar
-  toggle moved (a2c236b); plain folder icon for tab groups (628c99e);
-  AGENTS.md: end test builds by pid (26c6699).
-- October 20, 2026: inline renaming in the sidebar and tab bar
-  (ba9ecf5).
-- October 20, 2026: the full-screen frame fix (f67d804).
-- October 23, 2026: Armadale 0.1.0 build 2, tagged `v0.1.0` (bump
-  fd96512; built from 524c9da).
-- October 23, 2026: About panel on two lines; no dimming of unfocused
-  panes (9e47bee).
-- October 23, 2026: a clean exit closes the pane (f218600).
-- October 23, 2026: an empty workspace is deleted automatically
-  (a651532).
-- October 23, 2026: a clean exit closes a workspace's only pane too;
-  `FullScreenSerializer`; Return presses the placeholder's button
-  (2462fe6).
-- October 24, 2026: step 10 (table above).
-- October 29, 2026: Shortcuts moves from Settings to Help › Keyboard
-  Shortcuts (c4e45e0).
-- October 29, 2026: sidebar icon colours (5b005b6), highlight on the
-  shown path (204627f), a click on a shown row writes nothing
-  (5249216).
-- October 29, 2026: the sidebar has no selection and no highlight
-  (831b9af).
-- October 30, 2026: sidebar title weight follows the shown path
-  (9162c7e).
-- October 30, 2026: the tab bar drawn like the native macOS 27 one
-  (60e107d).
-- October 30, 2026: tabs fill the track; three tab bar bugs fixed
-  (49fd474).
-- October 30, 2026: Show Tab items hidden from the Window menu; ⇧⌘N on
-  sidebar tab group rows (2b64971).
-- October 30, 2026: a pane context menu with a Theme submenu (ebec034).
-- October 30, 2026: no mouse event opens the pane menu (a9f13c8).
-- October 31, 2026: pane cards, designed (20b315b) and built (8f601d1).
-- October 31, 2026: Split Right and Split Down in the pane menu and as
-  header buttons (2695c1b).
-- October 31, 2026: header split buttons dropped; Session Ended no
-  longer dimmed (6e0e0ca).
-- October 31, 2026: a split, tab switch or zoom no longer soft-resets
-  the program (c2c3aa2).
-- November 4, 2026: MIT License (7047a64).
-- November 4, 2026: the pre-publication scan, Help › Acknowledgements
-  and the armadale.dev page (7fc2e32); the site went live that night.
+Since the last release. The earlier changes, back to the build order,
+are the headings of Part 1 of `docs/HISTORY.md`, with their dates and,
+in the heading or the text under it, their commits:
 - November 5, 2026: the release DMG opens to a designed Finder window
   (a39f3ab); 0.1.1 build 27 (7560281), tagged `v0.1.1` and released
   on GitHub (ade6f27).
@@ -124,43 +77,41 @@ are in `docs/HISTORY.md`):
 - November 14, 2026: bump to 0.1.2 (28) (76562b7); that commit built,
   notarized, stapled and installed in `~/Applications` on that Mac.
   Not tagged or published.
+- November 14, 2026: housekeeping: the state of a Mac moved out of
+  this file into `HANDOFF.local.md` (git-ignored); this file trimmed.
 
 ## Next
 
-Nothing is in progress. The owner gave the go-ahead on November 14,
-2026 for the architecture review's items in the suggested order
-("Architecture review" and its second pass, at the end of the open
-items), and then for attaching restored sessions at launch, with a
-decision on each of its four questions (`docs/HISTORY.md`, the three
-entries from "restored sessions are attached at launch" on). All are
-built, the split of `AppDelegate` and `SessionRegistry` included, and
-the live checks were made once the owner said the Mac was free. What
-comes next waits for the owner.
+Nothing is in progress. Everything the owner gave the go-ahead for on
+November 14, 2026 is built, and checked live where the Mac was free
+(`docs/HISTORY.md`, the entries of that day). What comes next waits
+for the owner.
 
 Waiting for owner decisions:
-- **Publishing 0.1.2.** The notarized DMG of 76562b7 is
-  `build/release/Armadale-0.1.2.dmg` on the Mac used on November 14,
-  2026 (`docs/HISTORY.md`, "Armadale 0.1.2 (28), built and notarized,
-  not published"); the next run of `scripts/release.sh` deletes that
-  folder. The owner wanted to use the build first. To publish that
-  very build: tag 76562b7 as `v0.1.2`, create the GitHub Release with
-  the DMG under both names, and add the tag's state fixture (README,
-  "Releasing", steps 4 and 5). If anything is committed to the app
-  before then, bump the build number and build again instead. The
-  release notes should say that 0.1.2 writes state file schema 2,
-  which 0.1.0 and 0.1.1 refuse.
-- **Three decisions the coordinator made in that step**, each the
-  owner's to overrule: the launch holds at most six of a host's
-  sessions (open items, Remote; made without a test host); a session
+- **Publishing 0.1.2.** The notarized DMG of 76562b7 exists only on
+  the Mac it was built on (`HANDOFF.local.md` there; `docs/HISTORY.md`,
+  "Armadale 0.1.2 (28), built and notarized, not published"), in
+  `build/release/`, which the next run of `scripts/release.sh`
+  deletes. The owner does not plan to publish for now (November 14,
+  2026). To publish that very build: tag 76562b7 as `v0.1.2`, create
+  the GitHub Release with the DMG under both names, and add the tag's
+  state fixture (README, "Releasing", steps 4 and 5). If anything is
+  committed to the app before then, bump the build number and build
+  again instead. The release notes should say that 0.1.2 writes state
+  file schema 2, which 0.1.0 and 0.1.1 refuse.
+- **Three decisions the coordinator made** when restored sessions
+  were attached at launch (November 14, 2026), each the owner's to
+  overrule: the launch holds at most six of a host's sessions (open
+  items, Remote; made without a test host); a session
   never shown in the run does not start a sign-in by itself; and the
   cost of heavy output in sessions not on screen is accepted as it is
   (open items, Session layer).
 - **A live check on a host.** Nothing the app does with a host at
-  launch was checked live. The Mac used has a Lima VM since that
-  evening and the SSH integration tests pass against it ("State of
-  this Mac that matters"), so the check can be made there.
+  launch was checked live. It needs a Mac with the Lima VM
+  (`HANDOFF.local.md`); the SSH integration tests passed against one
+  on November 14, 2026, but they drive the session layer.
 - **Showing or re-adopting spared sessions** (open items, Session
-  layer, and "Adds to Orphan reclaim").
+  layer).
 - **A fork of the persistence helper** ("The persistence helper's
   workarounds").
 - **The Ghostty second renderer** ("Decisions pending" below).
@@ -190,42 +141,18 @@ Session layer
 - The flood test `aFloodIsCutShortByReattaching` is load-sensitive; it
   records a known issue under heavy CPU load rather than failing.
 - `floodArrivesCompleteInBoundedBatches` (PTYProcess, `ArmadaleSessions`)
-  failed in two of three full-gate runs on October 23, 2026 (the five
-  packages' tests run concurrently under `xcodebuild test`), each time
-  with the same delta: 7,888,899 bytes arrived for a `seq 1 1000000`
-  flood instead of 7,888,896, three extra bytes, and the share of bytes
-  in full 64 KB batches was 42 % and then 79.75 % against the 80 % the
-  test wants. It passed three times in a row under `swift test` on its
-  own, and in the gate run between the two failures. The identical
-  three-byte excess means something in the gate's environment adds to
-  the PTY stream, not random loss; not investigated. In two further
-  runs the count was right but no batch was full at all (0 %, 165
-  batches of about 50 KB) on a loaded machine: `seq` was not outrunning
-  the reader, so batches closed on the 16 ms interval. The test now
-  records that share as a known issue with the numbers, as the zmx flood
-  test does, keeps the byte count strict, and prints the first
-  mismatching bytes when the count is off (`describeMismatch`), so the
-  next three-byte failure says what the bytes are, which batch they
-  fell in, and the PTY's device path. Investigated the same evening
-  without a reproduction: 6 runs of the sessions bundle alone and 5
-  full-gate runs with the diagnostic armed all passed (the three
-  failures had coincided with the release build, notarization and DMG
-  install running on the same Mac). Excluded by reading the code: a
-  master descriptor reused while its read source is live (the master is
-  closed only in the source's cancel handler, after the last event
-  handler; reads, the exit source, the exit poll and the drain all run
-  on one serial queue; writes are refused once the descriptor is set to
-  −1 before the close; both PTY ends are close-on-exec), duplication in
-  `OutputBuffer` (batches are taken from one pending array under a lock
-  and never re-delivered), and the app tests' detached notify helper
-  writing to a reallocated device by path (its `sh` waits for it, and
-  its payload is one BEL or a long OSC 777, never three bytes). What is
-  three bytes long in this code base is a focus report, `ESC [ I` or
-  `ESC [ O`, which only a terminal view emits when DECSET 1004 is on;
-  no test writes one to a PTY. Open: wait for the diagnostic to catch
-  the next occurrence; if it shows a focus report, look for a surface
-  answering a replayed `?1004h` into a live PTY in the concurrent
-  session-controller tests.
+  failed in two of three full-gate runs on October 23, 2026, each time
+  with three bytes more than the flood's 7,888,896, and was not
+  reproduced in 11 further runs (the failures had coincided with a
+  release build, notarization and install on the same Mac). The test
+  keeps the byte count strict, prints the first mismatching bytes
+  when the count is off (`describeMismatch`) and records a low share
+  of full batches as a known issue. Open: wait for the diagnostic to
+  catch the next occurrence; if it shows a focus report (`ESC [ I` or
+  `ESC [ O`, the only three-byte sequence in this code base), look for
+  a surface answering a replayed `?1004h` into a live PTY in the
+  concurrent session-controller tests. The investigation is in
+  `docs/HISTORY.md` ("housekeeping").
 - One unexplained rendering glitch: a Claude Code prompt once showed a
   colour code as literal text (`185;249m`) after a replay. Not reproduced.
 - Spared sessions (November 14, 2026) are invisible and never end by
@@ -234,13 +161,23 @@ Session layer
   them, and End Sessions and Quit leaves them alone. The `state` log
   line of each launch gives their number and how many still run. By
   hand: `ZMX_DIR=<state directory>/run <state directory>/bin/zmx-0.8.1
-  ls`, and `kill a-<id>` to end one. Showing them, or offering them
-  back as panes (which needs a record of what each one runs), is an
-  owner decision. Their helper version is not recorded, so after the
-  bundled helper changes the old copy is removed and listing or ending
-  them with the new one may time out (DESIGN section 13). In a run on
-  the plain PTY fallback the flag stays set, so the reclaim is held
-  back until a run with the persistent runtime (intended).
+  ls`, and `kill a-<id>` to end one. Their helper version is not
+  recorded, so after the bundled helper changes the old copy is
+  removed and listing or ending them with the new one may time out
+  (DESIGN section 13). In a run on the plain PTY fallback the flag
+  stays set, so the reclaim is held back until a run with the
+  persistent runtime (intended).
+  What to do with them is an owner decision. The reclaim is the only
+  code that ends sessions the user did not ask to end, and it does so
+  by set difference against one file. It could ask before ending ("N
+  sessions are running that no pane shows"), or write a small record
+  per local session beside its socket at create (the `Session` value)
+  so that unreferenced live sessions can be offered back as panes
+  after a lost state file. A daemon left running costs a few
+  megabytes; an agent ended by mistake can cost hours of its work.
+  DESIGN section 1's "never adopts sessions created elsewhere" would
+  still hold (these are Armadale's own). Hosts are a separate
+  question, since several Macs may share a host's `~/.armadale`.
 - The helper's listing leaves out a daemon that does not answer within
   about a second and still succeeds (November 14, 2026, `kill -STOP`).
   Locally nothing depends on the listing alone any more (the same
@@ -399,36 +336,19 @@ Agents
 - Claude Code's own idle signal arrives 60 s after it finishes; immediate
   signalling needs the user's `Stop` hook (the Configure… sheet shows it).
 - The `armadale-notify` helper cannot reach the pane from inside tmux or
-  screen, and only exists on this Mac (hooks in remote sessions cannot use
-  it; the profile arguments work everywhere).
+  screen, and only exists on the Mac that runs Armadale (hooks in
+  remote sessions cannot use it; the profile arguments work
+  everywhere).
 - A session whose profile was deleted is never notified under "Only for
   agent profiles".
 
 Menu bar mode (step 8), from its review
-- The Dock badge could not be seen for Armadale on the Mac used for
-  step 8, in any mode, before or after it (the Dock's `AXStatusLabel`
-  stayed empty with attention pending). On the Mac used on November
-  14, 2026 it shows once notifications are allowed, through the same
-  code path (`docs/HISTORY.md`, "the Dock badge and notifications,
-  checked live"). What is left is the first Mac's own setting: System
-  Settings › Notifications › Armadale › "Badge application icon".
 - Not exercised live: a real logout, restart or shutdown (the quit
   event's reason is unit-tested with synthetic events only); a
   notification click reopening from menu bar mode (code path only);
   End Sessions and Quit against a slow or unreachable remote host; the
   persistence fallback mode; window order with several windows on
   return; macOS hiding the status item; the light menu bar.
-- Tested October 19, 2026, evening ("macOS 27: Allow in the Background
-  switched off", below): a quit from menu bar mode shows no first-quit
-  prompt and leaves no Dock item, but with Armadale switched off under
-  Allow in the Background macOS ends every session 5 s after that quit
-  (1 s after a regular quit such as SIGTERM). Under Allow nothing is
-  touched. The app cannot read that setting; what the quit alert, the
-  status menu and the README should say about it is an owner decision,
-  deferred on October 19, 2026 (open item).
-  Whether launchd lists the session daemons under Background App
-  Activity after a quit is still unknown (needs root or the System
-  Settings UI).
 - Decision (coordinator, November 9, 2026; owner may overrule):
   Settings and the Help windows shown from menu bar mode keep the
   accessory policy, so no Dock icon appears and the menu bar stays the
@@ -452,16 +372,12 @@ Shipping (step 9)
   at once (0.1.x takes no lock) the later build cannot start sessions
   until it is relaunched. A constraint for the next helper version
   bump (DESIGN section 13).
-- The release checklist grew (README, "Releasing"): run
-  `scripts/check-state-compat.sh` before a release, and add the new
-  tag's fixture after it (`scripts/state-fixtures/README.md`). The
-  comparison step needs `/usr/bin/python3`, which Xcode provides.
 - Known limit of the instance lock (November 14, 2026): builds before
-  it, 0.1.1 included, take no lock, so the installed app and a new
-  build are not kept apart until the installed app is replaced;
-  AGENTS.md's isolation rule still stands.
-- The installed 0.1.1 has neither activation fix (dcdeb50, 704a941);
-  a new release would ship them.
+  it, 0.1.1 included, take no lock, so an installed 0.1.1 or earlier
+  and a newer build are not kept apart; AGENTS.md's isolation rule
+  still stands.
+- 0.1.1, the last published release, has neither activation fix
+  (dcdeb50, 704a941); 0.1.2 has both and is not published.
 
 From finished changes: not checked live, and found and not fixed
 - Step 10, New Session (October 24, 2026).
@@ -530,13 +446,12 @@ From finished changes: not checked live, and found and not fixed
   staged with the helper and driven by accessibility actions, without
   a synthetic keystroke or click (`docs/HISTORY.md`, "the live checks
   of attaching at launch"). **Not checked:**
-  - Anything on a host (none on the Mac used at the time; it has a
-    Lima VM since that evening, "State of this Mac that matters", and
-    the SSH integration tests pass there, but those drive the session
-    layer, not the app's launch): the limit of six and
-    what lies past sshd's ten (Remote, above); a host that needs a
-    password at launch starts no client in a pane not shown until one
-    tab signs in, then the rest attach; a host unreachable at launch
+  - Anything on a host (there was no test host at the time; the SSH
+    integration tests, run that evening, drive the session layer, not
+    the app's launch): the limit of six and what lies past sshd's ten
+    (Remote, above); a host that needs a password at launch starts no
+    client in a pane not shown until one tab signs in, then the rest
+    attach; a host unreachable at launch
     and back asking for a password leaves those panes Disconnected
     with ssh's message, and showing one reconnects it.
   - What the eye would see. The sidebar's and the tab bar's glyphs and
@@ -561,20 +476,15 @@ From finished changes: not checked live, and found and not fixed
   **Found and not fixed:** heavy output in sessions not on screen
   (Session layer, above; accepted as it is).
 
-Architecture review (November 12, 2026)
+Architecture review (November 12 and 14, 2026): what is left
 
-Findings from reading the documents and the code. Nothing was built or
-run, so none is reproduced live. Of its suggested order, the orphan
-reclaim, the save scheduling and the schema rule were built on November
-14, 2026, and the documents were split the same day
-(`docs/HISTORY.md`). The owner then kept the rule that every agent
-reads all of `docs/DESIGN.md` and this file before changing code, which
-closes the finding on the documents. Attaching restored sessions at
-launch was built the same day, after the owner's decisions; that
-finding and the two of the second pass that went with it are quoted
-in `docs/HISTORY.md` ("restored sessions are attached at launch"),
-and what the change leaves open is under Session layer, Hierarchy
-and UI, and Remote above.
+Most of its findings were built on November 14, 2026 (`docs/HISTORY.md`,
+from "one Armadale process per state directory" to "`AppDelegate` and
+`SessionRegistry` split into files"), and the owner kept the rule that
+every agent reads all of `docs/DESIGN.md` and this file. What it says
+about spared sessions is under Session layer above. The findings came
+from reading the documents and the code; none of what is left is
+reproduced live.
 - **The persistence helper's workarounds.** Create's double attach,
   attach-only through `/usr/bin/true`, telling the cases apart by a
   client's first bytes within 2 s, the RIS filter, the flood reattach
@@ -585,57 +495,33 @@ and UI, and Remote above.
 - **Live UI testing shares the owner's screen.** Most of AGENTS.md's
   "Rules learned the hard way" guards against synthetic input landing
   in the wrong place. A macOS guest VM for those passes would remove
-  the risk instead of guarding against it.
-- Smaller: `AppDelegate`, which held launch, the quit paths, menu bar
-  mode and window management in one file of about 1,150 lines, was
-  split into files on November 14, 2026 (`docs/HISTORY.md`); the quit
-  paths, now in `AppDelegate+Quit.swift`, still need
-  `scripts/check-quit.sh`; some 17 `NSLog` calls remain in the app
-  beside the `Logger`s, although NSLog is `<private>` in `log show` on
-  macOS 27 (10c, `docs/HISTORY.md`); the load-sensitive flood tests
-  run beside four other test bundles in the gate. Seen in review on
-  November 14, 2026: a clean `xcodebuild … build-for-testing` into a
-  fresh DerivedData fails with "Unable to resolve module dependency:
-  'Armadale'" at
-  `ArmadaleAppTests/SidebarShownPathTests.swift:4` (`@testable import
-  Armadale`), while the gate's `build test` passes from a fresh
-  DerivedData; older, not looked into.
-
-Architecture review, second pass (November 14, 2026)
-
-The findings above were read against the code again and stand. Three
-are new and three add to ones above. Again from reading only: none is
-reproduced live. The first new one, the instance lock, was built on
-November 14, 2026, and so were the two on sessions never shown (the
-stale status, and the controllers kept inside pane views), with
-attaching restored sessions at launch (`docs/HISTORY.md`). The split
-of `SessionRegistry` and `AppDelegate` that finding asked for followed
-as a second commit, code moved only.
-- **Adds to "Orphan reclaim".** It is the only code that ends sessions
-  the user did not ask to end, and it does so by set difference
-  against one file. Instead of only widening the hold-back, the rule
-  could change: ask before ending ("N sessions are running that no
-  pane shows"), or write a small record per local session beside its
-  socket at create (the `Session` value) so that unreferenced live
-  sessions can be offered back as panes after a lost state file. A
-  daemon left running costs a few megabytes; an agent ended by mistake
-  can cost hours of its work. DESIGN section 1's "never adopts
-  sessions created elsewhere" would still hold (these are Armadale's
-  own). Owner decision; hosts are a separate question, since several
-  Macs may share a host's `~/.armadale`. **Partly built November 14,
-  2026** (`docs/HISTORY.md`): the reclaim now spares what it cannot account
-  for, but nothing shows the spared sessions or offers them back; that
-  part is still the owner's decision (open items, Session layer).
-- **Adds to "Save scheduling".** Besides a longest wait, the title and
-  the working directory (`AppModel.setTitle`, `setWorkingDirectory`)
-  could stay out of what schedules a save and be written with the next
-  structural change and at quit: the persistence helper replays both
-  on attach, so the saved copies matter only for sessions that are not
-  attached. `AppModel` is one `@Observable` object and
-  `displayTitle(for:)` reads `sessions`, so every title change also
-  re-evaluates the sidebar and tab bar views that show titles, in
-  every window; not measured. Not built: the longest wait
-  (`docs/HISTORY.md`) bounds the delay, and titles still schedule saves.
+  the risk instead of guarding against it. Looked into on November 14,
+  2026 and not made: Lima 2.3.0 has a `macos-27` template (Apple's
+  27.2 restore image, a 25.6 GB download, about 48 GB of disk at the
+  peak of the install); the owner would still have to log in and grant
+  Accessibility inside the guest; `limactl screenshot` would give
+  pictures of the guest without Screen Recording. The cost is high,
+  and live checks work on the owner's screen when it is free.
+- **Titles and working directories schedule saves.** Besides a longest
+  wait, the title and the working directory (`AppModel.setTitle`,
+  `setWorkingDirectory`) could stay out of what schedules a save and
+  be written with the next structural change and at quit: the
+  persistence helper replays both on attach, so the saved copies
+  matter only for sessions that are not attached. `AppModel` is one
+  `@Observable` object and `displayTitle(for:)` reads `sessions`, so
+  every title change also re-evaluates the sidebar and tab bar views
+  that show titles, in every window; not measured. Not built: the
+  longest wait (`docs/HISTORY.md`) bounds the delay, and titles still
+  schedule saves.
+- Smaller: some 17 `NSLog` calls remain in the app beside the
+  `Logger`s, although NSLog is `<private>` in `log show` on macOS 27
+  (10c, `docs/HISTORY.md`); the load-sensitive flood tests run beside
+  four other test bundles in the gate. Seen in review on November 14,
+  2026: a clean `xcodebuild … build-for-testing` into a fresh
+  DerivedData fails with "Unable to resolve module dependency:
+  'Armadale'" at `ArmadaleAppTests/SidebarShownPathTests.swift:4`
+  (`@testable import Armadale`), while the gate's `build test` passes
+  from a fresh DerivedData; older, not looked into.
 
 ## Decisions pending
 
@@ -646,35 +532,16 @@ two macOS 27 investigations are in `docs/HISTORY.md`.
 
 ### A second renderer: Ghostty behind `TerminalSurface`
 
-SwiftTerm 1.99.0 (pinned) is a preview of 2.0: a new I/O architecture and
-SIMD work, but also an API break ("you can no longer hold on to the
-underlying terminal"), so `SwiftTermSurface` needs attention at 2.0 either
-way. Ghostty-based rendering (Metal, Ghostty's parser and VT coverage) was
-compared across three Swift packages. The deciding constraint is that
-`TerminalSurface` is byte-fed: the session layer owns the PTY (persistence
-helper via `ctty-exec`, `ssh -tt`, the output filter, flood handling), the
-renderer gets `feed(bytes)` and reports `didInput`. A stock libghostty
-surface spawns its own command and owns its PTY, so only a wrapper with a
-host-managed I/O patch can slot in.
-
-| Package | Host-fed I/O | Events for our delegate | Pin / activity (19 Oct 2026) |
-|---|---|---|---|
-| `Lakr233/libghostty-spm` | Yes: `InMemoryTerminalSession` (`receive(Data)`, write and resize callbacks, output backpressure hooks) | Title, pwd, bell, desktop notification, open URL, hover link, clipboard with confirmation, progress, colour change, command finished, search, scrollbar, cell size | Ghostty main, re-pinned weekly, 21 documented patches; 114 stars; Swift 6.2; ~72 MB zip for all Apple slices |
-| `hudsonkit/Termini` | Yes: `processRemoteOutput`, `onTransportWrite`, `onSizeChange` (one ~400-line patch) | Only input, size, diagnostics, open URL, OSC 52. No title, bell, pwd, notification | One June 2026 Ghostty commit; 18 stars; Swift 5.9; 131 MB zip |
-| `briannadoubt/GhosttyKit` | No: stock libghostty spawns the shell | Title, pwd, bell, notification, URL, search, progress, child exited | May 2026 commit; arm64 only; 6 stars; last push June 2026 |
-
-Conclusion: `libghostty-spm` is the only candidate that fits the
-architecture, and it maps onto `TerminalSurfaceDelegate` almost one to one
-(`find`, `selectedText`, `clearScrollback`, `scrollToBottom` map to its
-search delegate, public selection API and binding actions). Costs: a
-weekly-moving upstream pin held together by one maintainer's patch stack, a
-20 to 30 MB macOS slice in the bundle, one Metal layer per pane. Unverified
-from outside: how its host-managed backend behaves with the persistence
-helper's replay on attach (replayed query sequences must not be answered to
-the live PTY; `ZmxOutputFilter` handles this for SwiftTerm today and would
-sit in the same place). Termini is a useful reference for how small the
-patch is; briannadoubt's wrapper is unusable here without moving PTY
-ownership into the renderer.
+SwiftTerm 1.99.0 (pinned) is a preview of 2.0, whose API break means
+`SwiftTermSurface` needs attention at 2.0 either way. Three Swift
+packages for Ghostty-based rendering were compared on October 19, 2026
+(`docs/HISTORY.md`, "housekeeping", has the table and the reasoning).
+Only `Lakr233/libghostty-spm` fits, because `TerminalSurface` is
+byte-fed and the session layer owns the PTY. Its costs: a
+weekly-moving upstream pin held together by one maintainer's patch
+stack, a 20 to 30 MB macOS slice in the bundle, one Metal layer per
+pane. Unverified: how its host-managed backend behaves with the
+persistence helper's replay on attach.
 
 Proposed step: a `GhosttySurface` package implementing `TerminalSurface`
 over libghostty-spm's in-memory session, registered in `SurfaceRegistry`
@@ -684,26 +551,20 @@ this.
 
 ### macOS 27: "Running in Background" after quit — tested, decided (step 8)
 
-Since macOS 27 the Dock keeps an app's icon with a light grey indicator
-and the tooltip "Running in Background" when processes that originate
-from the app are still alive after quit (Apple support article 125671).
-Tested live on October 19, 2026: the Dock's "Stop Running in
-Background" ends every session; a first-quit system prompt asks whether
-to allow the app in the background; neither disclaiming responsibility
-on the spawn nor a launchd job submitted from inside a session escapes
-the attribution, and no API, entitlement or Info.plist key opts out.
-Of the options considered, the third (do not quit: keep a status item
-while sessions are alive) was chosen and became step 8; the second,
-moving session ownership into an `SMAppService` login item or agent,
-needs a prototype and was not tried.
+Decided: Armadale does not quit while sessions are alive but keeps a
+status item (step 8). The test of October 19, 2026 and the options
+considered are in `docs/HISTORY.md` ("macOS 27, 'Running in
+Background' after quit").
 
 Still untested, in order of value: an `SMAppService` agent prototype
-(option 2), now also as a possible way out of the kill described in the
-next section; the prompt's Don't Allow button itself (needs a Mac with
-no stored decision; the switch records the same state); whether a quit
+(option 2 there: session ownership moved into a login item or agent),
+now also as a possible way out of the kill described in the next
+section; the prompt's Don't Allow button itself (needs a Mac with no
+stored decision; the switch records the same state); whether a quit
 leaves the ssh connection masters (`ControlPersist`, up to 10 minutes)
 as subordinate processes that show the Dock indicator or are killed;
-whether Background App Activity lists the daemons.
+whether Background App Activity lists the daemons after a quit (needs
+root or the System Settings UI).
 
 ### macOS 27: "Allow in the Background" switched off — tested, decision deferred
 
@@ -729,121 +590,19 @@ started.** What was recorded: `docs/DESIGN.md` section 8 ("Quit, Keep Sessions
 Running") and section 13; the README's "Quitting and the menu bar"
 gained one sentence.
 
-### The `ctty-exec` helper
-
-The orientation note is in `docs/HISTORY.md`; what the helper is and
-why it exists are in `docs/DESIGN.md` section 7 and the README ("The
-`ctty-exec` helper").
-
 ## State of this Mac that matters
 
-- **Looked at on November 14, 2026**, on the Mac that day's work was
-  done on, which may not be the Mac the entries below describe (the
-  checkout, the Claude Code cask and the build products were all new
-  that morning). There was no `~/Applications/Armadale.app` and no
-  Armadale in `/Applications`. Lima was not installed (`limactl` not on
-  PATH, no `~/.lima`), so there was no test host and the SSH
-  integration tests were skipped in every gate run that day. Codex was
-  not installed (nothing at `/opt/homebrew/bin/codex` or on PATH), so
-  nothing was checked against it. `/opt/homebrew/bin/claude` was
-  2.1.311, while `docs/DESIGN.md` §10 was checked against 2.1.292
-  (hooks) and 2.1.304 (flags) and is due a re-check. xcodegen was
-  installed from Homebrew, and `Vendor/zmx` had to be fetched. The
-  Developer ID certificate and the notary profile were not looked for.
-  The entries below were not re-verified that day, apart from the
-  privacy grants, which were made then.
-- **Notifications on that Mac (November 14, 2026).** During the live
-  checks macOS asked whether Armadale may send notifications, after
-  the first bell of a test build (which has the app's bundle
-  identifier), at about 15:26. The agent did not answer it, and it was
-  gone when that run ended; a prompt still up when the app quits
-  counts as a denial (`docs/DESIGN.md` §10). At about 17:30 the same
-  day the owner said they had allowed notifications for Armadale, and
-  a live check a few minutes later confirmed it: a banner and the
-  Dock badge "1" at a bell (`docs/HISTORY.md`, "the Dock badge and
-  notifications, checked live"). The setting cannot be read from
-  `~/Library/Preferences/com.apple.ncprefs.plist` on macOS 27: with
-  notifications allowed it had no entry for Armadale and was last
-  modified on September 20, 2025. That Mac has one display, at scale
-  1.0.
-- **That Mac set up for releases and host tests (November 14, 2026,
-  evening; `docs/HISTORY.md`, "the release pipeline and the SSH tests
-  on a second Mac").** The owner imported the Developer ID Application
-  certificate for team YJ8LXVCB3T with its key: issued July 26, 2026,
-  it expires on February 1, 2027, the day its issuer "Developer ID
-  Certification Authority" expires, so a release after that day needs
-  a new certificate. The Developer ID Installer, Apple Distribution
-  and Apple Development certificates came with it; the last two were
-  shown as not trusted until the owner added Apple's "Worldwide
-  Developer Relations - G3" intermediate. No trust setting is changed
-  by hand. `Vendor/dmgbuild` is installed. `scripts/release.sh
-  --skip-notarize --allow-existing-tag` passed there on 6d07126. The
-  owner then created the notary profile `armadale-notary` there, from
-  an App Store Connect API key, and `xcrun notarytool history
-  --keychain-profile armadale-notary` (the release script's own
-  check) answers with the account's earlier submissions; nothing has
-  been submitted from that Mac yet. Test a profile that way: on macOS
-  27 it is not an item `security find-generic-password` or
-  `dump-keychain` can see. `scripts/check-quit.sh` passed against that
-  Release app. The owner installed Lima 2.3.0 and made the VM `default`
-  (Ubuntu 26.10, aarch64, vz; home mode 750); the six SSH integration
-  tests passed against it, and it was cleaned and stopped afterwards.
-- **`~/Applications/Armadale.app` on that Mac** is 0.1.2 (28), the
-  notarized build of 76562b7, installed with
-  `scripts/install-release.sh` on November 14, 2026 at 19:22. There
-  was no installed Armadale there before, and no real state directory
-  (`~/Library/Application Support/Armadale`) when it was installed;
-  no agent has run it. From then on "Two apps with one name" in
-  AGENTS.md applies on that Mac too.
-- Background App Activity: on October 19, 2026 the owner answered
-  **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
-  so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`
-  shows the record). The switch under System Settings › General › Login
-  Items & Extensions › Allow in the Background was turned off for the
-  evening's tests and **is on again**; off means every session is ended
-  a few seconds after any quit (above). A Desktop-folder privacy denial
-  was recorded for the deleted path
-  `/tmp/armadale-bgtest/bin/ctty-exec-0.1.0` during the disclaim test;
-  harmless.
-- Notification permission for `com.tinylittleapps.armadale` is granted in
-  System Settings (done during step 7 testing); notification
-  authorization is per bundle id, so it covers ad-hoc and Developer ID
-  builds alike. Privacy (TCC) grants keyed by code requirement, and
-  macOS 27's stored background decision, may differ between the two.
-- The Developer ID certificate for team YJ8LXVCB3T expires on February 1,
-  2027; the notarization keychain profile is `armadale-notary` (created
-  by the owner on October 19, 2026; the notary history under that account
-  lists the accepted submissions). Debug builds never need either.
-- `~/Applications/Armadale.app` is whatever the owner last installed with
-  `scripts/install-release.sh` (by `docs/HISTORY.md`, 0.1.1 build 27,
-  the notarized release of November 5, 2026;
-  `--skip-notarize --allow-existing-tag` builds a local, signed but
-  unnotarized copy of a version whose tag exists). It has a different
-  code identity from Debug builds, so privacy prompts from inside its
-  sessions may appear once more; it uses the real state directory
-  (`~/Library/Application Support/Armadale`), never a test one. Do not
-  replace it or run it during tests without the owner's say-so.
-- Privacy grants for agent sessions run from the Claude desktop app
-  (November 14, 2026). Commands there run under the bundle "Claude
-  Code" (`com.anthropic.claude-code`, inside
-  `~/Library/Application Support/Claude/claude-code/<version>/`), which
-  macOS holds responsible, not the Claude app itself. The owner allowed
-  it to control System Events (the dialog that AGENTS.md's frontmost
-  check raises on first use, and which blocks that check until it is
-  answered) and switched on Accessibility for it, which the System
-  Events window probes and synthetic keystrokes need: without it they
-  fail with -1719 or -1728 and no dialog appears. Screen Recording is
-  not granted, so `screencapture -l` fails there. The owner may switch
-  Accessibility off again; `AXIsProcessTrusted()` says whether it is
-  on, and `lsappinfo info -only name -only pid "$(lsappinfo front)"`
-  gives the frontmost app and its pid with no permission at all. With
-  several test builds running, the frontmost check by name is not
-  enough (all are "Armadale"); compare the pid too. Synthetic
-  keystrokes reset `HIDIdleTime`, so the idle gate only means
-  something before the first one.
-- The Lima VM `default` is stopped and has no `~/.armadale` inside it.
-- Claude Code 2.1.292 and Codex 0.163.0 were the versions installed
-  when `docs/DESIGN.md` §10 recorded what each offers and the source
-  lines consulted (its flag table was read from Claude Code 2.1.304).
-  Re-check when either is upgraded; see the first entry of this
-  section for what was installed on November 14, 2026.
+What is installed and granted on a particular Mac is not in this file:
+the installed app, the test host, the agents, the signing identities
+and the notary profile, the notification and background settings, and
+the privacy grants agents need. It is in `HANDOFF.local.md` at the
+repository root, which is git-ignored, one per Mac. `AGENTS.md` ("Test
+hosts and tools") says what that file holds and what to do on a Mac
+that has none.
+
+The section this replaces described two Macs as last recorded on
+November 14, 2026: the one used until November 12, 2026 and the one
+used on November 14. It is in git: `git show f4d8bd8:HANDOFF.md`. On
+the first Mac, the entries there that are not dated November 14 say
+what to look at; none was re-verified after November 12, 2026, so
+each is to be checked again, not copied.

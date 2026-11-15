@@ -3562,7 +3562,8 @@ armadale/
 ├── THIRD_PARTY_LICENSES.md          bundled components' licenses, colour-scheme credits
 │                                    (mirrored in Armadale/Resources/Acknowledgements.txt)
 ├── AGENTS.md                        how to work in this repository (process, rules, test hosts)
-└── HANDOFF.md                       where development stopped (status, next step, open items)
+├── HANDOFF.md                       where development stopped (status, next step, open items)
+└── HANDOFF.local.md                 git-ignored, one per Mac: what is installed and granted there
 ```
 
 - `ArmadaleCore` and the layout operations are fully unit‑tested with Swift

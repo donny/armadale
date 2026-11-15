@@ -7,7 +7,11 @@ what is true now, is `docs/DESIGN.md`; why and when (the change log, and
 the history of each design section under the same section numbers) is
 `docs/HISTORY.md`; build and run instructions are in `README.md`. Read
 `HANDOFF.md` and `docs/DESIGN.md` before changing code, and the part of
-`docs/HISTORY.md` on the sections you are about to change.
+`docs/HISTORY.md` on the sections you are about to change. What is
+installed and granted on the Mac at hand is in `HANDOFF.local.md`,
+which is git-ignored ("Test hosts and tools" below); read it before
+anything that depends on the Mac: a live test, the SSH tests, a
+release.
 
 ## Build and test
 
@@ -55,9 +59,14 @@ step; pause immediately if asked. When work pauses, update `HANDOFF.md`:
 it holds where things stand and the open items. The account of a
 finished change (what was built, how it was checked, what was found on
 the way) goes to the end of Part 1 of `docs/HISTORY.md`, with one line in
-HANDOFF's status list. Open items, not-checked-live lists and pending
-decisions stay in HANDOFF until they are resolved; then remove them
-there and say so in the Part 1 entry of the change that resolved them.
+HANDOFF's status list. That list holds the changes since the last
+release; the older ones are the headings of Part 1. Open items,
+not-checked-live lists and pending decisions stay in HANDOFF until they
+are resolved; then remove them there and say so in the Part 1 entry of
+the change that resolved them. HANDOFF says what is open and points to
+the account; the account itself (an investigation, a comparison, what
+was measured) belongs in HISTORY. Nothing about a particular Mac goes
+into HANDOFF: it goes into `HANDOFF.local.md`.
 
 ## Rules learned the hard way
 
@@ -102,6 +111,21 @@ check is: screen unlocked and at least 20 s of HID idle time (`ioreg -c
 IOHIDSystem`, `HIDIdleTime`). `osascript -e 'quit app "Armadale"'`
 behaves like ⌘Q and returns "User canceled" when the quit alert's answer
 cancels the quit; that is expected.
+
+Which process macOS holds responsible decides what an agent may do. A
+session run from the Claude desktop app runs its commands under the
+bundle "Claude Code" (`com.anthropic.claude-code`), not under the
+Claude app. That bundle needs Automation for System Events: the first
+frontmost check raises the dialog and blocks until it is answered. It
+also needs Accessibility, without which the System Events window
+probes and synthetic keystrokes fail with -1719 or -1728 and no dialog
+appears; `AXIsProcessTrusted()` says whether it is on. Only the owner
+answers such dialogs or changes such settings. `lsappinfo info -only
+name -only pid "$(lsappinfo front)"` gives the frontmost app and its
+pid with no permission at all; with several test builds running the
+name is not enough (all are "Armadale"), so compare the pid too.
+Synthetic keystrokes reset `HIDIdleTime`, so the idle gate only means
+something before the first one.
 
 **Isolation for test runs.** Launch with `ARMADALE_STATE_DIR=/tmp/armadale-<name>`
 (a short path: Unix socket paths are limited to 104 bytes) and
@@ -154,8 +178,17 @@ keep both; the date, the reason and the evidence (what was measured,
 checked live or rejected) go into Part 2 of `docs/HISTORY.md`, under the
 same section.
 
-## Test hosts and tools on this Mac
+## Test hosts and tools
 
+- **`HANDOFF.local.md`** at the repository root is git-ignored, one per
+  Mac. It records the state of the Mac at hand: the installed app, the
+  Lima VM, the versions of Claude Code and Codex, the build tools, the
+  signing identities and the notary profile, the notification and
+  background settings, and the privacy grants agents need. Re-check an
+  entry before relying on it (each says how) and update the file when
+  something on the Mac changes. On a Mac that has none, make one by
+  checking each item of this section; never copy another Mac's. The
+  repository is public, so nothing about a particular Mac is committed.
 - **Lima VM `default`** (Linux aarch64, stopped when idle): `limactl start default`,
   then `ssh -F ~/.lima/default/ssh.config lima-default`. Run the SSH
   integration tests with `ARMADALE_TEST_SSH_HOST=lima-default
@@ -163,18 +196,24 @@ same section.
   command). Afterwards remove `~/.armadale` inside the VM (`pkill -x
   zmx-0.8.1; rm -rf ~/.armadale` over ssh), check home stays mode 750, close
   the shared connection (`ssh -O exit`), and `limactl stop default`.
+  Those tests run only when `ARMADALE_TEST_SSH_HOST` is set, so the
+  gate command above always skips them: say in the report whether
+  they ran, and against what.
 - **Claude Code** at `/opt/homebrew/bin/claude` and **Codex** at
-  `/opt/homebrew/bin/codex`. `docs/DESIGN.md` §10 records exactly what each
-  offers for completion signals and the source lines consulted; re-check
-  them when either is upgraded.
+  `/opt/homebrew/bin/codex`, where they are installed. `docs/DESIGN.md`
+  §10 records exactly what each offers for completion signals and the
+  source lines consulted; re-check them when either is upgraded.
 - `scripts/check-quit.sh /path/to/Armadale.app` checks the SIGTERM quit
   path in three scenarios (New Session chooser up, normal, fallback alert
   up); run it when touching `AppDelegate` quit code, sheets or the chooser.
 - `scripts/release.sh` (Developer ID signed, notarized, stapled DMG) and
   `scripts/install-release.sh` (the same, then installed to
   `~/Applications`) need the Developer ID certificate in the login
-  keychain and the notary profile `armadale-notary`; both exist on this
-  Mac. They also need `scripts/fetch-dmgbuild.sh` run once: it installs
+  keychain and the notary profile `armadale-notary`. Check for them:
+  `security find-identity -v -p codesigning` must list `Developer ID
+  Application: … (YJ8LXVCB3T)`, and `xcrun notarytool history
+  --keychain-profile armadale-notary` must answer. They also need
+  `scripts/fetch-dmgbuild.sh` run once: it installs
   dmgbuild, which lays out the DMG's Finder window, into `Vendor/dmgbuild`
   (git-ignored), pinned with hashes in `scripts/dmgbuild-requirements.txt`.
   Never store or print credentials; never create keychain profiles
