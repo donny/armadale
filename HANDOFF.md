@@ -24,6 +24,9 @@ schema 2, and restored sessions attached at launch. That last change
 was checked live the same day on a test build, except on a host (there
 was none) and for what the accessibility tree does not show ("From
 finished changes" below). The last gate run: 834 tests, zero warnings.
+**Armadale 0.1.2 (28) is built, notarized and stapled from 76562b7
+(November 14, 2026) and installed on the owner's Mac, but not
+released: no tag, no GitHub Release, no fixture ("Next" below).**
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -118,6 +121,9 @@ are in `docs/HISTORY.md`):
 - November 14, 2026: the Mac used that day set up for releases and
   host tests; a signing dry run and the SSH integration tests passed
   there; no code changed.
+- November 14, 2026: bump to 0.1.2 (28) (76562b7); that commit built,
+  notarized, stapled and installed in `~/Applications` on that Mac.
+  Not tagged or published.
 
 ## Next
 
@@ -125,20 +131,34 @@ Nothing is in progress. The owner gave the go-ahead on November 14,
 2026 for the architecture review's items in the suggested order
 ("Architecture review" and its second pass, at the end of the open
 items), and then for attaching restored sessions at launch, with a
-decision on each of its four questions (`docs/HISTORY.md`, the last
-three entries of Part 1). All are built, the split of `AppDelegate`
-and `SessionRegistry` included, and the live checks were made once the
-owner said the Mac was free. What comes next waits for the owner.
+decision on each of its four questions (`docs/HISTORY.md`, the three
+entries from "restored sessions are attached at launch" on). All are
+built, the split of `AppDelegate` and `SessionRegistry` included, and
+the live checks were made once the owner said the Mac was free. What
+comes next waits for the owner.
 
 Waiting for owner decisions:
+- **Publishing 0.1.2.** The notarized DMG of 76562b7 is
+  `build/release/Armadale-0.1.2.dmg` on the Mac used on November 14,
+  2026 (`docs/HISTORY.md`, "Armadale 0.1.2 (28), built and notarized,
+  not published"); the next run of `scripts/release.sh` deletes that
+  folder. The owner wanted to use the build first. To publish that
+  very build: tag 76562b7 as `v0.1.2`, create the GitHub Release with
+  the DMG under both names, and add the tag's state fixture (README,
+  "Releasing", steps 4 and 5). If anything is committed to the app
+  before then, bump the build number and build again instead. The
+  release notes should say that 0.1.2 writes state file schema 2,
+  which 0.1.0 and 0.1.1 refuse.
 - **Three decisions the coordinator made in that step**, each the
   owner's to overrule: the launch holds at most six of a host's
   sessions (open items, Remote; made without a test host); a session
   never shown in the run does not start a sign-in by itself; and the
   cost of heavy output in sessions not on screen is accepted as it is
   (open items, Session layer).
-- **A test host.** Nothing of that step was checked on a host; Lima is
-  not installed on the Mac used ("State of this Mac that matters").
+- **A live check on a host.** Nothing the app does with a host at
+  launch was checked live. The Mac used has a Lima VM since that
+  evening and the SSH integration tests pass against it ("State of
+  this Mac that matters"), so the check can be made there.
 - **Showing or re-adopting spared sessions** (open items, Session
   layer, and "Adds to Orphan reclaim").
 - **A fork of the persistence helper** ("The persistence helper's
@@ -768,6 +788,13 @@ why it exists are in `docs/DESIGN.md` section 7 and the README ("The
   Release app. The owner installed Lima 2.3.0 and made the VM `default`
   (Ubuntu 26.10, aarch64, vz; home mode 750); the six SSH integration
   tests passed against it, and it was cleaned and stopped afterwards.
+- **`~/Applications/Armadale.app` on that Mac** is 0.1.2 (28), the
+  notarized build of 76562b7, installed with
+  `scripts/install-release.sh` on November 14, 2026 at 19:22. There
+  was no installed Armadale there before, and no real state directory
+  (`~/Library/Application Support/Armadale`) when it was installed;
+  no agent has run it. From then on "Two apps with one name" in
+  AGENTS.md applies on that Mac too.
 - Background App Activity: on October 19, 2026 the owner answered
   **Allow** to the first-quit prompt for `com.tinylittleapps.armadale`,
   so the prompt will not appear again on this Mac (`sudo sfltool dumpbtm`

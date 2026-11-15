@@ -1832,6 +1832,38 @@ Mac), and anything the app does with a host at launch: the SSH
 integration tests drive the session layer, so the host items under
 "Restored sessions attached at launch" in `HANDOFF.md` stay.
 
+## November 14, 2026: Armadale 0.1.2 (28), built and notarized, not published (76562b7)
+
+November 14, 2026, about 19:20, on the owner's go-ahead: a notarized
+build of everything since 0.1.1, installed on the Mac used that day so
+that the owner can use it before deciding to publish. The owner chose
+the version 0.1.2.
+
+- `scripts/bump-build.sh --version 0.1.2`: 0.1.1 (27) to 0.1.2 (28),
+  `project.yml` only, committed as 76562b7 after the gate (834 tests,
+  no warnings) had passed on it.
+- `scripts/check-state-compat.sh`: the working tree writes schema 2,
+  and v0.1.0 and v0.1.1 both answer `newerVersion`, the refusal the
+  version rule allows (section 3).
+- `scripts/install-release.sh` on the clean tree at 76562b7: archive,
+  signature checks, the app notarized ("Accepted", notary log without
+  issues) and stapled, the DMG built, signed, notarized ("Accepted",
+  no issues) and stapled, Gatekeeper "Notarized Developer ID" for
+  both, then the app installed from the DMG into `~/Applications`.
+  The two submissions were the first from that Mac and its notary
+  profile. The whole run took 2 min 18 s.
+- Checked again by hand: the installed app is 0.1.2 (28), identical
+  to the archived app, its signature verifies, `spctl` accepts it as
+  "Notarized Developer ID" and its stapled ticket validates. The DMG
+  is `build/release/Armadale-0.1.2.dmg`, 16,212,103 bytes, SHA-256
+  `da7b29c37efab2c7919200d332f0715329bf49685d33ed5007677cde3c735596`.
+
+Not done, on purpose: no tag, no GitHub Release, no state fixture for
+the tag, no change to the website, and the installed app was not run
+by an agent. What 0.1.2 has that was never checked live is in
+`HANDOFF.md`, mainly what the app does with a host at launch. How to
+publish this very build is under "Next" there.
+
 ---
 
 # Part 2: the history of each design section
