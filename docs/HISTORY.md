@@ -2091,7 +2091,7 @@ retries give up; two hosts at once; what only the eye would see.
 `HANDOFF.md` keeps the password cases ("Next"; Remote; "Restored
 sessions attached at launch").
 
-## November 14, 2026: sessions macOS ends after a quit are detected and told
+## November 14, 2026: sessions macOS ends after a quit are detected and told (14ec35c)
 
 The decision deferred on October 19, 2026 ("Allow in the Background"
 switched off, above) was made on November 14, 2026, and built the same

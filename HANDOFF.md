@@ -89,7 +89,7 @@ in the heading or the text under it, their commits:
   back; no code changed.
 - November 14, 2026: sessions macOS ends after a quit are detected
   and told (Background App Activity); the owner's choice among three
-  options. Not checked live.
+  options (14ec35c). Not checked live.
 
 ## Next
 
