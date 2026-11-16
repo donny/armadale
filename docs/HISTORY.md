@@ -2270,7 +2270,7 @@ restart or logout between a loss and the next launch. Afterwards: no
 process, no test directory, modifier flags 0, the owner's switch on
 again.
 
-## November 16, 2026: favorites are managed in the chooser, a host is added in the New Session dialog, Settings loses its Favorites tab
+## November 16, 2026: favorites are managed in the chooser, a host is added in the New Session dialog, Settings loses its Favorites tab (3a5183c)
 
 The owner asked on November 14, 2026 whether Profiles, Hosts and
 Favorites, which hold things the user creates rather than preferences,

@@ -104,7 +104,7 @@ in the heading or the text under it, their commits:
   Up, Move Down), Save as Favorite… in the pane menu, New Host… with
   ssh config aliases in the New Session dialog, and Settings loses its
   Favorites tab; the owner's six decisions of that day, after a read
-  of how about 34 other apps do it. Not checked live.
+  of how about 34 other apps do it (3a5183c). Not checked live.
 
 ## Next
 
@@ -434,7 +434,7 @@ From finished changes: not checked live, and found and not fixed
     show only icon and name, so a remote favorite in a narrow pane does
     not show its host.
 - Favorites in the chooser, Save as Favorite…, New Host…, Settings
-  without Favorites (November 16, 2026; `docs/DESIGN.md` section 8,
+  without Favorites (November 16, 2026, 3a5183c; `docs/DESIGN.md` section 8,
   "New sessions"). Unit-tested only; **nothing checked live yet**:
   - In the chooser: a drag reordering the favorites while a plain click
     still starts one (the drag and the tap gesture together), the drop
