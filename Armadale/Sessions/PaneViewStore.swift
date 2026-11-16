@@ -49,7 +49,10 @@ extension SessionRegistry {
         let pane = PaneView(
             controller: controller, settings: settings, rendererID: record?.current ?? settings.surfaceFactory.id,
             pendingRendererID: record?.pending,
-            theme: .session(of: controller, in: model) { [weak self] in self?.split(pane: $0, axis: $1) })
+            theme: .session(
+                of: controller, in: model,
+                splitter: { [weak self] in self?.split(pane: $0, axis: $1) },
+                saver: { [weak self] in self?.saveAsFavorite(fromSession: $0) }))
         pane.titleProvider = { [weak self, weak controller] in
             guard let self, let controller else { return "Shell" }
             return self.displayName(of: controller.session)

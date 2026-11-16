@@ -327,9 +327,10 @@ agent that is re-checked against the installed agents like the rest of
 section 10; nothing for a shell or a `.command` profile except
 `additionalArguments`), then `additionalArguments`. The options are
 recorded on the session (`Session.options`). `Favorite`s are saved with
-the layout, in the order the user keeps them in Settings › Favorites; a
-favorite whose host or profile is gone is kept and shown as broken
-(`AppModel.favoriteProblem(_:)` says why) until edited or removed.
+the layout, in the order the user keeps them in the New Session chooser
+(section 8, "New sessions"); a favorite whose host or profile is gone is
+kept and shown as broken (`AppModel.favoriteProblem(_:)` says why) until
+edited or removed.
 
 What the code names and decides beyond the above:
 
@@ -361,7 +362,13 @@ What the code names and decides beyond the above:
   it); `updateFavorite` cleans the name the same way; `moveFavorite(_:to:)`
   counts the index after removal, like `moveTabGroup`. `proposedFavoriteName`
   shows the local home as `~` (`~/work`), never abbreviates a remote path,
-  and says "Session" / "Host" for a missing profile or host.
+  and says "Session" / "Host" for a missing profile or host; its
+  `hostName:` names a host the dialog is about to add.
+  `favoriteRequest(fromSession:)` is the pane menu's Save as Favorite…:
+  the session's location and profile (kept when removed), its options (the
+  defaults for a session without any) and its current
+  `workingDirectory`, a local one with the home folder as `~`
+  (`abbreviatedDirectory`), a host's as it is.
 - Lookups: `pane(_:)`, `emptyPaneIDs(in:)` (a workspace's empty panes
   in tab and layout order). An empty focused pane titles its tab "New
   Session" (`displayTitle(for:)`). The repair also drops duplicate favorite
@@ -459,7 +466,15 @@ A single `@MainActor @Observable final class AppModel` owns `[Workspace]`,
   default; trailing slashes are dropped, and a blank remote directory, or
   one `Host.remoteDirectoryProblem` refuses, becomes `~/.armadale`),
   `removeHost` (its sessions stay, see section 6) and
-  `sessionIDs(onHost:)`.
+  `sessionIDs(onHost:)`. For the New Session dialog's New Host…:
+  `plainHost(withDestination:)` (the first saved host with that
+  destination, trimmed and compared as typed, that is `Host.isPlain`: no
+  port, identity file or config file and the default remote directory,
+  whatever its name), `newHostName(forDestination:)` (the destination,
+  trimmed, made unique among the hosts' names with " 2", " 3"…) and
+  `ensureHost(forDestination:)` (that plain host, or else a new plain one
+  named `newHostName(forDestination:)`; `nil`, adding nothing, for a
+  destination `Host.destinationProblem` refuses).
 - Panes and sessions: `newWorkspace`, `newTabGroup`, `newTab(in:)` and
   `splitPane` create an **empty pane** (`Pane.sessionID == nil`) and no
   session, and `startSession(in: PaneID, request: SessionRequest) ->
@@ -1433,7 +1448,11 @@ A session with `.remote(host)` location uses the same zmx model on the host.
   (`SSH_AUTH_SOCK` is kept, `ZMX_*` and the variables scrubbed for
   sessions are removed from ssh's environment, `TERM=xterm-256color`).
   `Host.sshConfigFile` replaces the user's config (`ssh -F`), e.g. the file
-  `limactl show-ssh --format=config` writes for a Lima VM.
+  `limactl show-ssh --format=config` writes for a Lima VM. The only place
+  Armadale reads the user's own ssh configuration is the New Session
+  dialog's New Host…, which offers its `Host` aliases while a destination
+  is typed (`SSHConfigAliases` in `ArmadaleCore`, section 8, "New
+  sessions"); it never runs `ssh -G` and connects nowhere to do so.
   `LogLevel=ERROR` matters for interactive clients: without it ssh prints
   "Shared connection to … closed." on the pane's terminal after zmx's
   final reset sequence, which the output filter would then no longer find.
@@ -2149,7 +2168,15 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   show and `PaneMenu.Actions` what they do, so a later pane item adds a
   field to each and a few lines to the builder. It holds **Split Right**
   and **Split Down** (the header's way to split, see "Pane cards" below),
-  a separator, then **Theme**. The split items show the Pane menu's
+  a separator, for a pane that has a session **Save as Favorite…** and
+  another separator (an empty pane's menu has neither), then **Theme**.
+  Save as Favorite… (`PaneMenu.Inputs.showsSaveAsFavorite`,
+  `Actions.saveAsFavorite`, reached through
+  `PaneThemeBinding.saveAsFavorite` and `SessionRegistry.saveAsFavorite(fromSession:)`)
+  opens the New Favorite sheet of the window showing the pane
+  (`WorkspaceActions.saveAsFavorite(fromSession:)`, "New sessions"
+  below); it has no shortcut and is not in the application's Pane menu.
+  The split items show the Pane menu's
   shortcuts (⌘D, ⇧⌘D, the same keys and modifiers; a test keeps the two
   equal; ⌘D with the menu open splits once) and split *the pane the menu
   was opened for* (`AppModel.splitPane(_:axis:)`, Split Right horizontal,
@@ -2344,16 +2371,20 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   focused one, then calls `AppModel.splitPane(_:axis:)`, which focuses the
   new empty pane; the content controller then gives it keyboard focus and
   it shows the chooser, as after ⌘D. Tested in `PaneMenuTests` (outline
-  Split Right, Split Down, separator, Theme; the shortcuts equal the main
-  menu's; the menu of an unfocused pane splits that pane and focuses the
-  new one) and `PaneCardTests` (the "…" frame, the text space, the "…"
+  Split Right, Split Down, separator, Theme, with Save as Favorite… and a
+  separator before Theme for a pane with a session; the shortcuts equal
+  the main menu's; the menu of an unfocused pane splits that pane and
+  focuses the new one; a terminal pane's Save as Favorite… opening its
+  window's New Favorite sheet) and `PaneCardTests` (the "…" frame, the text space, the "…"
   menu's split items splitting their own pane after focusing it, through
   the window's actions, and an empty pane's).
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (notifications, "Ask before closing a pane with a running
   process", and the picker "When quitting with running sessions"),
-  **Appearance** (font, size, theme, cursor, renderer), **Profiles**,
-  **Hosts**, **Favorites**. Keyboard shortcuts are under **Help ›
+  **Appearance** (font, size, theme, cursor, renderer), **Profiles** and
+  **Hosts**. Favorites are made and managed where they are used, in the
+  New Session chooser, the dialog and the pane menu ("New sessions"
+  below), not in Settings. Keyboard shortcuts are under **Help ›
   Keyboard Shortcuts** (below), not in Settings: Settings is for what can
   be changed, and Armadale has no shortcut editor (section 9).
   `SettingsWindowController` (one instance, owned by the app delegate,
@@ -2439,7 +2470,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     that sessions run on asks first ("Host removal", below); those
     sessions become unavailable, never killed. Nothing user-visible names
     the runtime: it is "the persistence helper". Hosts are saved with the layout (`state.json`).
-  - **New sessions on hosts**: the New Session dialog's SSH choice (below).
+  - **New sessions on hosts**: the New Session dialog's SSH choice, where
+    New Host… adds a host by its destination alone (below).
     Remote tabs carry a small host badge (a network glyph; with the host's
     name in the sidebar; orange when not persistent). The window subtitle
     is unchanged by remote tabs, except that it shows the existing
@@ -2460,7 +2492,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
     resizable, centred, titled "Keyboard Shortcuts"; ⌘W closes it as it
     does Settings; in menu bar mode it is ordered out with Settings and
     closing it hides the app the same way. A `settingsTab` preference
-    still reading `shortcuts` opens General.
+    reading `shortcuts` or `favorites`, which name no tab, opens
+    General.
   - **Help › Acknowledgements** (`Help/AcknowledgementsWindowController.swift`)
     shows the third-party notices bundled as
     `Contents/Resources/Acknowledgements.txt` (source
@@ -2553,8 +2586,12 @@ A new pane never starts a local shell by itself. It asks.
   Keyboard: the empty pane is first responder when focused (as a pane with
   a placeholder is); ↑/↓ move a selection through the favorites, Return
   starts the selected favorite or, with none selected, opens the dialog,
-  and Escape cancels. A right-click on a favorite offers **Edit…** (the
-  dialog in edit mode) and **Remove** (no question). With no favorites the
+  and Escape cancels. **Favorites are managed here**: a favorite dragged
+  onto another row takes that row's place, as a tab does in the tab bar,
+  and a right-click on a favorite offers **Edit…** (the dialog in edit
+  mode), a separator, **Move Up** and **Move Down** (disabled on the first
+  and the last row), a separator, and **Remove** (no question). The order
+  is the model's, so every chooser shows it. With no favorites the
   card says "No favorites yet. New Session… starts one and can save it as
   a favorite." Cancel closes the pane through the
   normal close path with no confirmation (nothing is running), so when it
@@ -2566,12 +2603,17 @@ A new pane never starts a local shell by itself. It asks.
 - **The New Session dialog** (`NewSessionSheet`, a SwiftUI form in a sheet
   on the workspace window; `WorkspaceActions.newSession(in: PaneID)`) has:
   - **Location**: Local or SSH (segmented). SSH shows a picker of the saved
-    hosts (`Host.displayName`) and an **Add Host…** button that opens
-    Settings › Hosts; the sheet stays and its picker follows the model, so
-    the host added there can be picked without starting over. With no host
-    saved the picker reads "No Hosts" and Start is disabled while SSH is
-    selected. Host details (port, identity file, config file, remote
-    directory) stay in Settings › Hosts; the dialog never duplicates them.
+    hosts (`Host.displayName`) whose last item is **New Host…**, after a
+    divider when any item is above it (a saved host, "Choose a Host" or
+    "Host removed"). New Host… shows a **Destination** field in the same sheet
+    (`user@host` or an alias from the user's ssh configuration, which are
+    offered while typing) and gives it keyboard focus; Start (Save in the
+    favorite modes) adds the host and uses it, Cancel adds nothing. With
+    no host saved, choosing SSH chooses New Host… at once. The picker
+    follows the model, so a host added in Settings › Hosts while the sheet
+    is up can be picked. The destination is the only host detail the
+    dialog takes: port, identity file, config file and remote directory,
+    and Test Connection, Deploy Now and removal, stay in Settings › Hosts.
   - **Working directory**: a text field, prefilled with the directory of
     the window's focused pane that has a session, else of the session
     focused before the new pane was made ("Directory prefill" below), else
@@ -2601,24 +2643,36 @@ A new pane never starts a local shell by itself. It asks.
     lima-default in ~"), editable. The favorite is saved when Start is
     pressed, in addition to starting the session.
   - Buttons **Cancel** and **Start** (Return; disabled while the form is
-    invalid: SSH with no host, a directory containing NUL). Escape cancels.
+    invalid: SSH with no host, New Host… with an unusable destination, a
+    directory containing NUL). Escape cancels.
     Start calls `startSession(in:request:)`; the pane's view becomes the
     session's `PaneView` and takes keyboard focus. The dialog's Cancel
     closes the sheet only: the pane keeps its chooser (only the chooser's
-    own Cancel closes the pane). In **edit mode** (from
-    a favorite's Edit… or Settings › Favorites) the title is "Edit
-    Favorite", the name field is always shown, the buttons are Cancel and
-    **Save**, and nothing is started.
-- **Settings › Favorites** (`Settings/FavoritesSettingsView.swift`): the
-  list (drag to reorder, which is the chooser's order) with add / remove
-  and the same form as an editor on the right, like Profiles and Hosts;
-  edits save as described under "Settings › Favorites" below. A broken
-  favorite shows its reason and lets the user pick another host or
-  profile. Removing a host or deleting a profile leaves the favorites
-  that used it, broken; the host removal question counts them ("Host
-  removal", below).
+    own Cancel closes the pane). In **edit mode** (from a favorite's
+    Edit… in the chooser) the title is "Edit Favorite", the name field is
+    always shown, the buttons are Cancel and **Save**, and nothing is
+    started. A broken favorite shows its reason there and lets the user
+    pick another host or profile.
+- **Save as Favorite…** in the pane context menu of a pane that has a
+  session (section 8, "Pane context menu") opens the same dialog as **New
+  Favorite**, a sheet on the workspace window through the same sheet slot,
+  filled in from that session (`AppModel.favoriteRequest(fromSession:)`):
+  its location, profile, options (the defaults for a session saved
+  without any) and its current working directory (`Session.workingDirectory`,
+  a local one with the home folder as `~`, a host's as it is). The name
+  follows the proposal until typed. Save adds the favorite; nothing is
+  started. A session whose profile or host is gone shows "Profile
+  removed" or "Host removed", and Save waits for a valid choice.
+- **Where favorites live.** They are made in the dialog (Add to
+  Favorites) and from a running pane (Save as Favorite…), and edited,
+  reordered and removed in the chooser; Settings has no Favorites tab.
+  Removing a host or deleting a profile leaves the favorites that used
+  it, broken; the host removal question counts them ("Host removal",
+  below).
 - **No profile or host menus.** A new session's profile, host and
-  directory are chosen only in the chooser and the dialog: there is no
+  directory are chosen only in the chooser and the dialog (the pane
+  menu's Save as Favorite… records a running session's as a favorite and
+  starts nothing): there is no
   File › New Tab with Profile, no File › New Tab on Host (nor an Add
   Host… item under it), no context menu on the tab bar "+" (its help text
   is just "New Tab"), and no default profile or directory in Settings ›
@@ -2663,9 +2717,32 @@ What the code decides beyond the above, for the chooser:
   host's name, then the directory (local ones `~`-abbreviated, remote ones
   as typed, `~` when blank); a broken one is drawn at 55 % opacity with
   its reason in orange and ignores clicks, but keeps its context menu so Edit…
-  can repair it. The rows are a plain stack when they fit the pane and a
+  can repair it; it can be moved and dragged like any other. The rows
+  are a plain stack when they fit the pane and a
   scroll view (following the selection) when they do not (`ViewThatFits`).
   The pointer highlights a startable row; the selection is an accent tint.
+  Every row is one accessibility element whose default action starts it
+  (a startable one is a button; a broken one's does nothing), with the
+  named actions Edit…, Move Up and Move Down (each only where the move is
+  possible) and Remove.
+- **Order.** A row is `draggable` with a `FavoriteDragItem`, of
+  Armadale's own type `com.tinylittleapps.armadale.favorite` (declared in
+  Info.plist; not text, so a favorite dropped on a terminal types nothing,
+  and not the tab bar's and sidebar's `HierarchyDragItem`, so neither
+  takes it, nor does a favorite row take a tab). The click keeps its tap
+  gesture beside the drag, as in the tab bar. A drop on a row gives the
+  dragged favorite that row's index (`NewSessionChooser.dropIndex`,
+  counted after removal as `AppModel.moveFavorite(_:to:)` counts), so it
+  lands below the row when it came from above and above it when it came
+  from below; a 2 pt accent bar on that edge of the row shows where while
+  the drag is over it (`NewSessionChooser.dropEdge`, from
+  `FavoriteDragItem.lastDragged`, the favorite whose drag SwiftUI started
+  last). Move Up and Move Down (`NewSessionChooser.move(_:by:)`,
+  `canMove(_:by:)`) swap a favorite with its neighbour. The selection
+  is a favorite's ID, so it follows a moved favorite. Known limit: a drag
+  does not scroll the scrolling variant of the list, so only rows in view
+  are drop targets (the tab bar has the same limit); Move Up and Move Down
+  reach the rest.
 - **Keys.** They reach the chooser only through `EmptyPaneView.keyDown`
   while the pane is first responder; neither button has a SwiftUI
   keyboard shortcut (unlike the placeholder, which keeps its
@@ -2696,9 +2773,11 @@ What the code decides beyond the above, for the chooser:
   favorite, refuses a missing or broken one (`favoriteProblem`) or a pane
   that is gone or has a session, starts it with `startSession(in:request:)`,
   focuses the pane and its terminal. `editFavorite(_:)` presents the form
-  in `.editFavorite` mode as a sheet on the window (Save saves and closes;
-  Cancel closes). `removeFavorite(_:)` removes without a question.
-  `newSession(in:)` and `editFavorite(_:)` share one sheet slot: one sheet
+  in `.editFavorite` mode as a sheet on the window, and
+  `saveAsFavorite(fromSession:)` in `.newFavorite` mode filled in from the
+  session (Save saves and closes; Cancel closes). `removeFavorite(_:)`
+  removes without a question. `newSession(in:)`, `editFavorite(_:)` and
+  `saveAsFavorite(fromSession:)` share one sheet slot: one sheet
   at a time per window, none while another sheet (a close question) is up,
   and none while the window is closing or entering or leaving full screen
   (`WorkspaceWindowController.canPresentSheet`): New Session… and Return
@@ -2706,28 +2785,31 @@ What the code decides beyond the above, for the chooser:
   is taken down by itself when its pane is closed, given a session
   elsewhere, or leaves the window's workspace (its tab dragged into
   another workspace from another window's sidebar; that window shows its
-  chooser), or its favorite is removed (in Settings), and when its window
-  closes. The Edit Favorite sheet's Save follows the looser rule of
-  Settings › Favorites (`NewSessionForm.canConfirm`: `canSave` in the
-  favorite modes, `isValid` for Start), so a broken favorite can be
-  renamed from the chooser while it stays broken.
+  chooser), or its favorite is removed (in another pane's chooser), and
+  when its window closes; a New Favorite sheet stays, needing nothing
+  more from its session. The Edit Favorite sheet's Save follows a looser
+  rule than Start (`NewSessionForm.canConfirm`: `canSave` in the favorite
+  modes, `isValid` for Start), so a broken favorite can be renamed from
+  the chooser while it stays broken.
 - **Nothing opens a sheet by itself.** The dialog opens only from New
-  Session… or Return. At launch, restored empty panes and the fresh
-  workspace show the chooser.
+  Session…, Return, a favorite's Edit… or a pane menu's Save as
+  Favorite…. At launch, restored empty panes and the fresh workspace show
+  the chooser.
 - **Quit.** The chooser is a view, so it never holds up a quit, and an
   empty pane has no session, so the quit question and menu bar mode count
   nothing for it. A sheet up at quit is ended first ("App lifecycle",
   below). `scripts/check-quit.sh`'s first case is the chooser up ("App
   lifecycle", below).
 
-And for the dialog and Settings › Favorites:
+And for the dialog:
 
 - The form's rules are `NewSessionForm` (`Panes/NewSessionForm.swift`, an
   `@Observable` class in the app target with no view code; unit-tested in
   `NewSessionFormTests`); `NewSessionSheet` and `NewSessionFormFields`
   (`Panes/NewSessionSheet.swift`) are its views. Modes: new session
-  (Start), new favorite (Settings' "+", Save via `addFavorite`), edit
-  favorite (Save via `updateFavorite`).
+  (Start), new favorite (Save as Favorite…, filled in from a `prefill`
+  request; Save via `addFavorite`), edit favorite (Save via
+  `updateFavorite`).
 - **Directory prefill.** The source is the window's focused session, or,
   when the focused pane is the new empty one, the session focused before
   it was made: `WorkspaceActions.lastFocusedSessionID`, noted by every
@@ -2741,19 +2823,68 @@ And for the dialog and Settings › Favorites:
   directory the
   session started in. A remote session gives `~` and the form starts
   Local.
-- **Hosts.** The picker preselects the only saved host; with several it
-  reads "Choose a Host" and Start waits for a choice. A host added while
-  the dialog is open and SSH is selected becomes the selected host (it was
-  added for this session); otherwise an explicit choice is kept, and the
+- **Hosts.** The picker's selection is `NewSessionForm.hostChoice`
+  (a saved host, New Host…, or nothing: "Choose a Host", shown only then).
+  It preselects the only saved host; with several it reads "Choose a
+  Host" and Start waits for a choice; with none, SSH chooses New Host…
+  (`isRemote` sets `isAddingHost`). It follows `model.hosts` (a host can
+  still be added in Settings › Hosts while the sheet is up): a host added
+  while the dialog is open and SSH is selected becomes the selected host
+  (it was added for this session), except while New Host… is chosen,
+  which keeps what is typed; otherwise an explicit choice is kept, the
   only host, chosen implicitly, becomes an explicit choice when a second
-  appears (`NewSessionForm.hostsDidChange`). It follows
-  `model.hosts`, so a host added through **Add Host…**
-  (`AppDelegate.showSettings(tab:)`, internal, reached through
-  `WorkspaceActions.showSettings`) can be picked; a host whose destination
-  is blank or unusable (`Host.destinationProblem`, e.g. one just added
-  with "+") disables Start with a note to set it in Settings › Hosts. A
-  favorite's removed host shows as "Host removed" in the picker (and a
-  removed profile as "Profile removed").
+  appears, and SSH left with no host and none chosen goes to New Host…
+  (`NewSessionForm.hostsDidChange`). A saved host whose destination is
+  blank or unusable (`Host.destinationProblem`, e.g. one just added with
+  "+" in Settings › Hosts) disables Start with a note to set it in
+  Settings › Hosts. A removed host that an edited favorite names, or the
+  session a favorite is being saved from, shows as "Host removed" in the
+  picker (and a removed profile as "Profile removed").
+- **New Host….** `newHostDestination` is the Destination field; its
+  surrounding whitespace is trimmed and `Host.destinationProblem` decides
+  whether it is usable and gives the message shown. Nothing is added
+  while the sheet is up: `request` names the plain host already saved for
+  the destination (`AppModel.plainHost(withDestination:)`) or an empty
+  host ID, and `start()` and `save()` first call
+  `AppModel.ensureHost(forDestination:)`, which uses that plain host or adds one
+  named after the destination (so no duplicate is made), then select it.
+  The proposed favorite name names a host to be added as it will be named
+  (`AppModel.newHostName(forDestination:)`), so the name shown is the name
+  saved, and it equals the proposal for the saved request. Return
+  in the Destination field confirms like the other fields; choosing New
+  Host… moves keyboard focus to it.
+- **Aliases.** Choosing New Host… reads the host aliases of the user's
+  ssh configuration once per form, off the main actor
+  (`NewSessionForm.loadAliases()`, a detached task), with the loader the
+  form is given: the app passes `SSHConfigAliases.aliases(home:)` on the
+  home folder (`WorkspaceActions.sshAliasLoader`, set by the app
+  delegate); the defaults of both find none, so no test reads the real
+  `~/.ssh/config`. Nothing is read at launch. They are offered with
+  SwiftUI's text input suggestions on the Destination field, matched by
+  `SSHConfigAliases.suggestions(for:in:limit:)` (pure, tested): all of
+  them while nothing is typed, else those starting with the text, then
+  those containing it, ignoring case, at most 20, leaving out an exact
+  match. `SSHConfigAliases` (`ArmadaleCore`, pure, tested with strings
+  and temporary folders) takes a home folder or a file and only reads:
+  `Host` lines (the keyword in any case; several patterns; `Host=name`
+  and quoted patterns), keeping as aliases the patterns that name one
+  host (no `*` or `?`, not negated) and that `Host.destinationProblem`
+  accepts (no spaces, not starting with `-`); `Include` followed in place
+  (several paths per line; relative to `~/.ssh`; `~/` the home folder,
+  any other path starting with `~`, such as `~user/x`, naming nothing;
+  globs, sorted), each file read once (a cycle ends) and at most 16
+  deep, as ssh; everything else ignored (`Match` included), comments and
+  blank lines. Words are split as OpenSSH's `argv_split` does: a
+  backslash escapes a following `'`, `"` or `\` in every quote state and
+  a following space only outside quotes, and before anything else stays
+  a backslash; a `#` ends the line only where a word would start; a line
+  with an unterminated quote is dropped, as ssh rejects it. Only regular files are read, checked with `stat`
+  before opening (a FIFO or a device is never opened); a file larger than
+  1 MB (`maximumFileSize`) is skipped, and one read opens at most 256
+  files (`maximumFiles`), the top file included. A missing or unreadable
+  file or folder gives nothing; aliases are deduplicated in first-seen
+  order. It never runs `ssh -G` or connects; `${VAR}` and `%` tokens in
+  `Include` are not expanded.
 - **Options.** Rows come from the flag table (`OptionFlags`): a row is
   shown when the profile runs a program and its agent has that flag, its
   footnote and help name the flag. Titles: Claude Code "Skip permission
@@ -2769,36 +2900,30 @@ And for the dialog and Settings › Favorites:
 - **Name.** It follows `proposedFavoriteName` until the user types one; a
   saved favorite whose name equals the proposal for its request keeps
   following when edited.
-- **Validity.** `problem` is, in order: SSH without a host, a NUL in the
-  directory, `requestProblem` (host or profile removed), a host without a
-  usable destination. The problem is shown beside the buttons.
-  Settings' editor saves a broken favorite's other edits (`canSave`: only
-  SSH without any host and a NUL refuse), so it stays broken until a host
-  or profile is picked.
+- **Validity.** `problem` is, in order: SSH without a host (none chosen,
+  or New Host… with a destination `Host.destinationProblem` refuses), a
+  NUL in the directory, `requestProblem` (host or profile removed; for a
+  host New Host… will add, the profile only), a saved host without a
+  usable destination. The problem is shown beside the buttons. Edit
+  Favorite saves a broken favorite's other edits (`canSave`: only SSH
+  without a host and a NUL refuse), so it stays broken until a host or
+  profile is picked; New Favorite saves only a valid form.
 - **Keys.** Return presses Start / Save, Escape cancels. A focused text
   field takes Return before the default button sees it, so the fields'
   `onSubmit` confirms the sheet too; confirming twice is harmless (the
-  pane already has its session; Settings' New Favorite sheet saves once).
-- **Layout.** The sheet is a `.columns` form (it sizes to its content);
-  Settings › Favorites uses `.grouped` like Profiles and Hosts. Its New
-  Favorite sheet is presented like the workspace dialog
-  (`NewFavoriteSheet`: an `NSHostingController` with
-  `sizingOptions = [.preferredContentSize]` and `presentAsSheet` on the
-  Settings window), so it grows and shrinks with its rows; a SwiftUI
-  `.sheet` with `.presentationSizing(.fitted)` does not grow (SSH's Host
-  row squeezes the title's top margin). Choose… opens its folder panel as
-  a sheet on the window the form is in, so the panel cannot outlive the
-  dialog.
+  pane already has its session; a favorite sheet saves once, and New
+  Host…'s host is found again rather than added twice).
+- **Layout.** The sheet is a `.columns` form (it sizes to its content),
+  in an `NSHostingController` with `sizingOptions = [.preferredContentSize]`
+  presented with `presentAsSheet` on the workspace window, so it grows and
+  shrinks with its rows (SSH's Host row, New Host…'s Destination row); a
+  SwiftUI `.sheet` with `.presentationSizing(.fitted)` does not grow (SSH's
+  Host row squeezes the title's top margin). Choose… opens its folder
+  panel as a sheet on the window the form is in, so the panel cannot
+  outlive the dialog.
 - **Respawn** keeps the session's options on the fresh session too
   (`SessionController.respawn`), so every respawn composes them, not only
   the first.
-- **Settings › Favorites.** "+" opens the form as a sheet titled "New
-  Favorite" (rather than adding a blank row, which would save a favorite
-  nobody asked for); the new favorite is selected. Pickers, toggles and
-  the location save at once, text fields when focus leaves them or on
-  Return, and the editor when it goes away. Rows show the profile's icon,
-  the name, and "This Mac · ~/dir" or "host · dir", or the problem in
-  orange with a warning icon. Drag reorders (`moveFavorite`).
 - **Host removal.** The question (asked only when sessions run on the
   host) adds how many favorites will be broken
   (`HostsSettingsView.removalMessage(sessions:favorites:)`); a host with
@@ -2885,9 +3010,10 @@ And for the dialog and Settings › Favorites:
   nothing at all, without asking the delegate, while any window has a
   sheet attached (macOS 27), so the app's `NSApplication` subclass
   (`ArmadaleApplication`, the principal class) lets the delegate end every
-  window's New Session (or Edit Favorite) sheet first, and any sheet in
-  Settings (`AppDelegate.endSheetsForQuit`, tested with a sheet of each
-  kind in two windows; the hook from `terminate` to it is not
+  window's New Session, Edit Favorite or New Favorite sheet first, and any
+  sheet in Settings (`AppDelegate.endSheetsForQuit`, tested with a sheet of
+  each kind in three windows and one in a Settings window; the hook from
+  `terminate` to it is not
   unit-tested); the panes stay empty, are saved so and show the chooser again
   at the next launch. No sheet comes back when the quit is cancelled (the
   pane's chooser is still there). Every quit path goes through it (⌘Q, the
@@ -3698,7 +3824,7 @@ armadale/
 │   │                                SessionStatus / CloseRisk,
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
 │   ├── Settings/                    SettingsWindowController, Preferences, SwiftUI tabs
-│   │                                (General, Appearance, Profiles, Hosts, Favorites)
+│   │                                (General, Appearance, Profiles, Hosts)
 │   ├── Help/                        ShortcutTable, ShortcutsWindowController (Help › Keyboard Shortcuts),
 │   │                                AcknowledgementsWindowController (Help › Acknowledgements)
 │   ├── Resources/                   AppIcon.icon (Icon Composer document), Assets.xcassets
@@ -3708,13 +3834,15 @@ armadale/
 │   │                                Acknowledgements.txt (third-party notices → Contents/Resources)
 │   └── Support/                     ThemeCatalog (built-in + user themes), AppSettings
 │                                    (+ SurfaceRegistry.standard), HierarchyDragItem,
+│                                    FavoriteDragItem (a favorite dragged in the chooser),
 │                                    InlineRenameField, UserNotificationService;
 │                                    the shortcut table's source is App/MainMenu
 ├── ArmadaleAppTests/                tests of the app target's code (unhosted)
 ├── Packages/
 │   ├── ArmadaleCore/                model, PaneLayout ops, SplitTree (+ SplitTreeReconciler),
 │   │                                StateStore, StateSaver, StateLock, migrations, AttentionTracker,
-│   │                                AgentIntegration, ShellWords, EndedSessionRule  (no AppKit)
+│   │                                AgentIntegration, ShellWords, EndedSessionRule,
+│   │                                SSHConfigAliases (the aliases of ~/.ssh/config)  (no AppKit)
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
 │   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
 │   │                                SessionController, LaunchResolver, HelperLocator, HelperInstaller,

@@ -2,6 +2,7 @@ import AppKit
 import ArmadaleCore
 import ArmadaleSessions
 import Testing
+import UniformTypeIdentifiers
 
 /// The New Session chooser every empty pane shows (DESIGN §8, "New
 /// sessions"): its decisions (``NewSessionChooser``), the actions behind
@@ -351,7 +352,7 @@ struct NewSessionChooserTests {
     }
 
     /// A sheet whose pane was closed elsewhere (or whose favorite was
-    /// removed in Settings) goes by itself.
+    /// removed, from another pane's chooser) goes by itself.
     @Test func aSheetWhosePaneOrFavoriteGoesIsTakenDown() async throws {
         let (model, controller, settings, workspace) = windowFixture()
         defer {
@@ -406,34 +407,232 @@ struct NewSessionChooserTests {
 
     /// What a quit runs before AppKit's terminate
     /// (``AppDelegate/endSheetsForQuit(workspaceWindows:settingsWindow:)``):
-    /// a New Session sheet in one window and an Edit Favorite sheet in
-    /// another both end, and the panes stay empty (saved so).
+    /// a New Session sheet in one window, an Edit Favorite sheet in another
+    /// and a New Favorite sheet (Save as Favorite…) in a third all end, the
+    /// panes stay empty (saved so), and nothing is saved.
     @Test func aQuitEndsEveryWindowsSheet() throws {
         let (model, first, settings, workspace) = windowFixture()
+        let third = model.newWorkspace(name: "Third")
+        model.fillEmptyPanes(workingDirectory: "/repo")
         let other = model.newWorkspace(name: "Other")
         let second = WorkspaceWindowController(model: model, workspaceID: other, registry: first.actions.registry)
+        let thirdWindow = WorkspaceWindowController(model: model, workspaceID: third, registry: first.actions.registry)
         defer {
             first.close()
             second.close()
+            thirdWindow.close()
             settings.removeTestDefaults()
         }
         let (claude, _, _) = addFavorites(to: model)
+        let favoritesBefore = model.favorites
         first.actions.newTab()
         let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
         first.actions.newSession(in: pane)
         second.actions.editFavorite(claude)
+        let running = try focusedSession(model, third)
+        thirdWindow.actions.saveAsFavorite(fromSession: running.id)
         #expect(first.window?.attachedSheet != nil)
         #expect(second.window?.attachedSheet != nil)
+        #expect(thirdWindow.window?.attachedSheet != nil)
         #expect(second.actions.newSessionForm?.mode == .editFavorite(claude))
+        #expect(thirdWindow.actions.newSessionForm?.mode == .newFavorite)
 
-        AppDelegate.endSheetsForQuit(workspaceWindows: [first, second], settingsWindow: nil)
+        AppDelegate.endSheetsForQuit(workspaceWindows: [first, second, thirdWindow], settingsWindow: nil)
         #expect(first.window?.attachedSheet == nil, "terminate is no longer refused")
         #expect(second.window?.attachedSheet == nil)
+        #expect(thirdWindow.window?.attachedSheet == nil)
         #expect(first.actions.newSessionForm == nil)
         #expect(second.actions.newSessionForm == nil)
+        #expect(thirdWindow.actions.newSessionForm == nil)
         #expect(model.pane(pane)?.isEmpty == true)
         #expect(model.emptyPaneIDs(in: other).count == 1)
-        #expect(model.favorite(claude)?.name == "Claude", "nothing saved")
+        #expect(model.favorites == favoritesBefore, "nothing saved")
+    }
+
+    /// A sheet presented on a window passed as the Settings window ends at
+    /// a quit too. (Profiles' Configure… is a SwiftUI sheet; that one is
+    /// not shown here.)
+    @Test func aQuitEndsASheetOnTheSettingsWindow() throws {
+        _ = NSApplication.shared
+        let settingsWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        settingsWindow.isReleasedWhenClosed = false
+        defer { settingsWindow.close() }
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        settingsWindow.contentViewController = content
+        let sheet = NSViewController()
+        sheet.view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        content.presentAsSheet(sheet)
+        #expect(settingsWindow.attachedSheet != nil)
+        AppDelegate.endSheetsForQuit(workspaceWindows: [], settingsWindow: settingsWindow)
+        #expect(settingsWindow.attachedSheet == nil)
+    }
+
+    // MARK: Save as Favorite…
+
+    /// The pane menu's Save as Favorite…: the New Favorite sheet on the
+    /// window, filled in from the session with its current directory; Save
+    /// adds the favorite and starts nothing; the sheet slot is the same one.
+    @Test func saveAsFavoriteOpensANewFavoriteSheetFromTheSession() throws {
+        let (model, controller, settings, workspace) = windowFixture()
+        defer {
+            controller.close()
+            settings.removeTestDefaults()
+        }
+        let actions = controller.actions
+        let session = try focusedSession(model, workspace)
+        model.setWorkingDirectory("/Users/me/src/app", for: session.id) // as OSC 7 reports it
+        let sessionsBefore = model.sessions.count
+
+        actions.saveAsFavorite(fromSession: session.id)
+        let form = try #require(actions.newSessionForm)
+        #expect(form.mode == .newFavorite)
+        #expect(form.title == "New Favorite")
+        #expect(form.workingDirectory == "~/src/app", "the session's current directory")
+        #expect(form.profileID == session.profileID)
+        #expect(!form.isRemote)
+        #expect(form.name == "Shell in ~/src/app")
+        #expect(controller.window?.attachedSheet != nil)
+        #expect(actions.newSessionPane == nil, "not a New Session sheet")
+
+        actions.saveAsFavorite(fromSession: session.id)
+        #expect(actions.newSessionForm === form, "one sheet at a time")
+        actions.newTab()
+        let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        actions.newSession(in: pane)
+        #expect(actions.newSessionForm === form)
+
+        #expect(form.save() != nil)
+        actions.endNewSessionSheet()
+        #expect(model.favorites.map(\.name) == ["Shell in ~/src/app"])
+        #expect(model.favorites.first?.request.workingDirectory == "~/src/app")
+        #expect(model.sessions.count == sessionsBefore, "nothing started")
+        #expect(controller.window?.attachedSheet == nil)
+
+        actions.saveAsFavorite(fromSession: SessionID.generate())
+        #expect(actions.newSessionForm == nil, "a session not in the model opens nothing")
+    }
+
+    // MARK: Order
+
+    /// Move Up and Move Down swap a favorite with its neighbour (a broken
+    /// one too); the first cannot move up, the last down; the arrow keys'
+    /// selection follows the favorite.
+    @Test func moveUpAndMoveDownReorderAndTheSelectionFollows() throws {
+        let (model, actions, settings, workspace) = fixture()
+        defer { settings.removeTestDefaults() }
+        let (claude, broken, shell) = addFavorites(to: model)
+        actions.newTab()
+        let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        let chooser = NewSessionChooser(model: model, paneID: pane, actions: actions)
+        chooser.handle(.down)
+        #expect(chooser.selectedFavoriteID == claude)
+
+        #expect(!chooser.canMove(claude, by: -1))
+        #expect(chooser.canMove(claude, by: 1))
+        #expect(!chooser.canMove(shell, by: 1))
+        #expect(!chooser.move(claude, by: -1), "the first cannot move up")
+        #expect(chooser.move(claude, by: 1))
+        #expect(model.favorites.map(\.id) == [broken, claude, shell])
+        #expect(chooser.selectedFavoriteID == claude, "the selection is the favorite, not the row")
+        #expect(chooser.move(claude, by: 1))
+        #expect(model.favorites.map(\.id) == [broken, shell, claude])
+        #expect(!chooser.move(claude, by: 1), "the last cannot move down")
+        #expect(chooser.move(broken, by: 1), "a broken favorite moves too")
+        #expect(model.favorites.map(\.id) == [shell, broken, claude])
+        chooser.handle(.up)
+        #expect(chooser.selectedFavoriteID == shell, "↑ follows the new order")
+        #expect(!chooser.canMove(FavoriteID.generate(), by: 1))
+    }
+
+    /// Where a dropped favorite lands: the target row's place (its index,
+    /// counted after removal as ``AppModel/moveFavorite(_:to:)`` counts),
+    /// so above it when coming from below and below it when coming from
+    /// above; nothing for itself or an unknown one.
+    @Test func aDropTakesTheTargetRowsPlace() {
+        let a = FavoriteID.generate(), b = FavoriteID.generate(), c = FavoriteID.generate()
+        let order = [a, b, c]
+        #expect(NewSessionChooser.dropIndex(of: a, onto: c, in: order) == 2)
+        #expect(NewSessionChooser.dropEdge(of: a, onto: c, in: order) == .below)
+        #expect(NewSessionChooser.dropIndex(of: c, onto: a, in: order) == 0)
+        #expect(NewSessionChooser.dropEdge(of: c, onto: a, in: order) == .above)
+        #expect(NewSessionChooser.dropIndex(of: b, onto: c, in: order) == 2)
+        #expect(NewSessionChooser.dropIndex(of: b, onto: b, in: order) == nil)
+        #expect(NewSessionChooser.dropEdge(of: b, onto: b, in: order) == nil)
+        #expect(NewSessionChooser.dropIndex(of: FavoriteID.generate(), onto: b, in: order) == nil)
+        #expect(NewSessionChooser.dropIndex(of: a, onto: FavoriteID.generate(), in: order) == nil)
+    }
+
+    /// A drop on a row moves the model's favorite there, in every chooser.
+    @Test func aDropReordersTheFavorites() throws {
+        let (model, actions, settings, workspace) = fixture()
+        defer { settings.removeTestDefaults() }
+        let (claude, broken, shell) = addFavorites(to: model)
+        actions.newTab()
+        let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        let chooser = NewSessionChooser(model: model, paneID: pane, actions: actions)
+        #expect(chooser.drop([FavoriteDragItem(id: claude)], onto: shell))
+        #expect(model.favorites.map(\.id) == [broken, shell, claude])
+        #expect(chooser.drop([FavoriteDragItem(id: claude)], onto: broken))
+        #expect(model.favorites.map(\.id) == [claude, broken, shell])
+        #expect(!chooser.drop([FavoriteDragItem(id: claude)], onto: claude))
+        #expect(!chooser.drop([], onto: claude))
+        #expect(!chooser.drop([FavoriteDragItem(id: FavoriteID.generate())], onto: claude))
+        #expect(model.favorites.map(\.id) == [claude, broken, shell])
+    }
+
+    /// A handled drop ends the drag: the favorite noted for the indicator
+    /// is cleared, and the drop goes by the dropped items alone.
+    @Test func aDropClearsTheLastDraggedFavorite() throws {
+        let (model, actions, settings, workspace) = fixture()
+        defer { settings.removeTestDefaults() }
+        let (claude, broken, shell) = addFavorites(to: model)
+        actions.newTab()
+        let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        let chooser = NewSessionChooser(model: model, paneID: pane, actions: actions)
+        _ = FavoriteDragItem.dragging(broken)
+        #expect(chooser.drop([FavoriteDragItem(id: shell)], onto: claude))
+        #expect(model.favorites.map(\.id) == [shell, claude, broken], "the dropped item moved, not the noted one")
+        #expect(FavoriteDragItem.lastDragged == nil)
+        _ = FavoriteDragItem.dragging(claude)
+        #expect(!chooser.drop([FavoriteDragItem(id: claude)], onto: claude))
+        #expect(FavoriteDragItem.lastDragged == nil, "also when nothing moved")
+    }
+
+    /// The drag types are declared as the app exports them: read from the
+    /// source tree's Info.plist (unhosted tests cannot see the app's own
+    /// declarations, so a missing or wrong one would not fail otherwise).
+    @Test func theDragTypesAreDeclaredAsDataAndNotText() throws {
+        let plist = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Armadale/Resources/Info.plist")
+        let info = try #require(
+            try PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: Any])
+        let declarations = try #require(info["UTExportedTypeDeclarations"] as? [[String: Any]])
+        let textual = ["public.text", "public.plain-text", "public.utf8-plain-text", "public.utf16-plain-text"]
+        for identifier in ["com.tinylittleapps.armadale.hierarchy-item", "com.tinylittleapps.armadale.favorite"] {
+            let declaration = try #require(
+                declarations.first { $0["UTTypeIdentifier"] as? String == identifier }, "\(identifier) is exported")
+            let conforms = try #require(declaration["UTTypeConformsTo"] as? [String])
+            #expect(conforms == ["public.data"], "\(identifier)")
+            #expect(!conforms.contains { textual.contains($0) })
+        }
+        #expect(UTType.armadaleFavorite.identifier == "com.tinylittleapps.armadale.favorite")
+        #expect(UTType.armadaleHierarchyItem.identifier == "com.tinylittleapps.armadale.hierarchy-item")
+    }
+
+    /// A dragged favorite is Armadale's own type: not text (a terminal
+    /// types nothing), not the tab bar's and sidebar's, and it says which
+    /// favorite started the drag (for the drop indicator).
+    @Test func aDraggedFavoriteIsNotTextNorAHierarchyItem() throws {
+        #expect(!UTType.armadaleFavorite.conforms(to: .text))
+        #expect(!UTType.armadaleFavorite.conforms(to: .plainText))
+        #expect(UTType.armadaleFavorite != .armadaleHierarchyItem)
+        #expect(!UTType.armadaleFavorite.conforms(to: .armadaleHierarchyItem))
+        let id = FavoriteID.generate()
+        #expect(FavoriteDragItem.dragging(id) == FavoriteDragItem(id: id))
+        #expect(FavoriteDragItem.lastDragged == id)
     }
 
     /// No sheet while the window is closing or in a full-screen transition:
@@ -465,7 +664,7 @@ struct NewSessionChooserTests {
     }
 
     /// Edit… on a broken favorite from the chooser: Save is allowed (the
-    /// looser ``NewSessionForm/canSave``, as in Settings), so it can be
+    /// looser ``NewSessionForm/canSave``), so it can be
     /// renamed while it stays broken; Start in a new session's form still
     /// needs a valid form.
     @Test func aBrokenFavoriteCanBeSavedFromTheChoosersEdit() throws {

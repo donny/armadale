@@ -61,29 +61,34 @@ What works today:
   favorite starts it in that pane; ↑/↓ select one and Return starts it
   (with none selected, Return opens the dialog); Escape or Cancel closes
   the pane, cascading like a clean exit (so ⌘N then Cancel closes the new
-  window). A right-click on a favorite offers Edit… and Remove; a favorite
-  whose host or profile was removed is dimmed with the reason until it is
-  edited or removed. **New Session…** opens the **New Session** dialog:
-  Local or SSH (a saved host, with Add Host… opening Settings › Hosts), a
-  directory (prefilled from the window's focused session), a profile, the
-  agent options for Claude Code (skip permission checks, continue, model)
-  and Codex (skip approvals and sandbox, sandbox mode, model), additional
+  window). Favorites are managed right there: drag one onto another to
+  reorder them, and a right-click offers Edit…, Move Up, Move Down and
+  Remove; a favorite whose host or profile was removed is dimmed with the
+  reason until it is edited or removed. **New Session…** opens the **New
+  Session** dialog: Local or SSH (a saved host, or **New Host…**, which
+  takes a destination, offers the host aliases of your `~/.ssh/config`
+  while you type, and saves the host when you start or save), a directory
+  (prefilled from the window's focused session), a profile, the agent
+  options for Claude Code (skip permission checks, continue, model) and
+  Codex (skip approvals and sandbox, sandbox mode, model), additional
   arguments, and Add to Favorites. Start starts it; its Cancel returns to
-  the chooser. **Settings › Favorites** lists, edits, reorders (the
-  chooser's order) and removes favorites. A pane still choosing is saved
+  the chooser. A running pane's menu (the "…" in its header) has **Save
+  as Favorite…**, which saves that session's location, profile, options
+  and current directory under a name. A pane still choosing is saved
   as such and shows the chooser again after a relaunch; it needs no
   attention and never holds up a quit. File › New Tab with Profile, File ›
   New Tab on Host, the "+" button's menu and General's default profile and
   directory are gone.
 - **Settings** (⌘,): General (close confirmation, quitting with running
   sessions, notifications), Appearance (font, size, light and dark themes,
-  Ghostty theme import, cursor, renderer), Profiles, Hosts and Favorites.
+  Ghostty theme import, cursor, renderer), Profiles and Hosts.
   **Help › Keyboard Shortcuts** shows the read-only shortcut table,
   generated from the menus.
 - **Remote hosts.** **Settings › Hosts** adds SSH hosts (destination, port,
   identity file, SSH config file, remote folder) with Test Connection and
   Deploy Now; a session is started on a host from the New Session
-  dialog's SSH choice. A session
+  dialog's SSH choice, where New Host… adds a host by its destination
+  alone. A session
   on a host keeps running there: Armadale installs its private persistence helper under
   `~/.armadale` there on first use, quitting leaves the session running, a
   relaunch reattaches it, and a lost connection shows *Reconnecting…* and

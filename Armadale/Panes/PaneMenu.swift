@@ -3,10 +3,10 @@ import ArmadaleCore
 import ArmadaleSessions
 
 /// Where a pane's own theme (``Pane/themeID``) is read from and written to,
-/// and how the pane is split from its header and its menu: the model's pane
-/// record, reached from a ``PaneView`` through its session and from an
-/// ``EmptyPaneView`` through its pane ID (DESIGN §8, "Pane context menu",
-/// "Pane cards").
+/// how the pane is split from its header and its menu, and how its session
+/// is saved as a favorite: the model's pane record, reached from a
+/// ``PaneView`` through its session and from an ``EmptyPaneView`` through
+/// its pane ID (DESIGN §8, "Pane context menu", "Pane cards").
 ///
 /// `current` is called inside observation tracking, so the model reads it
 /// makes are observed and the pane re-applies its appearance when they
@@ -24,15 +24,20 @@ struct PaneThemeBinding: Sendable {
     /// `.horizontal` puts the new pane right of it (Split Right), `.vertical`
     /// below it (Split Down).
     let split: @MainActor @Sendable (ArmadaleCore.Axis) -> Void
+    /// The pane menu's Save as Favorite… for the pane's session, or `nil`
+    /// for a pane without one (an empty pane's menu has no such item).
+    let saveAsFavorite: (@MainActor @Sendable () -> Void)?
 
     init(
         current: @escaping @MainActor @Sendable () -> String?,
         choose: @escaping @MainActor @Sendable (String?) -> Void,
-        split: @escaping @MainActor @Sendable (ArmadaleCore.Axis) -> Void = { _ in }
+        split: @escaping @MainActor @Sendable (ArmadaleCore.Axis) -> Void = { _ in },
+        saveAsFavorite: (@MainActor @Sendable () -> Void)? = nil
     ) {
         self.current = current
         self.choose = choose
         self.split = split
+        self.saveAsFavorite = saveAsFavorite
     }
 
     /// A pane outside any model (tests): always the Settings choice, and
@@ -52,12 +57,21 @@ struct PaneThemeBinding: Sendable {
 
     /// The pane showing `controller`'s session, whichever session that is
     /// now (a respawn replaces it; the pane stays), split by `splitter`
-    /// (the model's own split when `nil`).
+    /// (the model's own split when `nil`), its session saved as a favorite
+    /// by `saver` (without one, the pane's menu has no Save as Favorite…).
     @MainActor
     static func session(
-        of controller: SessionController, in model: AppModel, splitter: Splitter? = nil
+        of controller: SessionController, in model: AppModel, splitter: Splitter? = nil,
+        saver: (@MainActor @Sendable (SessionID) -> Void)? = nil
     ) -> PaneThemeBinding {
         let splitter = splitter ?? { model.splitPane($0, axis: $1) }
+        var save: (@MainActor @Sendable () -> Void)?
+        if let saver {
+            save = { [weak controller] in
+                guard let controller else { return }
+                saver(controller.session.id)
+            }
+        }
         return PaneThemeBinding(
             current: { [weak controller] in
                 controller.flatMap { model.pane(showing: $0.session.id)?.themeID }
@@ -69,7 +83,8 @@ struct PaneThemeBinding: Sendable {
             split: { [weak controller] axis in
                 guard let controller, let place = model.place(of: controller.session.id) else { return }
                 splitter(place.pane, axis)
-            })
+            },
+            saveAsFavorite: save)
     }
 }
 
@@ -81,8 +96,9 @@ struct PaneThemeBinding: Sendable {
 /// "Pane cards").
 ///
 /// It holds Split Right and Split Down (the pane it was opened for, not the
-/// focused one; each shows the Pane menu's shortcut), a separator, then
-/// the Theme submenu.
+/// focused one; each shows the Pane menu's shortcut), a separator, Save as
+/// Favorite… and another separator for a pane that has a session, then the
+/// Theme submenu.
 ///
 /// ``make(_:actions:)`` is a pure function of its inputs, so the menu can be
 /// tested without a window. Items added later take their state from new
@@ -97,17 +113,24 @@ enum PaneMenu {
         var builtInThemes: [ThemeEntry]
         /// The imported themes, in catalog order.
         var userThemes: [ThemeEntry]
+        /// Whether Save as Favorite… is shown: the pane has a session.
+        var showsSaveAsFavorite: Bool
 
         /// The inputs for a pane whose theme is `themeID`, with `catalog`'s themes.
         @MainActor
-        init(themeID: String?, catalog: ThemeCatalog) {
-            self.init(themeID: themeID, builtInThemes: ThemeCatalog.builtIns, userThemes: catalog.userThemes)
+        init(themeID: String?, catalog: ThemeCatalog, showsSaveAsFavorite: Bool = false) {
+            self.init(
+                themeID: themeID, builtInThemes: ThemeCatalog.builtIns, userThemes: catalog.userThemes,
+                showsSaveAsFavorite: showsSaveAsFavorite)
         }
 
-        init(themeID: String?, builtInThemes: [ThemeEntry], userThemes: [ThemeEntry]) {
+        init(
+            themeID: String?, builtInThemes: [ThemeEntry], userThemes: [ThemeEntry], showsSaveAsFavorite: Bool = false
+        ) {
             self.themeID = themeID
             self.builtInThemes = builtInThemes
             self.userThemes = userThemes
+            self.showsSaveAsFavorite = showsSaveAsFavorite
         }
     }
 
@@ -119,6 +142,9 @@ enum PaneMenu {
         var splitDown: @MainActor () -> Void
         /// A theme was chosen: its ID, or `nil` for Default.
         var chooseTheme: @MainActor (String?) -> Void
+        /// Save as Favorite…: the New Favorite sheet, filled in from the
+        /// pane's session.
+        var saveAsFavorite: @MainActor () -> Void = {}
     }
 
     static let splitRightTitle = "Split Right"
@@ -130,6 +156,8 @@ enum PaneMenu {
     /// the keyboard reaches the main menu's items, not these.
     static let splitRightShortcut = (key: "d", modifiers: NSEvent.ModifierFlags.command)
     static let splitDownShortcut = (key: "d", modifiers: NSEvent.ModifierFlags([.command, .shift]))
+    static let saveAsFavoriteTitle = "Save as Favorite…"
+    static let saveAsFavoriteItemIdentifier = NSUserInterfaceItemIdentifier("armadale.pane.save-as-favorite")
     static let themeTitle = "Theme"
     static let defaultThemeTitle = "Default"
     static let themeItemIdentifier = NSUserInterfaceItemIdentifier("armadale.pane.theme")
@@ -145,6 +173,12 @@ enum PaneMenu {
             splitDownTitle, identifier: splitDownItemIdentifier, shortcut: splitDownShortcut,
             action: actions.splitDown))
         menu.addItem(.separator())
+        if inputs.showsSaveAsFavorite {
+            let save = ActionMenuItem(title: saveAsFavoriteTitle, handler: actions.saveAsFavorite)
+            save.identifier = saveAsFavoriteItemIdentifier
+            menu.addItem(save)
+            menu.addItem(.separator())
+        }
         menu.addItem(themeItem(inputs, actions: actions))
         return menu
     }

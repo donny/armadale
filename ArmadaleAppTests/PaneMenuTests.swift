@@ -65,6 +65,26 @@ struct PaneMenuTests {
         #expect(split == [.horizontal, .vertical], "Split Right is a horizontal split, Split Down a vertical one")
     }
 
+    /// A pane with a session adds Save as Favorite… between two separators,
+    /// after the splits; it has no shortcut.
+    @Test func aPaneWithASessionOffersSaveAsFavorite() throws {
+        var saved = 0
+        let menu = PaneMenu.make(
+            PaneMenu.Inputs(
+                themeID: nil, builtInThemes: ThemeCatalog.builtIns, userThemes: [], showsSaveAsFavorite: true),
+            actions: PaneMenu.Actions(
+                splitRight: {}, splitDown: {}, chooseTheme: { _ in }, saveAsFavorite: { saved += 1 }))
+        #expect(outline(menu) == ["Split Right", "Split Down", "—", "Save as Favorite…", "—", "Theme"])
+        let item = try #require(
+            menu.items.first { $0.identifier == PaneMenu.saveAsFavoriteItemIdentifier } as? ActionMenuItem)
+        #expect(item.title == PaneMenu.saveAsFavoriteTitle)
+        #expect(item.isEnabled)
+        #expect(item.target === item)
+        #expect(item.keyEquivalent.isEmpty, "no shortcut")
+        item.handler()
+        #expect(saved == 1)
+    }
+
     /// The split items show the application Pane menu's shortcuts (⌘D, ⇧⌘D).
     @Test func theSplitItemsShowThePaneMenusShortcuts() throws {
         let main = MainMenu.make(installsSpecialMenus: false)
@@ -232,6 +252,54 @@ struct PaneMenuTests {
         // A detached binding (outside any model) splits nothing.
         PaneThemeBinding.detached.split(.horizontal)
         #expect(model.selectedTab(in: workspace)?.layout.leaves().count == 4)
+    }
+
+    /// A terminal pane's menu has Save as Favorite…, which opens the New
+    /// Favorite sheet of the window showing it, filled in from its session;
+    /// an empty pane's menu does not have the item.
+    @Test func aTerminalPanesMenuSavesItsSessionAsAFavorite() throws {
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        let (model, registry, workspace) = makeRegistry(settings: settings)
+        let controller = WorkspaceWindowController(model: model, workspaceID: workspace, registry: registry)
+        defer { controller.close() }
+        registry.actionsOfWorkspace = { [weak controller] id in id == workspace ? controller?.actions : nil }
+        let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        let session = try #require(model.pane(pane)?.sessionID)
+        model.setWorkingDirectory("/srv/project", for: session)
+        let view = try #require(registry.paneView(for: session))
+
+        let menu = view.paneMenu()
+        #expect(outline(menu) == ["Split Right", "Split Down", "—", "Save as Favorite…", "—", "Theme"])
+        try #require(menu.items.first { $0.identifier == PaneMenu.saveAsFavoriteItemIdentifier } as? ActionMenuItem)
+            .handler()
+        let form = try #require(controller.actions.newSessionForm)
+        #expect(form.mode == .newFavorite)
+        #expect(form.workingDirectory == "/srv/project")
+        #expect(controller.window?.attachedSheet != nil)
+        controller.actions.endNewSessionSheet()
+        #expect(model.favorites.isEmpty, "Cancel saves nothing")
+
+        let empty = try #require(model.splitPane(pane, axis: .horizontal))
+        let emptyView = EmptyPaneView(
+            chooser: NewSessionChooser(model: model, paneID: empty, actions: controller.actions),
+            settings: settings, theme: .pane(empty, in: model))
+        #expect(!emptyView.paneMenu().items.contains { $0.identifier == PaneMenu.saveAsFavoriteItemIdentifier })
+        #expect(outline(emptyView.paneMenu()) == ["Split Right", "Split Down", "—", "Theme"])
+    }
+
+    /// A session's binding made without a saver has no Save as Favorite…,
+    /// so a pane made with it (``PaneView/paneMenu()`` shows the item only
+    /// for a non-nil one) has no item that would do nothing.
+    @Test func aBindingWithoutASaverOffersNoSaveAsFavorite() throws {
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        let (model, registry, workspace) = makeRegistry(settings: settings)
+        let pane = try #require(model.selectedTab(in: workspace)?.focusedPaneID)
+        let session = try #require(model.pane(pane)?.sessionID)
+        let controller = try #require(registry.paneView(for: session)?.controller)
+        #expect(PaneThemeBinding.session(of: controller, in: model).saveAsFavorite == nil)
+        #expect(PaneThemeBinding.session(of: controller, in: model, saver: { _ in }).saveAsFavorite != nil)
     }
 
     @Test func aPaneViewMadeLaterStartsWithItsPanesTheme() throws {

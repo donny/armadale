@@ -8,7 +8,7 @@ is `docs/DESIGN.md`; why and when (the change log, and the history of
 each design section) is `docs/HISTORY.md`; build and run instructions
 are in `README.md`.
 
-## Status (November 14, 2026)
+## Status (November 16, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
@@ -28,7 +28,13 @@ that macOS ended the sessions a quit left running (Armadale switched
 off under Background App Activity) and to say so; that change was
 checked live the same night, with the owner at the switch ("From
 finished changes" below has what is left), and is not in the installed
-0.1.2. The last gate run: 861 tests, zero warnings.
+0.1.2. On November 16, 2026 favorites moved into the New Session
+chooser (drag, Move Up, Move Down, Save as Favorite… in the pane
+menu), the New Session dialog learned to add a host (New Host…, with
+the aliases of the ssh configuration offered), and Settings lost its
+Favorites tab; that change has unit tests only, is **not checked
+live** ("Next" below) and is not in the installed 0.1.2 either. The
+last gate run: 914 tests, zero warnings.
 **Armadale 0.1.2 (28) is built, notarized and stapled from 76562b7
 (November 14, 2026) and installed on the owner's Mac, but not
 released: no tag, no GitHub Release, no fixture ("Next" below).**
@@ -94,13 +100,23 @@ in the heading or the text under it, their commits:
 - November 14, 2026: the background detection checked live, switched
   off and on; a rule in AGENTS.md after a test build ran on the real
   state directory; no code changed.
+- November 16, 2026: favorites are managed in the chooser (drag, Move
+  Up, Move Down), Save as Favorite… in the pane menu, New Host… with
+  ssh config aliases in the New Session dialog, and Settings loses its
+  Favorites tab; the owner's six decisions of that day, after a read
+  of how about 34 other apps do it. Not checked live.
 
 ## Next
 
-Nothing is in progress. Everything the owner gave the go-ahead for on
+Nothing is being built. Everything the owner gave the go-ahead for on
 November 14, 2026 is built, and checked live where the Mac was free
-(`docs/HISTORY.md`, the entries of that day). What comes next waits
-for the owner.
+(`docs/HISTORY.md`, the entries of that day). The step of November 16,
+2026 (favorites in the chooser, New Host…, Settings without Favorites)
+is built, reviewed and committed, and **its live checks are owed**:
+the list is under "From finished changes" below, and
+`scripts/check-quit.sh` is due with them, since the step touches
+sheets and the chooser. Both wait for the owner's word that the Mac is
+free. What comes after that waits for the owner.
 
 Waiting for owner decisions:
 - **Publishing 0.1.2.** The notarized DMG of 76562b7 exists only on
@@ -113,8 +129,8 @@ Waiting for owner decisions:
   state fixture (README, "Releasing", steps 4 and 5). If anything is
   committed to the app before then, bump the build number and build
   again instead; the detection of sessions macOS ends after a quit
-  (November 14, 2026) was committed after 76562b7, so a release that
-  has it is a new build. The release notes should say that 0.1.2
+  (November 14, 2026) and the step of November 16, 2026 were committed
+  after 76562b7, so a release that has them is a new build. The release notes should say that 0.1.2
   writes state file schema 2, which 0.1.0 and 0.1.1 refuse.
 - **Three decisions the coordinator made** when restored sessions
   were attached at launch (November 14, 2026), each the owner's to
@@ -408,16 +424,49 @@ From finished changes: not checked live, and found and not fixed
     is `~` until shell integration exists (owner decision, not
     started).
   - Not checked live in 10b: full screen and menu bar mode
-    with a sheet up, a host deleted while the sheet is open, broken
-    favorites in Settings, the host-removal count sentence, Codex
-    options, a real SSH start.
+    with a sheet up, a host deleted while the sheet is open, the
+    host-removal count sentence, Codex options, a real SSH start.
   - Not checked live in 10c: menu bar mode with a chooser pane, keypad
     Enter, hover, a scrolling favorites list, dark mode, ⇧⌘N / tab bar
-    "+" / sidebar New Tab in 10c (they share the path), Add Host… from
-    the Edit Favorite sheet, zoom with a chooser, the compact
+    "+" / sidebar New Tab in 10c (they share the path), zoom with a
+    chooser, the compact
     Disconnected and Unavailable cards. Known: compact chooser rows
     show only icon and name, so a remote favorite in a narrow pane does
     not show its host.
+- Favorites in the chooser, Save as Favorite…, New Host…, Settings
+  without Favorites (November 16, 2026; `docs/DESIGN.md` section 8,
+  "New sessions"). Unit-tested only; **nothing checked live yet**:
+  - In the chooser: a drag reordering the favorites while a plain click
+    still starts one (the drag and the tap gesture together), the drop
+    indicator on the right edge (it relies on SwiftUI building the drag
+    payload when the drag starts), a drag in the scrolling variant of the
+    list, in a compact (< 340 pt) and a tiny (< 180 pt) pane, and between
+    two panes' choosers; a broken favorite dragged and moved; a favorite
+    dropped on a terminal, the sidebar or the tab bar doing nothing, and
+    a tab dropped on a favorite row doing nothing; Move Up and Move Down
+    from the context menu (disabled at the ends) and as accessibility
+    actions (VoiceOver too); the arrow-key selection after a move;
+    that SwiftUI builds the drag's payload on the main thread (the
+    payload notes the dragged favorite for the indicator).
+  - Save as Favorite… from a running pane's "…" and right-click: the
+    sheet, the directory after `cd` with a shell that sends OSC 7 (with
+    a shell that sends none it is the directory the session started in), a
+    remote pane, a pane whose host or profile was removed, the item
+    absent from an empty pane's menu; a pane of a window that is not
+    the key one.
+  - New Host…: the picker's divider and item, the Destination field
+    appearing and taking keyboard focus (focus is set on the next turn),
+    SSH with no host saved going there at once (and the picker then
+    showing New Host… with no separator above it), the alias
+    suggestions popup in a sheet (`textInputSuggestions`), Return in
+    the field, and whether Return with the popup open takes the
+    suggestion or confirms the sheet, Cancel adding nothing, the
+    sheet's height following the new row, and a real start on a host
+    added this way (Lima).
+  - Settings with four tabs; a saved Favorites tab opening General;
+    ⌘Q with each kind of sheet up, Profiles' Configure… in Settings
+    included (the unit test ends a plain sheet on the Settings window,
+    not that SwiftUI one). `scripts/check-quit.sh` was not run.
 - Help › Keyboard Shortcuts (October 29, 2026, c4e45e0). **Not checked
   live** (the Mac was not free): the window itself (Help › Keyboard
   Shortcuts, its size, ⌘W closing it, menu bar mode).

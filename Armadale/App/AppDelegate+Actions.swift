@@ -19,13 +19,8 @@ extension AppDelegate {
     }
 
     /// Armadale › Settings… (⌘,): the one Settings window.
+    /// It opens on the tab shown last.
     @objc func showSettings(_ sender: Any?) {
-        showSettings(tab: nil)
-    }
-
-    /// Settings, on `tab` (the New Session dialog's Add Host… opens Hosts),
-    /// else on the tab shown last.
-    func showSettings(tab: SettingsWindowController.Tab?) {
         if settingsWindowController == nil {
             let registry = registry
             settingsWindowController = SettingsWindowController(
@@ -38,7 +33,7 @@ extension AppDelegate {
             }
         }
         NSApp.unhide(nil) // hidden after Settings closed in menu bar mode
-        settingsWindowController?.show(tab)
+        settingsWindowController?.show()
         AppActivation.bringForward()
     }
 

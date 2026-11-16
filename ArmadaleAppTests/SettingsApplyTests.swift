@@ -246,4 +246,19 @@ struct SettingsApplyTests {
         #expect(!SettingsWindowController.Tab.allCases.contains { $0.rawValue == "shortcuts" })
         controller.window?.close()
     }
+
+    /// The Favorites tab went on November 16, 2026 (favorites are managed
+    /// in the New Session chooser); a tab saved under its name opens
+    /// General, and Settings has four tabs.
+    @Test func aSavedFavoritesTabOpensGeneral() throws {
+        _ = NSApplication.shared
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        settings.preferences.settingsTab = "favorites"
+        let controller = SettingsWindowController(model: AppModel(defaultWorkingDirectory: "/"), settings: settings)
+        #expect(controller.selectedTab == .general)
+        #expect(SettingsWindowController.Tab.allCases.map(\.rawValue) == ["general", "appearance", "profiles", "hosts"])
+        #expect(SettingsWindowController.Tab.allCases.map(\.title) == ["General", "Appearance", "Profiles", "Hosts"])
+        controller.window?.close()
+    }
 }

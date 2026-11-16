@@ -43,7 +43,8 @@ final class NewSessionChooser {
 
     // MARK: What is shown
 
-    /// Every favorite, in the model's (Settings') order, broken ones too.
+    /// Every favorite, in the model's order (which the chooser's drag and
+    /// Move Up / Move Down keep), broken ones too.
     var favorites: [Favorite] { model.favorites }
 
     /// Why `favorite` cannot start ("Host removed", "Profile removed"), or
@@ -139,5 +140,68 @@ final class NewSessionChooser {
     func remove(_ id: FavoriteID) {
         if selection == id { selection = nil }
         actions?.removeFavorite(id)
+    }
+
+    // MARK: Order
+
+    /// Whether Move Up (`offset` -1) or Move Down (+1) can move `id`: not
+    /// the first up, nor the last down. Broken favorites move too.
+    func canMove(_ id: FavoriteID, by offset: Int) -> Bool {
+        guard let index = favorites.firstIndex(where: { $0.id == id }) else { return false }
+        return favorites.indices.contains(index + offset)
+    }
+
+    /// Move Up (`offset` -1) or Move Down (+1) in the context menu or as an
+    /// accessibility action: `id` swaps places with its neighbour. The
+    /// order is the model's, so every chooser follows; the arrow keys'
+    /// selection follows the favorite (it is an ID). Returns whether it
+    /// moved.
+    @discardableResult
+    func move(_ id: FavoriteID, by offset: Int) -> Bool {
+        guard canMove(id, by: offset), let index = favorites.firstIndex(where: { $0.id == id }) else { return false }
+        // The index counts after removal: one up is index - 1, one down
+        // index + 1 (past the neighbour that slid into its place).
+        model.moveFavorite(id, to: index + offset)
+        return true
+    }
+
+    /// Where a favorite dropped on a row lands, as in the tab bar: it takes
+    /// that row's place, so it ends up above the row when it came from
+    /// below and below the row when it came from above.
+    enum DropEdge: Equatable {
+        case above, below
+    }
+
+    /// The index (after removal, as ``AppModel/moveFavorite(_:to:)``
+    /// counts it) `dragged` moves to when dropped on the row of `target`,
+    /// in `order`: the target's own index. `nil` when either is not in
+    /// `order` or they are the same favorite (nothing moves).
+    static func dropIndex(of dragged: FavoriteID, onto target: FavoriteID, in order: [FavoriteID]) -> Int? {
+        guard dragged != target, order.contains(dragged), let index = order.firstIndex(of: target) else { return nil }
+        return index
+    }
+
+    /// Which edge of `target`'s row shows the drop indicator while
+    /// `dragged` is over it: where it will land. `nil` when the drop would
+    /// move nothing.
+    static func dropEdge(of dragged: FavoriteID, onto target: FavoriteID, in order: [FavoriteID]) -> DropEdge? {
+        guard dropIndex(of: dragged, onto: target, in: order) != nil,
+              let from = order.firstIndex(of: dragged), let to = order.firstIndex(of: target)
+        else { return nil }
+        return from < to ? .below : .above
+    }
+
+    /// Favorites dropped on the row of `target`: the first takes its
+    /// place. Returns whether anything moved. Whatever happens, the drag is
+    /// over: ``FavoriteDragItem/lastDragged`` is cleared (the drop itself
+    /// goes by the dropped items, never by it).
+    @discardableResult
+    func drop(_ items: [FavoriteDragItem], onto target: FavoriteID) -> Bool {
+        FavoriteDragItem.lastDragged = nil
+        guard let dragged = items.first?.id,
+              let index = Self.dropIndex(of: dragged, onto: target, in: favorites.map(\.id))
+        else { return false }
+        model.moveFavorite(dragged, to: index)
+        return true
     }
 }

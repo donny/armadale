@@ -4,10 +4,11 @@ import SwiftUI
 /// The New Session chooser (DESIGN §8, "New sessions"): what an empty pane
 /// shows in place of a terminal. A card over the pane's background, like
 /// the *Session Ended* placeholder (``SessionPlaceholderView``): the heading,
-/// the favorites (a click starts one; a right-click offers Edit… and
-/// Remove; a broken one is dimmed with its reason and does nothing), and
-/// Cancel and New Session…. The decisions are ``NewSessionChooser``'s; keys
-/// reach it through ``EmptyPaneView``.
+/// the favorites (a click starts one; a drag onto another row reorders
+/// them; a right-click offers Edit…, Move Up, Move Down and Remove; a
+/// broken one is dimmed with its reason and does not start), and Cancel and
+/// New Session…. The decisions are ``NewSessionChooser``'s; keys reach it
+/// through ``EmptyPaneView``.
 struct NewSessionPaneView: View {
     let chooser: NewSessionChooser
     /// A click on the pane around the card focuses the pane, as a click on
@@ -116,14 +117,11 @@ struct NewSessionPaneView: View {
         VStack(spacing: 2) {
             ForEach(chooser.favorites) { favorite in
                 FavoriteChoiceRow(
-                    model: chooser.model,
+                    chooser: chooser,
                     favorite: favorite,
                     problem: chooser.problem(of: favorite),
                     isSelected: chooser.selectedFavoriteID == favorite.id,
-                    compact: compact,
-                    start: { chooser.start(favorite.id) },
-                    edit: { chooser.edit(favorite.id) },
-                    remove: { chooser.remove(favorite.id) })
+                    compact: compact)
                 .id(favorite.id)
             }
         }
@@ -132,21 +130,28 @@ struct NewSessionPaneView: View {
 
 /// One favorite in the chooser: its profile's icon, its name, and where it
 /// runs (a host badge with the host's name for a remote one, and the
-/// directory), or why it cannot start.
+/// directory), or why it cannot start. A click starts it (a broken one
+/// does nothing); it can be dragged onto another row, whose place it takes,
+/// as a tab does in the tab bar; its context menu and accessibility actions
+/// edit, move and remove it.
 private struct FavoriteChoiceRow: View {
-    let model: AppModel
+    let chooser: NewSessionChooser
     let favorite: Favorite
     let problem: String?
     let isSelected: Bool
     /// A narrow pane: the name and the reason on one line each, no host or
     /// directory line, less padding.
     let compact: Bool
-    let start: () -> Void
-    let edit: () -> Void
-    let remove: () -> Void
     @State private var isHovering = false
+    /// Where a favorite dragged over this row would land, while one is.
+    @State private var dropEdge: NewSessionChooser.DropEdge?
+
+    private var model: AppModel { chooser.model }
 
     var body: some View {
+        let id = favorite.id
+        let canMoveUp = chooser.canMove(id, by: -1)
+        let canMoveDown = chooser.canMove(id, by: 1)
         HStack(spacing: compact ? 6 : 10) {
             Image(systemName: problem == nil
                 ? ProfileIcon.symbol(model.profile(favorite.request.profileID)?.icon ?? "")
@@ -185,24 +190,56 @@ private struct FavoriteChoiceRow: View {
         .background(background, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .contentShape(Rectangle())
         .opacity(problem == nil ? 1 : 0.55)
+        .overlay(alignment: dropEdge == .below ? .bottom : .top) {
+            if dropEdge != nil {
+                // Where the dragged favorite lands, as the tab bar's bar.
+                Capsule().fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, 4)
+                    .offset(y: dropEdge == .below ? 2 : -2)
+            }
+        }
         .onHover { isHovering = $0 }
         .onTapGesture {
             guard problem == nil else { return }
-            start()
+            chooser.start(id)
+        }
+        .draggable(FavoriteDragItem.dragging(id)) {
+            Label(favorite.name, systemImage: "star")
+                .padding(6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .dropDestination(for: FavoriteDragItem.self) { items, _ in
+            dropEdge = nil
+            return chooser.drop(items, onto: id)
+        } isTargeted: { targeted in
+            dropEdge = targeted ? FavoriteDragItem.lastDragged.flatMap {
+                NewSessionChooser.dropEdge(of: $0, onto: id, in: chooser.favorites.map(\.id))
+            } : nil
         }
         .contextMenu {
-            Button("Edit…", action: edit)
-            Button("Remove", action: remove)
+            Button("Edit…") { chooser.edit(id) }
+            Divider()
+            Button("Move Up") { chooser.move(id, by: -1) }
+                .disabled(!canMoveUp)
+            Button("Move Down") { chooser.move(id, by: 1) }
+                .disabled(!canMoveDown)
+            Divider()
+            Button("Remove") { chooser.remove(id) }
         }
         .help(help)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(problem == nil ? .isButton : [])
         .accessibilityAction {
             guard problem == nil else { return }
-            start()
+            chooser.start(id)
         }
-        .accessibilityAction(named: "Edit…", edit)
-        .accessibilityAction(named: "Remove", remove)
+        .accessibilityAction(named: "Edit…") { chooser.edit(id) }
+        .accessibilityActions {
+            if canMoveUp { Button("Move Up") { chooser.move(id, by: -1) } }
+            if canMoveDown { Button("Move Down") { chooser.move(id, by: 1) } }
+        }
+        .accessibilityAction(named: "Remove") { chooser.remove(id) }
     }
 
     private var background: Color {
@@ -213,7 +250,7 @@ private struct FavoriteChoiceRow: View {
 
     private var help: String {
         if let problem {
-            return "“\(favorite.name)” can’t start: \(problem). Right-click to edit or remove it."
+            return "“\(favorite.name)” can’t start: \(problem). Right-click to edit, move or remove it."
         }
         return "Start “\(favorite.name)”"
     }

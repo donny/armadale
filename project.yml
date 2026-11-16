@@ -57,10 +57,16 @@ targets:
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         # Tabs and tab groups dragged in the tab bar and the sidebar
-        # (Armadale/Support/HierarchyDragItem.swift). Private to the app.
+        # (Armadale/Support/HierarchyDragItem.swift), and favorites dragged
+        # in the New Session chooser (Armadale/Support/FavoriteDragItem.swift).
+        # Private to the app.
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.tinylittleapps.armadale.hierarchy-item
             UTTypeDescription: Armadale tab or tab group
+            UTTypeConformsTo:
+              - public.data
+          - UTTypeIdentifier: com.tinylittleapps.armadale.favorite
+            UTTypeDescription: Armadale favorite
             UTTypeConformsTo:
               - public.data
     # No App Sandbox, by design (docs/DESIGN.md, "Distribution"): Armadale

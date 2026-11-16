@@ -146,4 +146,66 @@ struct FavoriteTests {
         model.removeHost(host)
         #expect(model.favoriteProblem(try #require(model.favorite(id))) == "Host removed", "removal is named first")
     }
+
+    /// A host the New Session dialog is about to add has no saved name: the
+    /// proposal can name it.
+    @Test func aProposedNameCanNameAHostNotSavedYet() {
+        let model = model()
+        let request = SessionRequest(location: .remote(host: HostID(raw: "")), workingDirectory: "/srv")
+        #expect(model.proposedFavoriteName(for: request) == "Shell on Host in /srv")
+        #expect(model.proposedFavoriteName(for: request, hostName: "me@box") == "Shell on me@box in /srv")
+        #expect(model.proposedFavoriteName(for: SessionRequest(), hostName: "ignored") == "Shell in ~", "local")
+    }
+
+    // MARK: Save as Favorite…
+
+    /// A favorite's request from a running session: its location, profile
+    /// and options, and its current directory with the home folder as `~`
+    /// locally, a host's as it is.
+    @Test func aRequestFromASessionUsesItsCurrentDirectory() throws {
+        let host = ArmadaleCore.Host(name: "VM", sshDestination: "vm")
+        let options = SessionOptions(skipPermissions: true, model: "opus", additionalArguments: ["--x"])
+        let local = Session(
+            profileID: Profile.claudeCode.id, launch: LaunchSpec(program: "claude"),
+            workingDirectory: "/Users/me/start", options: options)
+        let remote = Session(
+            location: .remote(host: host.id), profileID: Profile.shell.id, launch: LaunchSpec(),
+            workingDirectory: "/Users/me/on-the-host", options: SessionOptions())
+        let old = Session(profileID: Profile.codex.id, launch: LaunchSpec(program: "codex"), workingDirectory: "/Users/me")
+        let model = AppModel(
+            state: PersistedState(sessions: [local, remote, old], hosts: [host]), defaultWorkingDirectory: "/Users/me")
+
+        #expect(model.favoriteRequest(fromSession: local.id) == SessionRequest(
+            profileID: Profile.claudeCode.id, workingDirectory: "~/start", options: options))
+        model.setWorkingDirectory("/Users/me/src/app", for: local.id) // as OSC 7 reports it
+        #expect(model.favoriteRequest(fromSession: local.id)?.workingDirectory == "~/src/app", "the current one")
+        model.setWorkingDirectory("/opt/data", for: local.id)
+        #expect(model.favoriteRequest(fromSession: local.id)?.workingDirectory == "/opt/data")
+
+        #expect(model.favoriteRequest(fromSession: remote.id) == SessionRequest(
+            location: .remote(host: host.id), profileID: Profile.shell.id, workingDirectory: "/Users/me/on-the-host"),
+            "a host's path is never abbreviated")
+        #expect(model.favoriteRequest(fromSession: old.id) == SessionRequest(
+            profileID: Profile.codex.id, workingDirectory: "~"), "no options recorded: the defaults")
+        #expect(model.favoriteRequest(fromSession: SessionID.generate()) == nil)
+    }
+
+    /// A session whose host or profile is gone still gives its request,
+    /// which names them, so the form shows the favorite as broken.
+    @Test func aRequestFromASessionKeepsARemovedHostOrProfile() throws {
+        let model = model()
+        let host = model.addHost(name: "VM", sshDestination: "vm")
+        let profile = model.newProfile()
+        let session = Session(
+            location: .remote(host: host), profileID: profile, launch: LaunchSpec(), workingDirectory: "~")
+        let restored = AppModel(
+            state: PersistedState(sessions: [session], hosts: model.hosts, profiles: model.profiles),
+            defaultWorkingDirectory: "/Users/me")
+        restored.removeHost(host)
+        restored.deleteProfile(profile)
+        let request = try #require(restored.favoriteRequest(fromSession: session.id))
+        #expect(request.location == .remote(host: host))
+        #expect(request.profileID == profile)
+        #expect(restored.requestProblem(request) == "Host removed")
+    }
 }

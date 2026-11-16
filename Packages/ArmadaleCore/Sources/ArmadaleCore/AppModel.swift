@@ -31,7 +31,7 @@ public final class AppModel {
     public private(set) var sessions: [Session]
     public private(set) var hosts: [Host]
     public private(set) var profiles: [Profile]
-    /// Saved session recipes, in the user's order (Settings › Favorites).
+    /// Saved session recipes, in the user's order (kept in the New Session chooser).
     public private(set) var favorites: [Favorite]
     /// Live sessions the orphan reclaim leaves running
     /// (``PersistedState/sparedSessionIDs``). Not shown anywhere yet.
@@ -908,16 +908,34 @@ public final class AppModel {
     /// The name the New Session dialog proposes for a favorite of
     /// `request`: "<Profile> in <dir>" locally, "<Profile> on <host> in
     /// <dir>" on a host, with the home directory shown as `~`.
-    public func proposedFavoriteName(for request: SessionRequest) -> String {
+    /// `hostName`, when given, names a remote request's host instead of the
+    /// saved host's name (a host the dialog is about to add).
+    public func proposedFavoriteName(for request: SessionRequest, hostName: String? = nil) -> String {
         let profileName = profile(request.profileID)?.name ?? "Session"
         let directory = abbreviatedDirectory(request.workingDirectory, location: request.location)
         switch request.location {
         case .local:
             return "\(profileName) in \(directory)"
         case .remote(let hostID):
-            let hostName = host(hostID)?.displayName ?? "Host"
+            let hostName = hostName ?? host(hostID)?.displayName ?? "Host"
             return "\(profileName) on \(hostName) in \(directory)"
         }
+    }
+
+    /// A favorite's request made from the running session `id` (the pane
+    /// menu's Save as Favorite…): its location and profile (kept even when
+    /// removed, so the form shows the favorite as broken), its options
+    /// (none for a session saved before options existed), and its current
+    /// working directory, a local one with the home folder as `~`
+    /// (``abbreviatedDirectory(_:location:)``), a host's as it is. `nil`
+    /// for a session that is not in the model.
+    public func favoriteRequest(fromSession id: SessionID) -> SessionRequest? {
+        guard let session = session(id) else { return nil }
+        return SessionRequest(
+            location: session.location,
+            profileID: session.profileID,
+            workingDirectory: abbreviatedDirectory(session.workingDirectory, location: session.location),
+            options: session.options ?? SessionOptions())
     }
 
     /// Adds `favorite` at the end of the list and returns its ID (a new one
@@ -1060,6 +1078,37 @@ public final class AppModel {
         hosts.remove(at: index)
         didChange()
         return left
+    }
+
+    /// The saved host that reaches `destination` (surrounding whitespace
+    /// ignored) with nothing else set: no port, identity file or config
+    /// file, and the default remote folder (``Host/isPlain``); its name
+    /// does not matter. The first such host, or `nil`.
+    public func plainHost(withDestination destination: String) -> HostID? {
+        let trimmed = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return hosts.first { $0.isPlain && $0.sshDestination == trimmed }?.id
+    }
+
+    /// The name a host added for `destination` gets
+    /// (``ensureHost(forDestination:)``): the destination, trimmed, made
+    /// unique among the hosts' names with " 2", " 3"…, as "New Host" is.
+    public func newHostName(forDestination destination: String) -> String {
+        uniqueHostName(destination.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// The New Session dialog's New Host…: the host for `destination`
+    /// (surrounding whitespace trimmed), which is the plain host already
+    /// saved for it (``plainHost(withDestination:)``) or, when there is
+    /// none, a new one with only that destination, named
+    /// ``newHostName(forDestination:)``. `nil`, adding nothing, when
+    /// ``Host/destinationProblem(_:)`` refuses the destination.
+    @discardableResult
+    public func ensureHost(forDestination destination: String) -> HostID? {
+        let trimmed = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Host.destinationProblem(trimmed) == nil else { return nil }
+        if let existing = plainHost(withDestination: trimmed) { return existing }
+        return addHost(name: newHostName(forDestination: trimmed), sshDestination: trimmed)
     }
 
     /// Sessions whose location is `host`, whether the host still exists or not.

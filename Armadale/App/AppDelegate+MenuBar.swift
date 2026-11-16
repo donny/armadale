@@ -60,7 +60,7 @@ extension AppDelegate {
     /// window is left on screen, the app hides, which activates the app
     /// that was active before (`NSApp.deactivate()` does not, for an accessory app: it
     /// stayed the frontmost application). The status item stays; every
-    /// way back unhides (``leaveMenuBarMode()``, ``showSettings(tab:)``,
+    /// way back unhides (``leaveMenuBarMode()``, ``showSettings(_:)``,
     /// ``showKeyboardShortcuts(_:)``, ``showAcknowledgements(_:)``).
     func auxiliaryWindowDidClose() {
         guard menuBarItem != nil else { return }

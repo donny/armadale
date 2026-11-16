@@ -420,6 +420,15 @@ public struct Host: Identifiable, Codable, Sendable, Hashable {
         self.remoteDirectory = remoteDirectory
     }
 
+    /// Whether the host sets nothing but its destination (and name): no
+    /// port, identity file or config file, and the default remote folder.
+    /// Such a host is what the New Session dialog's New Host… adds, and
+    /// one already saved for a destination is used instead of a duplicate
+    /// (``AppModel/ensureHost(forDestination:)``).
+    public var isPlain: Bool {
+        port == nil && identityFile == nil && sshConfigFile == nil && remoteDirectory == Host.defaultRemoteDirectory
+    }
+
     /// The name shown for the host: its name, else its destination.
     public var displayName: String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)

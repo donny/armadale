@@ -2270,6 +2270,94 @@ restart or logout between a loss and the next launch. Afterwards: no
 process, no test directory, modifier flags 0, the owner's switch on
 again.
 
+## November 16, 2026: favorites are managed in the chooser, a host is added in the New Session dialog, Settings loses its Favorites tab
+
+The owner asked on November 14, 2026 whether Profiles, Hosts and
+Favorites, which hold things the user creates rather than preferences,
+had a better home than Settings. The documentation of about 34
+terminal, SSH and agent apps was read that day (Part 2, section 8, "New
+sessions", has what it found and the sources), and on November 16, 2026
+the owner approved this step with six decisions: remove the Favorites
+tab; reorder by drag plus Move Up and Move Down; an inline Destination
+field rather than a host sheet; suggest `~/.ssh/config` aliases; a
+favorite saved from a pane uses the pane's current directory; recents
+are not part of this step.
+
+What was built (`docs/DESIGN.md` section 8, "New sessions", "Pane
+context menu" and the Settings bullet; section 2; section 6, one line).
+- **The chooser manages favorites.** A favorite row can be dragged onto
+  another, whose place it takes (as a tab in the tab bar), with a 2 pt
+  accent bar on the edge where it will land; its context menu is Edit…,
+  Move Up, Move Down, Remove, with matching accessibility actions. A
+  favorite drags as a type of Armadale's own
+  (`com.tinylittleapps.armadale.favorite`, declared in Info.plist), so
+  a terminal, the sidebar and the tab bar take nothing from it. The
+  decisions (`dropIndex`, `dropEdge`, `move(_:by:)`, `canMove`) are in
+  `NewSessionChooser`.
+- **Save as Favorite…** in the pane menu of a pane with a session (after
+  the splits, between separators) opens the dialog as "New Favorite" on
+  the workspace window, through the same sheet slot, filled in from the
+  session with its current working directory
+  (`AppModel.favoriteRequest(fromSession:)`).
+- **New Host…** is the host picker's last item and replaces Add Host…
+  (which opened Settings › Hosts): a Destination field in the same sheet,
+  with the aliases of the user's ssh configuration offered while typing.
+  Start or Save adds the host, named after its destination, or uses a
+  plain host already saved for it (`AppModel.ensureHost(forDestination:)`);
+  Cancel adds nothing. With no host saved, SSH goes to New Host… at once.
+- **`SSHConfigAliases`** (`ArmadaleCore`): a small reader of `Host` and
+  `Include` lines that only reads, given a home folder; the dialog reads
+  it off the main actor when New Host… is chosen, through a loader the
+  app injects (tests get one that finds nothing).
+- **Settings loses its Favorites tab** (General, Appearance, Profiles,
+  Hosts remain); a saved `favorites` tab opens General.
+  `FavoritesSettingsView.swift` (the list, its editor and its New Favorite
+  sheet), the form fields' per-field commit plumbing, the dialog's Add
+  Host… plumbing (`WorkspaceActions.showSettings`,
+  `AppDelegate.showSettings(tab:)`) and the quit notification only that
+  sheet listened to (`armadaleWillQuit`) are gone.
+
+How it was checked. Unit tests: the alias reader with strings and
+temporary folders (includes in place, globs, a cycle, the depth limit,
+a FIFO, the size and file limits, unreadable files and folders, nothing
+written), the matching rule, the host lookup and intent, the request
+from a session, the form's New Host… rules and its injected loader
+(called once, off the main thread), the name shown being the name
+saved, the New Favorite form from a session, the chooser's moves and
+drops, the drag types and their declarations, the pane menu's outline
+and its Save as Favorite… reaching the window's sheet, the quit path
+ending a sheet of each kind, and the saved `favorites` tab. The gate,
+run by the coordinator on the final tree: 914 tests (336 app, 313 core,
+240 sessions, 13 and 12), zero warnings; the SSH integration tests did
+not run (no host was set). No state file shape changed, so
+`scripts/check-state-compat.sh` was not needed. **The app was not
+launched: nothing of this step is checked live** (`HANDOFF.md` lists
+what to look at), and `scripts/check-quit.sh`, due because the step
+touches sheets and the chooser, was not run; both wait for the owner's
+word that the Mac is free.
+
+The review. An implementer and a separate adversarial reviewer (both
+Opus 5.5), as `AGENTS.md` describes. The reviewer found no blocker and
+confirmed by hand the drop and move index arithmetic for every pair,
+that no path leaves a host behind when nothing is started or saved,
+that the drop's result does not depend on the remembered drag, and
+that no test can read the real `~/.ssh/config`. What it and the
+coordinator's own reading found was fixed in the same change (Part 2,
+section 8, "New sessions", "after the review", has the list): the
+favorite's name shown could differ from the name saved; the alias
+reader read an included file of any size whole (25 s and 3.2 GB for a
+sparse 1 GB file); aliases no destination can use were offered; the
+word splitting was brought in line with OpenSSH's `argv_split`, first
+from a description and then, corrected, from its source; and a line in
+`HANDOFF.md` described one Mac. Left as they were, with reasons there:
+four smaller points.
+
+In `HANDOFF.md` the Step 10 items "broken favorites in Settings" (10b)
+and "Add Host… from the Edit Favorite sheet" (10c) are removed: the
+first is moot (the tab is gone; a broken favorite is repaired through
+the chooser's Edit…, which was already there), the second names a
+button that no longer exists.
+
 ---
 
 # Part 2: the history of each design section
@@ -3163,6 +3251,12 @@ and neither take keyboard focus nor change the focused pane (the first
 version did, seen live). The header does exactly that; after a choice,
 typing goes on in the pane (seen live).
 
+**November 16, 2026: Save as Favorite….** Added to the menu of a pane
+that has a session, after Split Right and Split Down between separators
+(the coordinator's placement), by the owner's decision that favorites
+are made where sessions are; it opens the dialog as New Favorite filled
+in from the session (section 8, "New sessions").
+
 **The pane's appearance for its theme.** A pane with its own theme sets
 its view `appearance` to suit the theme's background so the placeholder
 card and the New Session chooser stay legible (seen live: an empty pane
@@ -3328,6 +3422,14 @@ when its name or size changed.
 **October 30, 2026: removing an imported theme.** Removing an imported
 theme has returned panes using it to Default since October 30, 2026.
 
+**November 16, 2026: the Favorites tab removed.** Settings › Favorites
+(October 24, 2026 to November 16, 2026) is gone: favorites are managed
+in the New Session chooser, made in the dialog and from a pane's menu
+(section 8, "New sessions"). A `settingsTab` saved as `favorites` opens
+General, as `shortcuts` does. The dialog's Add Host… button, which opened
+Settings › Hosts, went with it (New Host… in the dialog); Settings ›
+Hosts itself is unchanged.
+
 ### New sessions: the chooser, the dialog and favorites
 
 **October 24, 2026. New sessions designed (owner's request).** The design
@@ -3419,6 +3521,157 @@ squeezed the title's top margin.
 **Step 10b. Host removal question.** The existing question (asked only
 when sessions run on the host) gained how many favorites will be broken;
 a host with no sessions is still removed without a question.
+
+**November 14, 2026: where Profiles, Hosts and Favorites belong (the
+research).** The owner's question: General and Appearance hold
+preferences, while Profiles, Hosts and Favorites hold things the user
+creates; do those three have a better home than Settings? About 34
+terminal, SSH and agent apps were read from their official documentation
+that day (documentation only; none was run). What it found:
+- Launching has its own surface outside Settings in almost every
+  terminal: iTerm2's Profiles window, Warp's "+" menu with Tab Configs,
+  Windows Terminal's dropdown, Tabby's selector, Wave's launcher in a new
+  block. None gives profile editing a window of its own; those with a
+  graphical editor keep profiles in Settings.
+- Agent apps create hosts and environments where they are used: the last
+  item of the "where it runs" picker opens the add dialog (Claude
+  desktop, Codex), and Settings is at most a second door (Codex
+  Connections, Emdash Machines, Paradev Hosts).
+- An existing ssh configuration is offered rather than retyped (Codex,
+  Emdash, Zed, Tabby as a read-only group, VS Code, which uses the file
+  as its store).
+- SSH-first apps put hosts in the main window (Termius, Prompt 3,
+  SecureCRT, MobaXterm). Armadale is not host-first, so no Hosts window.
+- Nobody has literal favorites; the equivalents are recents, pins and
+  recipes saved from a live session (Warp's "Save as new config",
+  Transmit's connect first and save afterwards).
+Sources: https://docs.warp.dev/terminal/windows/tab-configs ,
+https://docs.waveterm.dev/connections ,
+https://iterm2.com/documentation-menu-items.html ,
+https://learn.microsoft.com/en-us/windows/terminal/customize-settings/startup ,
+https://code.claude.com/docs/en/desktop ,
+https://learn.chatgpt.com/docs/remote-connections ,
+https://zed.dev/docs/remote-development ,
+https://emdash.com/docs/remote-development/ssh-connections ,
+https://help.panic.com/prompt/prompt-mac-sidebar/ ,
+https://docs.termius.com/getting-started/import-existing-hosts.md ,
+https://help.nova.app/remote-files/servers/ ,
+https://code.visualstudio.com/docs/remote/ssh .
+
+**November 16, 2026: the owner's six decisions.** Approved that day: (1)
+Settings loses its Favorites tab; (2) favorites are reordered in the
+chooser by drag, plus Move Up and Move Down; (3) a host is added in the
+New Session dialog through an inline Destination field (no sheet on a
+sheet, which the window's one sheet slot and the quit path would not
+allow); (4) the aliases of `~/.ssh/config` are suggested while the
+destination is typed; (5) a favorite saved from a pane uses the pane's
+current directory; (6) recents are not part of this step. Not in this
+step either: a Hosts window, a default favorite that a new tab starts by
+itself (a new pane always asks), sign-in in an embedded terminal,
+resolving aliases with `ssh -G`, any change to Profiles, a main-menu item
+or shortcut for any of this. The coordinator's details: Save as
+Favorite… sits after Split Right and Split Down between separators and
+is not in an empty pane's menu; a host added by New Host… is named after
+its destination, made unique like "New Host"; with no host saved, SSH
+goes to New Host… at once (the "No Hosts" state and its message went);
+a saved host without a usable destination still points at Settings ›
+Hosts, which stays as it was.
+
+**November 16, 2026: as built.** Decisions made in the implementation,
+beyond the brief:
+- A dropped favorite takes the target row's index, counted after removal
+  as `moveFavorite` counts (the tab bar's rule), so it lands below a row
+  it came from above and above one it came from below. The drop
+  indicator is drawn on that edge. A drop destination sees the payload
+  only on the drop, so the edge comes from the favorite whose drag
+  SwiftUI started last (`FavoriteDragItem.lastDragged`, set when the
+  payload is built); the tab bar's indicator, always at the leading
+  edge, was the alternative and was not taken because it shows the wrong
+  edge for a move down.
+- Move Up and Move Down are accessibility actions only where the move
+  is possible (`accessibilityActions` with conditions), matching the
+  disabled menu items, rather than actions that do nothing at the ends.
+- New Host…'s host is looked up as a "plain" host (`Host.isPlain`: no
+  port, identity file or config file, the default remote folder) with
+  the destination compared exactly as typed after trimming, not
+  case-insensitively: an exact comparison errs towards one more saved
+  host, never towards a session on a host the user did not name. What
+  ssh does, read from the source, not run (openssh-portable master:
+  readconf.c v1.424, match.c v1.46, ssh.c v1.647): the `oHost` case
+  calls `match_pattern(host, arg)`, which compares byte for byte, against
+  the host name as typed (ssh.c passes `options.host_arg` to the first
+  configuration pass and lowercases `host` only afterwards), so `Host`
+  patterns are case-sensitive in that pass; `Match host` is not
+  (`match_hostname` lowercases). The reason above holds either way.
+- The request shown while New Host… is chosen names the plain host
+  already saved for the destination, if any, so the proposed name names
+  that host; otherwise the proposal names the destination
+  (`proposedFavoriteName(for:hostName:)`).
+- New Favorite (Save as Favorite…) saves only a valid form, so a session
+  whose host or profile is gone waits for a choice; Edit Favorite keeps
+  its looser rule.
+- The alias matching is: all while nothing is typed, then prefix matches,
+  then other substring matches, ignoring case, at most 20, an exact match
+  left out. The reader follows each file once (a cycle ends there) and
+  stops at ssh's depth of 16; it also accepts `'` quotes and backslash
+  escapes and treats an unquoted word starting with `#` as a comment,
+  as OpenSSH's own argument splitting does.
+- The form takes its loader at init, and `WorkspaceActions` holds the
+  one it passes (`sshAliasLoader`), whose default also finds nothing:
+  the app delegate sets the real one when it makes a window, so even a
+  test that drives a window's dialog cannot read the real file.
+- The notification `armadaleWillQuit`, posted at a quit for Settings ›
+  Favorites' New Favorite sheet only, was removed with it; a quit still
+  ends any sheet on the Settings window (Profiles' Configure…).
+- A drag does not scroll the scrolling variant of the list (not built;
+  the tab bar has the same limit), recorded in DESIGN as a known limit.
+
+**November 16, 2026: after the review.** An adversarial review of the
+step and the coordinator's own reading found no blocker. Changed:
+- *The favorite's name shown was not the name saved.* With a configured
+  host "vm" (port 2200) saved, New Host… "vm" with Add to Favorites
+  showed "Shell on vm in ~", added the host as "vm 2" and saved the
+  favorite as "Shell on vm 2 in ~". The proposal now names a host to be
+  added as it will be named (`AppModel.newHostName(forDestination:)`,
+  which `ensureHost(forDestination:)` uses too), so the name shown is the
+  name saved and still equals the proposal for the saved request.
+- *The ssh configuration reader read whatever it was pointed at, whole.*
+  The reviewer measured an `Include` of a sparse 1 GB file: 25 s of CPU
+  and 3.2 GB resident, on a thread that cannot be cancelled. (A FIFO,
+  `/dev/zero` and `/dev/stdin` returned at once in the reviewer's
+  probes: `FileManager.contents(atPath:)` gives nothing for them. The
+  reader no longer relies on that.) It now reads regular files only,
+  checked with `stat` before opening, skips a file over 1 MB and opens
+  at most 256 files in one read.
+- *Aliases that can never be used were offered* (`Host "a b"`, a pattern
+  starting with `-`): an alias must also pass `Host.destinationProblem`.
+- *The word splitting now follows OpenSSH's `argv_split`* (misc.c
+  v1.223, read from the source, not run): a line with an unterminated
+  quote is dropped (it gave an alias; ssh rejects it as invalid quotes);
+  a backslash escapes a following `'`, `"` or `\` in every quote state
+  and a following space only outside quotes, and stays a backslash
+  before anything else; an `Include` of `~user/x` names nothing (it read
+  `~/.ssh/~user/x`). The backslash rule was first written from a
+  description (inside quotes only the quote and `\`) and then corrected
+  against `argv_split` itself.
+- *`FavoriteDragItem.lastDragged` was never cleared*: a handled drop
+  clears it now (a cancelled drag still leaves it until the next drag
+  starts, which only affects the indicator).
+- Smaller: `AppModel.host(forDestination:)` renamed
+  `ensureHost(forDestination:)`, since it adds; the picker's divider only
+  under an item; a session binding without a saver has no Save as
+  Favorite…; the form's "Profile removed" for a host to be added comes
+  from `requestProblem`; a test of the drag types' declarations in the
+  source tree's Info.plist (an unhosted test cannot see them otherwise);
+  a vacuous test block removed; wording.
+Left as it was, by the coordinator's decision:
+`SettingsWindowController.show(_ tab:)` keeps its parameter (a test uses
+it, and it is a reasonable entry point); Save as Favorite… does nothing
+while the window's sheet slot is taken (a sheet blocks the window's
+headers, so the menu cannot be opened then; the remaining case is a
+full-screen transition, where New Session… does nothing either);
+aliases are deduplicated case-sensitively and destinations compared
+exactly; `Include ${VAR}` and `%` tokens are not expanded.
 
 ### App lifecycle
 

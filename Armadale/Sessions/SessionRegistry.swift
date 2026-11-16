@@ -265,6 +265,17 @@ final class SessionRegistry {
         }
     }
 
+    /// The pane menu's Save as Favorite… for `session`
+    /// (``PaneThemeBinding/saveAsFavorite``): the New Favorite sheet of the
+    /// window showing its pane (``WorkspaceActions/saveAsFavorite(fromSession:)``).
+    /// Nothing happens when no window shows it.
+    func saveAsFavorite(fromSession session: SessionID) {
+        guard let workspace = model.place(of: session)?.workspace,
+              let actions = actionsOfWorkspace(workspace)
+        else { return }
+        actions.saveAsFavorite(fromSession: session)
+    }
+
     // MARK: Controllers
 
     /// The session's controller, if it has one (every session in the model

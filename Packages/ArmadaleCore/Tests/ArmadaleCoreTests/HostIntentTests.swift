@@ -130,4 +130,79 @@ struct HostIntentTests {
         #expect(host.sshConfigFile == nil)
         #expect(host.port == nil)
     }
+
+    // MARK: New Host… in the New Session dialog
+
+    /// A host New Host… adds is named after its destination, made unique
+    /// among the hosts' names, and sets nothing else.
+    @Test func aHostForADestinationIsNamedAfterIt() throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let before = model.changeCount
+        let id = try #require(model.ensureHost(forDestination: "  me@build  "))
+        let host = try #require(model.host(id))
+        #expect(host.name == "me@build")
+        #expect(host.sshDestination == "me@build", "trimmed")
+        #expect(host.isPlain)
+        #expect(model.changeCount == before + 1)
+
+        // A host of that name with other settings is not reused: the new
+        // one's name is made unique, as "New Host" is.
+        let other = model.addHost(name: "box", sshDestination: "box", port: 2222)
+        let fresh = try #require(model.ensureHost(forDestination: "box"))
+        #expect(fresh != other)
+        #expect(model.host(fresh)?.name == "box 2")
+        #expect(model.host(fresh)?.port == nil)
+    }
+
+    /// No duplicate: a saved host with that destination and otherwise
+    /// default settings is used, whatever its name.
+    @Test func aPlainHostAlreadySavedIsUsedInsteadOfADuplicate() throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        let saved = model.addHost(name: "My VM", sshDestination: "lima-default")
+        let before = model.changeCount
+        #expect(model.plainHost(withDestination: " lima-default ") == saved)
+        #expect(model.ensureHost(forDestination: "lima-default") == saved)
+        #expect(model.hosts.count == 1)
+        #expect(model.changeCount == before, "nothing added or changed")
+        #expect(model.plainHost(withDestination: "Lima-Default") == nil, "the destination as typed")
+        #expect(model.plainHost(withDestination: "") == nil)
+    }
+
+    /// A host that sets anything besides its destination is not "plain"
+    /// and is never reused for New Host….
+    @Test(arguments: [
+        ArmadaleCore.Host(name: "p", sshDestination: "d", port: 22),
+        ArmadaleCore.Host(name: "i", sshDestination: "d", identityFile: "~/.ssh/id"),
+        ArmadaleCore.Host(name: "c", sshDestination: "d", sshConfigFile: "/tmp/c"),
+        ArmadaleCore.Host(name: "r", sshDestination: "d", remoteDirectory: "~/.other"),
+    ])
+    func aHostWithOtherSettingsIsNotReused(_ configured: ArmadaleCore.Host) throws {
+        #expect(!configured.isPlain)
+        let model = AppModel(state: PersistedState(hosts: [configured]), defaultWorkingDirectory: "/")
+        #expect(model.plainHost(withDestination: "d") == nil)
+        let added = try #require(model.ensureHost(forDestination: "d"))
+        #expect(added != configured.id)
+        #expect(model.hosts.count == 2)
+        #expect(model.ensureHost(forDestination: "d") == added, "the plain one is reused from then on")
+    }
+
+    /// A destination ``Host/destinationProblem(_:)`` refuses adds nothing.
+    @Test(arguments: ["", "   ", "-oProxyCommand=x", "two words"])
+    func aRefusedDestinationAddsNothing(_ destination: String) {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        #expect(model.ensureHost(forDestination: destination) == nil)
+        #expect(model.hosts.isEmpty)
+    }
+
+    /// The name a host added for a destination will get is known before it
+    /// is added, and is the name it gets.
+    @Test func theNewHostNameIsTheNameTheHostGets() throws {
+        let model = AppModel(defaultWorkingDirectory: "/")
+        #expect(model.newHostName(forDestination: " vm ") == "vm")
+        model.addHost(name: "vm", sshDestination: "vm", port: 2200)
+        let expected = model.newHostName(forDestination: "vm")
+        #expect(expected == "vm 2")
+        let added = try #require(model.ensureHost(forDestination: "vm"))
+        #expect(model.host(added)?.name == expected)
+    }
 }

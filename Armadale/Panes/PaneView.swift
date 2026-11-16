@@ -256,12 +256,14 @@ final class PaneView: NSView {
     /// "Pane context menu", "Pane cards").
     func paneMenu() -> NSMenu {
         let theme = theme
+        let save = theme.saveAsFavorite
         return PaneMenu.make(
-            PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes),
+            PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes, showsSaveAsFavorite: save != nil),
             actions: PaneMenu.Actions(
                 splitRight: { theme.split(.horizontal) },
                 splitDown: { theme.split(.vertical) },
-                chooseTheme: { theme.choose($0) }))
+                chooseTheme: { theme.choose($0) },
+                saveAsFavorite: { save?() }))
     }
 
     /// The card's corners, background and border for the current theme

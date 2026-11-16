@@ -322,4 +322,29 @@ struct NewSessionTests {
         #expect(repaired.favorites == [broken])
         #expect(issues == ["Dropped duplicate favorite \(broken.id)"])
     }
+
+    /// A favorite saved from a running session (the pane menu's Save as
+    /// Favorite…) starts a session like it: same profile, location and
+    /// options, in the directory the first one had reached.
+    @Test func aFavoriteSavedFromASessionStartsLikeIt() throws {
+        let (model, ws, pane) = try emptyPane()
+        let options = SessionOptions(continueConversation: true, additionalArguments: ["--verbose"])
+        let first = try #require(model.startSession(
+            in: pane, request: SessionRequest(profileID: Profile.claudeCode.id, workingDirectory: "~", options: options)))
+        model.setWorkingDirectory("/Users/me/work/app", for: first)
+        let favorite = model.addFavorite(Favorite(
+            name: "", request: try #require(model.favoriteRequest(fromSession: first))))
+        #expect(model.favorite(favorite)?.name == "Claude Code in ~/work/app")
+
+        let group = try #require(model.workspace(ws)?.selectedTabGroupID)
+        let tab = try #require(model.newTab(in: group))
+        let second = try #require(model.tab(tab)?.focusedPaneID)
+        let request = try #require(model.favorite(favorite)?.request)
+        let started = try #require(model.startSession(in: second, request: request).flatMap { model.session($0) })
+        let original = try #require(model.session(first))
+        #expect(started.workingDirectory == "/Users/me/work/app")
+        #expect(started.profileID == original.profileID)
+        #expect(started.options == original.options)
+        #expect(started.launch == original.launch)
+    }
 }

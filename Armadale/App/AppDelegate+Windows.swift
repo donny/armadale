@@ -46,7 +46,9 @@ extension AppDelegate {
         }
         controller.actions.showWorkspace = { [weak self] id in self?.showWorkspace(id) }
         controller.actions.actionsOfWorkspace = { [weak self] id in self?.windowControllers[id]?.actions }
-        controller.actions.showSettings = { [weak self] tab in self?.showSettings(tab: tab) }
+        // The dialog's New Host… offers the aliases of the user's ssh
+        // configuration, read off the main actor when it is chosen.
+        controller.actions.sshAliasLoader = { SSHConfigAliases.aliases(home: NSHomeDirectory()) }
         controller.fullScreenSteps = fullScreenSteps
         // Cascade from the current window instead of opening exactly on top.
         if !controller.hadSavedFrame, let reference, let window = controller.window, window !== reference {

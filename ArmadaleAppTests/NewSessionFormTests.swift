@@ -1,5 +1,6 @@
 import AppKit
 import ArmadaleCore
+import Synchronization
 import Testing
 
 /// The New Session dialog's rules (``NewSessionForm``, DESIGN §8 "New
@@ -123,31 +124,60 @@ struct NewSessionFormTests {
         #expect(form.options == SessionOptions(additionalArguments: ["--x"]))
     }
 
-    @Test func sshWithoutAHostCannotStart() throws {
+    /// SSH with no host saved goes straight to New Host…: the Destination
+    /// field shows, and Start waits for a usable destination.
+    @Test func sshWithoutAHostChoosesNewHost() throws {
         let (model, pane) = try fixture()
         let form = NewSessionForm(model: model, mode: .newSession(pane))
         form.isRemote = true
+        #expect(form.isAddingHost, "New Host… at once")
+        #expect(form.hostChoice == .newHost)
         #expect(form.selectedHostID == nil)
         #expect(!form.isValid)
-        #expect(form.problem != nil)
+        #expect(form.problem == ArmadaleCore.Host.destinationProblem(""))
         #expect(form.start() == nil)
         #expect(model.sessions.isEmpty)
+        #expect(model.hosts.isEmpty, "nothing added")
         #expect(model.pane(pane)?.isEmpty == true)
+        form.newHostDestination = " -oProxyCommand=x "
+        #expect(form.problem == "A destination can’t start with “-”.", "trimmed, then checked")
+        form.newHostDestination = "me@box"
+        #expect(form.isValid)
+        form.isRemote = false
+        #expect(form.request.location == .local)
+        #expect(form.isValid)
+    }
 
-        // Hosts added meanwhile (Add Host… opens Settings; the sheet stays),
-        // while SSH is selected: each becomes the selected host.
+    /// Hosts added in Settings › Hosts while the dialog is open: while SSH
+    /// is selected on a saved host each becomes the selected host; New
+    /// Host… keeps what is being typed.
+    @Test func hostsAddedMeanwhileAreSelectedButNotOverNewHost() throws {
+        let (model, pane) = try fixture()
+        let form = NewSessionForm(model: model, mode: .newSession(pane))
+        form.isRemote = true
+        form.newHostDestination = "typing"
         let first = model.addHost(name: "A", sshDestination: "a")
         form.hostsDidChange()
+        #expect(form.hostChoice == .newHost, "the selection stays on New Host…")
+        #expect(form.newHostDestination == "typing")
+
+        form.hostChoice = .host(first)
+        #expect(!form.isAddingHost)
         #expect(form.selectedHostID == first)
         #expect(form.isValid)
         let second = model.addHost(name: "B", sshDestination: "b")
         form.hostsDidChange()
         #expect(form.selectedHostID == second, "added for this session")
-        #expect(form.isValid)
         form.selectedHostID = first
         #expect(form.isValid)
-        form.isRemote = false
-        #expect(form.request.location == .local)
+
+        // Every host removed while SSH is chosen with nothing picked.
+        form.hostChoice = .unchosen
+        #expect(form.problem == "Choose a host.")
+        model.removeHost(first)
+        model.removeHost(second)
+        form.hostsDidChange()
+        #expect(form.hostChoice == .newHost)
     }
 
     /// With Local selected, a new host is not picked; the only host, chosen
@@ -360,10 +390,222 @@ struct NewSessionFormTests {
         #expect(form.save() == nil, "SSH with no host")
     }
 
+    // MARK: New Host…
+
+    /// Start with New Host… adds the host (named after its destination,
+    /// trimmed) and starts on it; nothing is added before Start.
+    @Test func newHostIsAddedOnStartAndUsed() throws {
+        let (model, pane) = try fixture()
+        model.addHost(name: "Other", sshDestination: "other", port: 2200)
+        let form = NewSessionForm(model: model, mode: .newSession(pane))
+        form.isRemote = true
+        #expect(!form.isAddingHost, "a host is saved: the usual rules")
+        form.hostChoice = .newHost
+        form.newHostDestination = "  me@box  "
+        form.workingDirectory = "/srv"
+        #expect(form.isValid)
+        #expect(form.name == "Shell on me@box in /srv", "the proposal names the host to be added")
+        #expect(model.hosts.count == 1, "nothing added while the form is open")
+
+        let session = try #require(form.start().flatMap { model.session($0) })
+        #expect(model.hosts.count == 2)
+        let host = try #require(model.hosts.last)
+        #expect(host.name == "me@box")
+        #expect(host.sshDestination == "me@box")
+        #expect(host.isPlain)
+        #expect(session.location == .remote(host: host.id))
+        #expect(session.workingDirectory == "/srv")
+        #expect(form.hostChoice == .host(host.id), "the picker shows the host now")
+        #expect(form.start() == nil, "once")
+        #expect(model.hosts.count == 2)
+    }
+
+    /// The name shown is the name saved: a host New Host… adds may get a
+    /// unique name ("vm 2" beside a configured "vm"), and the proposal
+    /// already names it so, for Start with Add to Favorites and for Save.
+    @Test func theProposedNameNamesTheHostAsItWillBeNamed() throws {
+        let (model, pane) = try fixture()
+        model.addHost(name: "vm", sshDestination: "vm", port: 2200)
+        let form = NewSessionForm(model: model, mode: .newSession(pane))
+        form.isRemote = true
+        form.hostChoice = .newHost
+        form.newHostDestination = "vm"
+        form.addToFavorites = true
+        let shown = form.name
+        #expect(shown == "Shell on vm 2 in ~")
+        _ = try #require(form.start())
+        #expect(model.hosts.last?.name == "vm 2")
+        let favorite = try #require(model.favorites.first)
+        #expect(favorite.name == shown)
+        #expect(favorite.name == model.proposedFavoriteName(for: favorite.request), "keeps following when edited")
+
+        let save = NewSessionForm(model: model, mode: .newFavorite, prefill: SessionRequest(workingDirectory: "/srv"))
+        save.isRemote = true
+        save.hostChoice = .newHost
+        save.newHostDestination = "box"
+        model.addHost(name: "box", sshDestination: "box", identityFile: "~/.ssh/k")
+        let shownForSave = save.name
+        #expect(shownForSave == "Shell on box 2 in /srv")
+        let id = try #require(save.save())
+        #expect(model.favorite(id)?.name == shownForSave)
+    }
+
+    /// No duplicate: a plain host already saved for the destination is used.
+    @Test func newHostUsesAPlainHostAlreadySaved() throws {
+        let (model, pane) = try fixture()
+        let saved = model.addHost(name: "My VM", sshDestination: "lima-default")
+        let form = NewSessionForm(model: model, mode: .newSession(pane))
+        form.isRemote = true
+        form.hostChoice = .newHost
+        form.newHostDestination = "lima-default"
+        #expect(form.request.location == .remote(host: saved))
+        #expect(form.name == "Shell on My VM in ~")
+        form.addToFavorites = true
+        let session = try #require(form.start().flatMap { model.session($0) })
+        #expect(model.hosts.map(\.id) == [saved])
+        #expect(session.location == .remote(host: saved))
+        #expect(model.favorites.first?.request.location == .remote(host: saved))
+    }
+
+    /// Cancel (the sheet going away) adds nothing; a favorite of a new
+    /// host is saved with that host.
+    @Test func newHostInAFavoriteFormIsAddedOnSaveOnly() throws {
+        let (model, _) = try fixture()
+        let request = SessionRequest(profileID: Profile.claudeCode.id, workingDirectory: "~/work")
+        let cancelled = NewSessionForm(model: model, mode: .newFavorite, prefill: request)
+        cancelled.isRemote = true
+        cancelled.newHostDestination = "vm"
+        #expect(cancelled.canSave)
+        #expect(model.hosts.isEmpty, "Cancel adds nothing")
+
+        let form = NewSessionForm(model: model, mode: .newFavorite, prefill: request)
+        form.isRemote = true
+        #expect(form.isAddingHost)
+        #expect(!form.canSave, "no destination yet")
+        form.newHostDestination = "vm"
+        let id = try #require(form.save())
+        let favorite = try #require(model.favorite(id))
+        let host = try #require(model.hosts.first)
+        #expect(model.hosts.count == 1)
+        #expect(favorite.request.location == .remote(host: host.id))
+        #expect(favorite.name == "Claude Code on vm in ~/work")
+        #expect(model.sessions.isEmpty, "nothing started")
+    }
+
+    /// The picker's choice: a saved host, New Host…, or nothing.
+    @Test func theHostChoiceMapsToTheForm() throws {
+        let (model, pane) = try fixture()
+        let a = model.addHost(name: "A", sshDestination: "a")
+        let b = model.addHost(name: "B", sshDestination: "b")
+        let form = NewSessionForm(model: model, mode: .newSession(pane))
+        form.isRemote = true
+        #expect(form.hostChoice == .unchosen, "several hosts: Choose a Host")
+        form.hostChoice = .host(b)
+        #expect(form.selectedHostID == b)
+        form.hostChoice = .newHost
+        #expect(form.selectedHostID == nil)
+        #expect(form.isAddingHost)
+        form.selectedHostID = a
+        #expect(!form.isAddingHost, "picking a host leaves New Host…")
+        #expect(form.hostChoice == .host(a))
+    }
+
+    /// The aliases come from the injected loader, off the main actor, once,
+    /// when New Host… is chosen.
+    @Test func aliasesAreLoadedWhenNewHostIsChosen() async throws {
+        let (model, pane) = try fixture()
+        let calls = Calls()
+        let form = NewSessionForm(model: model, mode: .newSession(pane), aliasLoader: {
+            calls.record(onMain: Thread.isMainThread)
+            return ["lima-default", "build", "my-lima"]
+        })
+        #expect(form.aliases.isEmpty)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(calls.count == 0, "not before New Host…")
+        form.isRemote = true // no host saved: New Host… at once
+        for _ in 0..<80 where form.aliases.isEmpty { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(form.aliases == ["lima-default", "build", "my-lima"])
+        #expect(calls.count == 1)
+        #expect(calls.onMain == [false], "read off the main thread")
+        form.newHostDestination = "lim"
+        #expect(form.aliasSuggestions == ["lima-default", "my-lima"])
+        form.hostChoice = .unchosen
+        form.hostChoice = .newHost
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(calls.count == 1, "once per form")
+
+    }
+
+    // MARK: Save as Favorite…
+
+    /// A new favorite filled in from a session: its choices, a name that
+    /// follows the proposal, and Save adds it without starting anything.
+    @Test func aNewFavoriteFromASessionIsFilledIn() throws {
+        let (model, _) = try fixture()
+        let host = model.addHost(name: "VM", sshDestination: "vm")
+        let request = SessionRequest(
+            location: .remote(host: host), profileID: Profile.codex.id, workingDirectory: "/srv/app",
+            options: SessionOptions(sandbox: "read-only", additionalArguments: ["a b"]))
+        let form = NewSessionForm(model: model, mode: .newFavorite, prefill: request)
+        #expect(form.title == "New Favorite")
+        #expect(form.primaryButtonTitle == "Save")
+        #expect(form.isRemote)
+        #expect(form.selectedHostID == host)
+        #expect(form.profileID == Profile.codex.id)
+        #expect(form.workingDirectory == "/srv/app")
+        #expect(form.sandbox == "read-only")
+        #expect(form.additionalArguments == "'a b'")
+        #expect(form.request == request)
+        #expect(!form.hasCustomName)
+        #expect(form.name == "Codex on VM in /srv/app")
+        form.workingDirectory = "/srv"
+        #expect(form.name == "Codex on VM in /srv", "follows until typed")
+        let id = try #require(form.save())
+        #expect(model.favorite(id)?.request.workingDirectory == "/srv")
+        #expect(model.sessions.isEmpty)
+    }
+
+    /// A session whose profile or host is gone opens the form as a broken
+    /// favorite would: Save waits for a valid choice.
+    @Test func aNewFavoriteFromASessionWithAGoneHostOrProfileWaits() throws {
+        let (model, _) = try fixture()
+        let gone = model.addHost(name: "Old", sshDestination: "old")
+        model.removeHost(gone)
+        let form = NewSessionForm(
+            model: model, mode: .newFavorite, prefill: SessionRequest(location: .remote(host: gone)))
+        #expect(form.hostIsMissing)
+        #expect(form.problem == "Host removed")
+        #expect(!form.canSave)
+        #expect(!form.canConfirm)
+        #expect(form.save() == nil)
+        form.isRemote = false
+        #expect(form.save() != nil)
+
+        let profile = model.newProfile()
+        model.deleteProfile(profile)
+        let noProfile = NewSessionForm(model: model, mode: .newFavorite, prefill: SessionRequest(profileID: profile))
+        #expect(noProfile.problem == "Profile removed")
+        #expect(!noProfile.canSave)
+        noProfile.profileID = Profile.shell.id
+        #expect(noProfile.canSave)
+    }
+
     @Test(arguments: [
         [], ["a"], ["a b"], [""], ["it's"], [#"back\slash"#], [#""quoted""#, "--x=1", "~/dir", "$HOME"],
     ])
     func argumentsRoundTrip(_ words: [String]) {
         #expect(ShellWords.split(NewSessionForm.joinedShellWords(words)) == words)
     }
+}
+
+/// Counts a loader's calls and whether each ran on the main thread.
+private final class Calls: Sendable {
+    private let threads = Mutex<[Bool]>([])
+
+    func record(onMain: Bool) {
+        threads.withLock { $0.append(onMain) }
+    }
+
+    var count: Int { threads.withLock { $0.count } }
+    var onMain: [Bool] { threads.withLock { $0 } }
 }

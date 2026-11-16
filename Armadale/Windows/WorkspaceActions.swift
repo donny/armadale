@@ -105,8 +105,12 @@ final class WorkspaceActions {
         }
     }
 
-    /// Opens Settings on a tab (the dialog's Add Host…).
-    var showSettings: (SettingsWindowController.Tab) -> Void = { _ in }
+    /// Reads the host aliases of the user's ssh configuration for the
+    /// dialog's New Host… (``NewSessionForm/loadAliases()``, off the main
+    /// actor). The app sets the real reader
+    /// (``SSHConfigAliases/aliases(home:)``); the default finds none, so no
+    /// test reads the real `~/.ssh/config`.
+    var sshAliasLoader: @Sendable () -> [String] = { [] }
     /// Gives keyboard focus to a pane's terminal once it is on screen.
     var focusPaneWhenShown: (PaneID) -> Void = { _ in }
     /// Whether the window can take a sheet now, besides having none: the
@@ -115,8 +119,8 @@ final class WorkspaceActions {
     /// The chooser's New Session… and Return then do nothing.
     var canPresentSheet: () -> Bool = { true }
 
-    /// The sheet that is up (New Session, or Edit Favorite from the
-    /// chooser), with its form.
+    /// The sheet that is up (New Session; Edit Favorite from the chooser;
+    /// New Favorite from a pane menu's Save as Favorite…), with its form.
     private var sheet: NSViewController?
     /// The form of the sheet that is up, if one is.
     private(set) var newSessionForm: NewSessionForm?
@@ -138,7 +142,8 @@ final class WorkspaceActions {
     func newSession(in paneID: PaneID) {
         guard model.pane(paneID)?.isEmpty == true else { return }
         let directorySession = model.focusedSessionID(in: workspaceID) ?? lastFocusedSessionID
-        let form = NewSessionForm(model: model, mode: .newSession(paneID), directorySession: directorySession)
+        let form = NewSessionForm(
+            model: model, mode: .newSession(paneID), directorySession: directorySession, aliasLoader: sshAliasLoader)
         presentSheet(form: form) { [weak self] in self?.startNewSession(form) }
     }
 
@@ -146,7 +151,26 @@ final class WorkspaceActions {
     /// sheet on this window. Save updates the favorite; nothing is started.
     func editFavorite(_ id: FavoriteID) {
         guard model.favorite(id) != nil else { return }
-        let form = NewSessionForm(model: model, mode: .editFavorite(id))
+        presentFavoriteSheet(NewSessionForm(model: model, mode: .editFavorite(id), aliasLoader: sshAliasLoader))
+    }
+
+    /// The pane menu's Save as Favorite… for the pane of `session`: the
+    /// dialog as "New Favorite", as a sheet on this window, filled in from
+    /// the session (its location, profile, options and current working
+    /// directory, ``AppModel/favoriteRequest(fromSession:)``), the name
+    /// following the proposal. Save adds the favorite; nothing is started.
+    /// A session whose profile or host is gone shows it as removed, and
+    /// Save waits for a valid choice. Does nothing for a session not in the
+    /// model, or while a sheet is up.
+    func saveAsFavorite(fromSession session: SessionID) {
+        guard let request = model.favoriteRequest(fromSession: session) else { return }
+        presentFavoriteSheet(NewSessionForm(
+            model: model, mode: .newFavorite, prefill: request, aliasLoader: sshAliasLoader))
+    }
+
+    /// A favorite's sheet: Save saves (once: Return and the button could
+    /// both arrive) and closes; Cancel closes.
+    private func presentFavoriteSheet(_ form: NewSessionForm) {
         presentSheet(form: form) { [weak self, weak form] in
             guard let self, let form, self.newSessionForm === form else { return }
             form.save()
@@ -161,7 +185,6 @@ final class WorkspaceActions {
         rename.commit()
         let controller = NSHostingController(rootView: NewSessionSheet(
             form: form,
-            showHosts: { [weak self] in self?.showSettings(.hosts) },
             onCancel: { [weak self] in self?.endNewSessionSheet() },
             onConfirm: onConfirm))
         controller.sizingOptions = [.preferredContentSize]
@@ -174,7 +197,9 @@ final class WorkspaceActions {
     /// Takes the sheet down once its pane is closed, given a session
     /// elsewhere, or moved to another workspace (its tab dragged there from
     /// another window's sidebar; that workspace's window shows its
-    /// chooser), or its favorite is removed (in Settings).
+    /// chooser), or its favorite is removed (in another pane's chooser). A
+    /// New Favorite sheet stays: it is filled in already and needs nothing
+    /// more from its session.
     private func watchSheet(_ form: NewSessionForm) {
         sheetWatch?.cancel()
         let model = model
@@ -247,7 +272,7 @@ final class WorkspaceActions {
         if model.pane(paneID)?.isEmpty == true { closePane(paneID, confirm: false) }
     }
 
-    /// Takes the sheet (New Session or Edit Favorite) down, if one is up,
+    /// Takes the sheet (New Session, Edit Favorite or New Favorite) down, if one is up,
     /// without starting, saving or closing anything: Cancel, a quit
     /// (``AppDelegate/prepareForQuit()``), the window closing, or what it
     /// was about having gone.

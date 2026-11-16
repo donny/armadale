@@ -5,9 +5,9 @@ import Observation
 /// The state and rules of the New Session dialog (DESIGN §8, "New
 /// sessions"), without any view: what is chosen, the ``SessionRequest`` it
 /// makes, whether it can be started or saved, which options the chosen
-/// profile offers, the favorite's name, and what Start and Save do. The
-/// dialog (``NewSessionSheet``) and Settings › Favorites
-/// (``FavoritesSettingsView``) show it; the tests drive it directly.
+/// profile offers, the favorite's name, the host New Host… will add, and
+/// what Start and Save do. The dialog (``NewSessionSheet``) shows it; the
+/// tests drive it directly.
 @MainActor
 @Observable
 final class NewSessionForm {
@@ -16,7 +16,8 @@ final class NewSessionForm {
         /// Start a session in this empty pane (Start), optionally saving a
         /// favorite of it too.
         case newSession(PaneID)
-        /// Settings › Favorites' "+": a new favorite (Save), nothing started.
+        /// A new favorite (Save), nothing started: the pane menu's Save as
+        /// Favorite…, filled in from the pane's session.
         case newFavorite
         /// Edit a saved favorite (Save), nothing started.
         case editFavorite(FavoriteID)
@@ -25,11 +26,36 @@ final class NewSessionForm {
     let model: AppModel
     let mode: Mode
 
-    /// SSH (true) or this Mac (false).
-    var isRemote: Bool
+    /// SSH (true) or this Mac (false). Choosing SSH with no host saved
+    /// chooses New Host… at once (``isAddingHost``), so the Destination
+    /// field shows without another click.
+    var isRemote: Bool {
+        get { storedIsRemote }
+        set {
+            storedIsRemote = newValue
+            if newValue, hostID == nil, model.hosts.isEmpty { isAddingHost = true }
+        }
+    }
+    private var storedIsRemote: Bool
     /// The host picked, if any; it may name a host that was removed (a
     /// broken favorite). See ``selectedHostID``.
     var hostID: HostID?
+    /// Whether the host picker is on New Host…: the Destination field is
+    /// shown, and Start (or Save) adds a host for ``newHostDestination``,
+    /// or uses the plain host already saved for it
+    /// (``AppModel/ensureHost(forDestination:)``). Nothing is added before that,
+    /// so Cancel adds nothing. Turning it on reads the ssh configuration's
+    /// aliases (``loadAliases()``).
+    var isAddingHost: Bool {
+        get { storedIsAddingHost }
+        set {
+            storedIsAddingHost = newValue
+            if newValue { loadAliases() }
+        }
+    }
+    private var storedIsAddingHost = false
+    /// What is typed in the Destination field (New Host…).
+    var newHostDestination = ""
     /// As typed; `""` or `~` is the home directory. A local one is shown
     /// with the home folder abbreviated to `~`; a remote one is the host's.
     var workingDirectory: String
@@ -50,21 +76,41 @@ final class NewSessionForm {
     /// option rows can be shown for a profile that is gone).
     private let originalOptions: SessionOptions?
 
+    /// Reads the aliases of the user's ssh configuration; called off the
+    /// main actor, once, when New Host… is chosen. The app passes the real
+    /// reader (``WorkspaceActions/sshAliasLoader``); the default finds
+    /// none, so no test reads the real `~/.ssh/config`.
+    @ObservationIgnored private let aliasLoader: @Sendable () -> [String]
+    @ObservationIgnored private var aliasLoad: Task<Void, Never>?
+    /// The aliases read for New Host… (``loadAliases()``); empty until
+    /// they have been read, and when there are none.
+    private(set) var aliases: [String] = []
+
     /// A form for `mode`. A new session's directory is that of
     /// `directorySession` (the window's focused pane that has a session),
-    /// else home; a favorite's fields are the favorite's.
-    init(model: AppModel, mode: Mode, directorySession: SessionID? = nil) {
+    /// else home; an edited favorite's fields are the favorite's, and a new
+    /// favorite's those of `prefill` (made from a running session,
+    /// ``AppModel/favoriteRequest(fromSession:)``), else the defaults.
+    init(
+        model: AppModel, mode: Mode, directorySession: SessionID? = nil, prefill: SessionRequest? = nil,
+        aliasLoader: @escaping @Sendable () -> [String] = { [] }
+    ) {
         self.model = model
         self.mode = mode
+        self.aliasLoader = aliasLoader
         knownHostIDs = model.hosts.map(\.id)
         let favorite: Favorite? = if case .editFavorite(let id) = mode { model.favorite(id) } else { nil }
-        if let favorite {
-            let request = favorite.request
+        let filled: SessionRequest? = switch mode {
+        case .editFavorite: favorite?.request
+        case .newFavorite: prefill
+        case .newSession: nil
+        }
+        if let request = filled {
             if case .remote(let host) = request.location {
-                isRemote = true
+                storedIsRemote = true
                 hostID = host
             } else {
-                isRemote = false
+                storedIsRemote = false
                 hostID = nil
             }
             workingDirectory = request.workingDirectory.isEmpty ? "~" : request.workingDirectory
@@ -76,10 +122,13 @@ final class NewSessionForm {
             additionalArguments = Self.joinedShellWords(request.options.additionalArguments)
             originalOptions = request.options
             // A name that is what the dialog would propose keeps following
-            // the choices; anything else is the user's.
-            customName = favorite.name == model.proposedFavoriteName(for: request) ? nil : favorite.name
+            // the choices; anything else is the user's. A new favorite's
+            // name follows the proposal.
+            if let favorite, favorite.name != model.proposedFavoriteName(for: request) {
+                customName = favorite.name
+            }
         } else {
-            isRemote = false
+            storedIsRemote = false
             hostID = nil
             storedProfileID = Profile.shell.id
             originalOptions = nil
@@ -89,6 +138,10 @@ final class NewSessionForm {
                 workingDirectory = "~"
             }
         }
+    }
+
+    isolated deinit {
+        aliasLoad?.cancel()
     }
 
     /// The directory a new session's form starts with: that of `session`
@@ -150,30 +203,91 @@ final class NewSessionForm {
     /// The hosts saved when the form last looked (``hostsDidChange()``).
     private var knownHostIDs: [HostID] = []
 
-    /// The saved hosts changed while the form is open (a host added through
-    /// Add Host…). A host added while SSH is selected becomes the selected
-    /// one: it was added for this session. Otherwise an explicit choice is
-    /// kept, and the only host, chosen implicitly, is chosen explicitly once
-    /// a second one appears.
+    /// The saved hosts changed while the form is open (a host added in
+    /// Settings › Hosts meanwhile). A host added while SSH is selected
+    /// becomes the selected one: it was added for this session; but never
+    /// while New Host… is chosen, which keeps what is being typed.
+    /// Otherwise an explicit choice is kept, and the only host, chosen
+    /// implicitly, is chosen explicitly once a second one appears. SSH left
+    /// with no host saved and none chosen goes to New Host….
     func hostsDidChange() {
         let current = model.hosts.map(\.id)
         let added = current.filter { !knownHostIDs.contains($0) }
-        if isRemote, let newest = added.last {
+        if isAddingHost {
+            // Stays on New Host….
+        } else if isRemote, let newest = added.last {
             hostID = newest
         } else if hostID == nil, knownHostIDs.count == 1, current.count > 1, current.contains(knownHostIDs[0]) {
             hostID = knownHostIDs[0]
+        } else if isRemote, hostID == nil, current.isEmpty {
+            isAddingHost = true
         }
         knownHostIDs = current
     }
 
     /// The host the request uses: the one picked (possibly removed), else
-    /// the only saved host, else none.
+    /// the only saved host, else none; none while New Host… is chosen.
+    /// Setting it leaves New Host….
     var selectedHostID: HostID? {
         get {
+            if isAddingHost { return nil }
             if let hostID { return hostID }
             return model.hosts.count == 1 ? model.hosts[0].id : nil
         }
-        set { hostID = newValue }
+        set {
+            hostID = newValue
+            isAddingHost = false
+        }
+    }
+
+    /// What the host picker shows and sets.
+    enum HostChoice: Hashable {
+        /// "Choose a Host": nothing picked yet.
+        case unchosen
+        /// A saved host, or a removed one a favorite still names.
+        case host(HostID)
+        /// New Host…: a destination typed in the dialog.
+        case newHost
+    }
+
+    /// The host picker's selection: ``selectedHostID``, or New Host….
+    var hostChoice: HostChoice {
+        get {
+            if isAddingHost { return .newHost }
+            return selectedHostID.map(HostChoice.host) ?? .unchosen
+        }
+        set {
+            switch newValue {
+            case .unchosen: selectedHostID = nil
+            case .host(let id): selectedHostID = id
+            case .newHost: isAddingHost = true
+            }
+        }
+    }
+
+    /// ``newHostDestination`` without the whitespace around it.
+    var trimmedNewHostDestination: String {
+        newHostDestination.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: Aliases
+
+    /// Reads the ssh configuration's aliases with the injected loader, off
+    /// the main actor, once per form.
+    func loadAliases() {
+        guard aliasLoad == nil else { return }
+        let loader = aliasLoader
+        aliasLoad = Task { [weak self] in
+            let found = await Task.detached(priority: .userInitiated) { loader() }.value
+            guard !Task.isCancelled else { return }
+            self?.aliases = found
+        }
+    }
+
+    /// The aliases offered for what is typed in the Destination field
+    /// (``SSHConfigAliases/suggestions(for:in:limit:)``).
+    var aliasSuggestions: [String] {
+        SSHConfigAliases.suggestions(for: newHostDestination, in: aliases)
     }
 
     /// Whether ``selectedHostID`` names a host that is gone.
@@ -278,27 +392,42 @@ final class NewSessionForm {
     // MARK: Result
 
     /// What the form asks for. With SSH and no host it names an empty host
-    /// ID, which ``problem`` reports first.
+    /// ID, which ``problem`` reports first. With New Host… it names the
+    /// plain host already saved for the destination, if any, else an empty
+    /// host ID: the host is only added by ``start()`` or ``save()``.
     var request: SessionRequest {
-        SessionRequest(
-            location: isRemote ? .remote(host: selectedHostID ?? HostID(raw: "")) : .local,
+        let host = isAddingHost ? model.plainHost(withDestination: newHostDestination) : selectedHostID
+        return SessionRequest(
+            location: isRemote ? .remote(host: host ?? HostID(raw: "")) : .local,
             profileID: profileID,
             workingDirectory: workingDirectory,
             options: options)
+    }
+
+    /// Whether the request is for a host New Host… will add (none is saved
+    /// for its destination yet).
+    private var addsHost: Bool {
+        isRemote && isAddingHost && model.plainHost(withDestination: newHostDestination) == nil
     }
 
     /// Why the form cannot be started or saved, or `nil`.
     var problem: String? {
         if let problem = locationProblem { return problem }
         if let problem = directoryProblem { return problem }
-        if let problem = model.requestProblem(request) { return problem }
+        // A host New Host… will add is not in the model yet: only the
+        // profile can be missing, which the model's check of the request
+        // as a local one says.
+        var checked = request
+        if addsHost { checked.location = .local }
+        if let problem = model.requestProblem(checked) { return problem }
         return hostProblem
     }
 
-    /// A host just added in Settings › Hosts has no destination until one
-    /// is typed there: starting on it could only fail.
+    /// A saved host without a usable destination (one just added with "+"
+    /// in Settings › Hosts has none until one is typed there): starting on
+    /// it could only fail.
     private var hostProblem: String? {
-        guard isRemote, let host = selectedHostID.flatMap({ model.host($0) }),
+        guard isRemote, !isAddingHost, let host = selectedHostID.flatMap({ model.host($0) }),
               ArmadaleCore.Host.destinationProblem(host.sshDestination) != nil
         else { return nil }
         return "“\(host.displayName)” has no usable destination. Set one in Settings › Hosts."
@@ -306,9 +435,12 @@ final class NewSessionForm {
 
     var isValid: Bool { problem == nil }
 
+    /// SSH without a host: none chosen, or New Host… with a destination
+    /// ``Host/destinationProblem(_:)`` refuses (its message).
     private var locationProblem: String? {
-        guard isRemote, selectedHostID == nil else { return nil }
-        return model.hosts.isEmpty ? "No hosts are saved. Add one with Add Host…" : "Choose a host."
+        guard isRemote else { return nil }
+        if isAddingHost { return ArmadaleCore.Host.destinationProblem(trimmedNewHostDestination) }
+        return selectedHostID == nil ? "Choose a host." : nil
     }
 
     private var directoryProblem: String? {
@@ -319,24 +451,50 @@ final class NewSessionForm {
     /// current choices (``AppModel/proposedFavoriteName(for:)``), which
     /// follows every change until the user edits the name.
     var name: String {
-        get { customName ?? model.proposedFavoriteName(for: request) }
+        get { customName ?? proposedName }
         set {
             guard newValue != name else { return }
             customName = newValue
         }
     }
 
+    /// The proposal for the current choices; with New Host… a host to be
+    /// added is named as it will be (``AppModel/newHostName(forDestination:)``),
+    /// so the name shown is the name saved, and it still equals the
+    /// proposal for the saved request.
+    private var proposedName: String {
+        guard addsHost, !trimmedNewHostDestination.isEmpty else {
+            return model.proposedFavoriteName(for: request)
+        }
+        return model.proposedFavoriteName(
+            for: request, hostName: model.newHostName(forDestination: newHostDestination))
+    }
+
     /// Whether the name is the user's rather than the proposal.
     var hasCustomName: Bool { customName != nil }
 
-    /// Start: saves the favorite first when Add to Favorites is on, then
-    /// starts the session in the pane. Returns the session, or `nil` (and
-    /// changes nothing) when the form is invalid, is not for a new session,
-    /// or the pane is gone or already has a session.
+    /// The request to start or save, with New Host…'s host now in the
+    /// model (added, or the plain one already saved for the destination);
+    /// the picker then shows that host, and a name that follows the
+    /// proposal names it. `nil` when the destination is refused.
+    private func committedRequest() -> SessionRequest? {
+        guard isRemote, isAddingHost else { return request }
+        guard let host = model.ensureHost(forDestination: newHostDestination) else { return nil }
+        selectedHostID = host
+        newHostDestination = ""
+        return request
+    }
+
+    /// Start: adds New Host…'s host if one is to be added, saves the
+    /// favorite when Add to Favorites is on, then starts the session in the
+    /// pane. Returns the session, or `nil` (and changes nothing) when the
+    /// form is invalid, is not for a new session, or the pane is gone or
+    /// already has a session.
     @discardableResult
     func start() -> SessionID? {
-        guard case .newSession(let pane) = mode, isValid, model.pane(pane)?.isEmpty == true else { return nil }
-        let request = request
+        guard case .newSession(let pane) = mode, isValid, model.pane(pane)?.isEmpty == true,
+              let request = committedRequest()
+        else { return nil }
         if addToFavorites { model.addFavorite(Favorite(name: name, request: request)) }
         return model.startSession(in: pane, request: request)
     }
@@ -356,13 +514,14 @@ final class NewSessionForm {
     /// Whether the sheet's Start or Save can be pressed: Start needs a valid
     /// form (``isValid``); Save the looser ``canSave``, so a broken
     /// favorite can still be renamed or otherwise edited from the chooser's
-    /// Edit…, as in Settings › Favorites.
+    /// Edit….
     var canConfirm: Bool {
         if case .newSession = mode { isValid } else { canSave }
     }
 
-    /// Save: adds the new favorite or updates the edited one; nothing is
-    /// started. Returns its ID, or `nil` when nothing was saved.
+    /// Save: adds New Host…'s host if one is to be added, then adds the
+    /// new favorite or updates the edited one; nothing is started. Returns
+    /// its ID, or `nil` when nothing was saved.
     @discardableResult
     func save() -> FavoriteID? {
         guard canSave else { return nil }
@@ -370,9 +529,10 @@ final class NewSessionForm {
         case .newSession:
             return nil
         case .newFavorite:
+            guard let request = committedRequest() else { return nil }
             return model.addFavorite(Favorite(name: name, request: request))
         case .editFavorite(let id):
-            guard model.favorite(id) != nil else { return nil }
+            guard model.favorite(id) != nil, let request = committedRequest() else { return nil }
             model.updateFavorite(Favorite(id: id, name: name, request: request))
             return id
         }

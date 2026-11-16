@@ -45,6 +45,16 @@ MIT License.</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.tinylittleapps.armadale.hierarchy-item</string>
 		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Armadale favorite</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.tinylittleapps.armadale.favorite</string>
+		</dict>
 	</array>
 </dict>
 </plist>

@@ -21,9 +21,3 @@ final class ArmadaleApplication: NSApplication {
         super.terminate(sender)
     }
 }
-
-extension Notification.Name {
-    /// Posted by ``AppDelegate/prepareForQuit()`` before it ends a sheet in
-    /// Settings, so its SwiftUI state lets go of it too.
-    static let armadaleWillQuit = Notification.Name("com.tinylittleapps.armadale.willQuit")
-}

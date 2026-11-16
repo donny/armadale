@@ -11,27 +11,25 @@ import UserNotifications
 /// handler and ending sheets before a quit.
 extension AppDelegate {
     /// Before AppKit's `terminate(_:)` (``ArmadaleApplication``), which does
-    /// nothing while a sheet is attached: every window's New Session or Edit
-    /// Favorite sheet is taken down without closing its pane (it keeps the
-    /// chooser, saved empty, and shows it again at the next launch); a sheet
-    /// in Settings (New Favorite, Configure…) is ended too. A cancelled quit
-    /// does not bring a sheet back: the pane's chooser is still there. The
-    /// chooser itself is a view in the pane, never a sheet, and holds
-    /// nothing up.
+    /// nothing while a sheet is attached: every window's New Session, Edit
+    /// Favorite or New Favorite sheet is taken down without closing its pane
+    /// (an empty pane keeps the chooser, saved empty, and shows it again at
+    /// the next launch); a sheet in Settings (Profiles' Configure…) is ended
+    /// too. A cancelled quit does not bring a sheet back: the pane's chooser
+    /// is still there. The chooser itself is a view in the pane, never a
+    /// sheet, and holds nothing up.
     func prepareForQuit() {
         Self.endSheetsForQuit(
             workspaceWindows: Array(windowControllers.values), settingsWindow: settingsWindowController?.window)
     }
 
     /// ``prepareForQuit()``'s work, separate so it can be tested: ends the
-    /// New Session or Edit Favorite sheet of every workspace window, and
-    /// any sheet on the Settings window (posting ``Notification/Name/armadaleWillQuit``
-    /// first, so its SwiftUI state lets go of it).
+    /// New Session, Edit Favorite or New Favorite sheet of every workspace
+    /// window, and any sheet on the Settings window.
     static func endSheetsForQuit(workspaceWindows: [WorkspaceWindowController], settingsWindow: NSWindow?) {
         for controller in workspaceWindows { controller.actions.endNewSessionSheet() }
         if let window = settingsWindow, let sheet = window.attachedSheet {
-            NotificationCenter.default.post(name: .armadaleWillQuit, object: nil)
-            if window.attachedSheet === sheet { window.endSheet(sheet) }
+            window.endSheet(sheet)
         }
     }
 

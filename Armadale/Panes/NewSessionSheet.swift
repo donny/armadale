@@ -3,15 +3,15 @@ import ArmadaleCore
 import SwiftUI
 
 /// The New Session dialog (DESIGN §8, "New sessions"): a sheet on the
-/// workspace window (``WorkspaceActions/newSession(in:)``), and in its
-/// favorite modes ("New Favorite", "Edit Favorite") a sheet in Settings ›
-/// Favorites. The rules are ``NewSessionForm``'s; this is only the view.
-/// Return presses Start while the form is valid (Save while it can be
-/// saved, ``NewSessionForm/canConfirm``); Escape cancels.
+/// workspace window, for a new session (``WorkspaceActions/newSession(in:)``)
+/// and in its favorite modes, "New Favorite" (the pane menu's Save as
+/// Favorite…, ``WorkspaceActions/saveAsFavorite(fromSession:)``) and "Edit
+/// Favorite" (the chooser's Edit…). The rules are ``NewSessionForm``'s;
+/// this is only the view. Return presses Start while the form is valid
+/// (Save while it can be saved, ``NewSessionForm/canConfirm``); Escape
+/// cancels.
 struct NewSessionSheet: View {
     @Bindable var form: NewSessionForm
-    /// Add Host…: opens Settings › Hosts; the sheet stays.
-    let showHosts: @MainActor () -> Void
     let onCancel: @MainActor () -> Void
     /// Start or Save was pressed and the form is valid.
     let onConfirm: @MainActor () -> Void
@@ -25,7 +25,7 @@ struct NewSessionSheet: View {
             Form {
                 // Return in a text field presses Start (or Save): the field
                 // takes the key before the default button sees it.
-                NewSessionFormFields(form: form, showHosts: showHosts, commit: {}, submit: confirm)
+                NewSessionFormFields(form: form, submit: confirm)
             }
             .formStyle(.columns)
             .padding(.horizontal, 20)
@@ -56,21 +56,15 @@ struct NewSessionSheet: View {
     }
 }
 
-/// The dialog's fields, shared by the sheet and the Settings › Favorites
-/// editor. `commit` is called when a field's editing ends (focus leaves a
-/// text field, Return) and whenever a picker, toggle or the Location
-/// changes, which is when the Favorites editor saves; the sheet passes a
-/// no-op and saves on its button. `submit` is Return in a text field (after
-/// `commit`): the sheet's Start or Save, nothing more in the editor.
+/// The dialog's fields. `submit` is Return in a text field: the sheet's
+/// Start or Save.
 struct NewSessionFormFields: View {
     @Bindable var form: NewSessionForm
-    let showHosts: @MainActor () -> Void
-    let commit: @MainActor () -> Void
     var submit: @MainActor () -> Void = {}
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
-        case name, directory, model, arguments
+        case name, destination, directory, model, arguments
     }
 
     var body: some View {
@@ -85,10 +79,10 @@ struct NewSessionFormFields: View {
             .pickerStyle(.segmented)
             if form.isRemote {
                 LabeledContent("Host") {
-                    HStack {
-                        hostPicker
-                        Button("Add Host…", action: showHosts)
-                    }
+                    hostPicker
+                }
+                if form.isAddingHost {
+                    destinationField
                 }
             }
             LabeledContent("Directory") {
@@ -102,18 +96,16 @@ struct NewSessionFormFields: View {
                     }
                 }
             }
-            // Attached once, to a row that is always shown: editing ended
-            // (focus left a text field, or Return), and every choice that
-            // is not typed.
-            .onSubmit { commit(); submit() }
-            .onChange(of: focus) { commit() }
+            // Attached once, to a row that is always shown.
+            .onSubmit(submit)
             .onChange(of: form.model.hosts.map(\.id)) { form.hostsDidChange() }
-            .onChange(of: form.isRemote) { commit() }
-            .onChange(of: form.selectedHostID) { commit() }
-            .onChange(of: form.profileID) { commit() }
-            .onChange(of: form.skipPermissions) { commit() }
-            .onChange(of: form.continueConversation) { commit() }
-            .onChange(of: form.sandbox) { commit() }
+            // New Host… (chosen, or picked at once when SSH has no host
+            // saved) gives the Destination field keyboard focus, once it
+            // is in the form.
+            .onChange(of: form.isAddingHost) { _, adding in
+                guard adding else { return }
+                Task { @MainActor in focus = .destination }
+            }
             profilePicker
         }
 
@@ -149,7 +141,7 @@ struct NewSessionFormFields: View {
                                 .labelsHidden()
                                 .autocorrectionDisabled()
                                 .focused($focus, equals: .model)
-                                .onSubmit { commit(); submit() }
+                                .onSubmit(submit)
                             flagNote("\(row.flag) <model>; empty adds nothing")
                         }
                     }
@@ -162,7 +154,7 @@ struct NewSessionFormFields: View {
                                 .autocorrectionDisabled()
                                 .font(.system(.body, design: .monospaced))
                                 .focused($focus, equals: .arguments)
-                                .onSubmit { commit(); submit() }
+                                .onSubmit(submit)
                             flagNote("Added last, split like a shell: spaces separate, quotes group")
                         }
                     }
@@ -185,24 +177,53 @@ struct NewSessionFormFields: View {
     private var nameField: some View {
         TextField("Name", text: $form.name)
             .focused($focus, equals: .name)
-            .onSubmit { commit(); submit() }
+            .onSubmit(submit)
     }
 
+    /// The saved hosts, then New Host…, after a divider when anything is
+    /// above it. "Choose a Host" only while nothing is chosen; a favorite's
+    /// removed host as "Host removed".
     private var hostPicker: some View {
-        Picker("Host", selection: $form.selectedHostID) {
-            if form.model.hosts.isEmpty {
-                Text("No Hosts").tag(HostID?.none)
-            } else if form.selectedHostID == nil {
-                Text("Choose a Host").tag(HostID?.none)
+        let hasItemsAbove = form.hostChoice == .unchosen || form.hostIsMissing || !form.model.hosts.isEmpty
+        return Picker("Host", selection: $form.hostChoice) {
+            if form.hostChoice == .unchosen {
+                Text("Choose a Host").tag(NewSessionForm.HostChoice.unchosen)
             }
             if form.hostIsMissing, let missing = form.selectedHostID {
-                Text("Host removed").tag(Optional(missing))
+                Text("Host removed").tag(NewSessionForm.HostChoice.host(missing))
             }
             ForEach(form.model.hosts) { host in
-                Text(host.displayName).tag(Optional(host.id))
+                Text(host.displayName).tag(NewSessionForm.HostChoice.host(host.id))
             }
+            if hasItemsAbove {
+                Divider()
+            }
+            Text("New Host…").tag(NewSessionForm.HostChoice.newHost)
         }
         .labelsHidden()
+    }
+
+    /// New Host…'s destination: `user@host` or an alias from the ssh
+    /// configuration, which are offered while typing. Return confirms
+    /// like the other fields.
+    private var destinationField: some View {
+        LabeledContent("Destination") {
+            VStack(alignment: .leading, spacing: 2) {
+                TextField(
+                    "Destination", text: $form.newHostDestination,
+                    prompt: Text("user@example.com or an SSH alias"))
+                    .labelsHidden()
+                    .autocorrectionDisabled()
+                    .focused($focus, equals: .destination)
+                    .onSubmit(submit)
+                    .textInputSuggestions {
+                        ForEach(form.aliasSuggestions, id: \.self) { alias in
+                            Text(alias).textInputCompletion(alias)
+                        }
+                    }
+                flagNote("Saved as a host when you \(form.isFavoriteMode ? "save" : "start"); port, key and other settings are in Settings › Hosts")
+            }
+        }
     }
 
     private var profilePicker: some View {
@@ -240,14 +261,12 @@ struct NewSessionFormFields: View {
             ? home : (typed.hasPrefix("~/") ? home + typed.dropFirst() : typed)
         panel.directoryURL = URL(fileURLWithPath: expanded, isDirectory: true)
         let form = form
-        let commit = commit
         let finish: @MainActor (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = panel.url else { return }
             form.workingDirectory = ProfileIcon.abbreviatingHome(url.path(percentEncoded: false), home: home)
-            commit()
         }
-        // A sheet on the window the form is in (the New Session sheet, or
-        // Settings), so the panel cannot outlive it.
+        // A sheet on the window the form is in (the dialog's), so the panel
+        // cannot outlive it.
         guard let window = NSApp.keyWindow else {
             panel.begin { response in MainActor.assumeIsolated { finish(response) } }
             return
