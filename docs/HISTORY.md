@@ -2465,6 +2465,34 @@ no Dock item, modifier flags 0x20000000, the real state directory last
 written on November 14. In `HANDOFF.md` the step's not-checked-live
 list is replaced by what is left.
 
+## November 16, 2026: Armadale 0.1.2 (29), built and notarized, not published (77a02cf)
+
+November 16, 2026, about 10:40, on the owner's word: a new notarized
+build for the owner's own use, because the installed 0.1.2 (28) of
+November 14 had neither the detection of sessions macOS ends after a
+quit nor favorites in the chooser and New Host…. The version stays
+0.1.2; only the build number rises.
+
+- `scripts/bump-build.sh`: 0.1.2 (28) to 0.1.2 (29), `project.yml`
+  only, committed as 77a02cf after the gate had passed on it (914
+  tests, no warnings; the SSH integration tests did not run, as in
+  every gate run).
+- `scripts/check-state-compat.sh`: the working tree writes schema 2,
+  and v0.1.0 and v0.1.1 both answer `newerVersion`.
+- `scripts/install-release.sh` on the clean tree at 77a02cf: the app
+  and the DMG both notarized ("Accepted", notary logs without issues)
+  and stapled, Gatekeeper "Notarized Developer ID" for both, and the
+  app installed over build 28 in `~/Applications`. The run took 2 min
+  35 s. It deleted the DMG of build 28 with `build/release/`.
+- Checked again by hand: the installed app is 0.1.2 (29), identical
+  to the archived app, its signature verifies, `spctl` accepts it as
+  "Notarized Developer ID" and its stapled ticket validates.
+
+Not done, on purpose: no tag, no GitHub Release, no state fixture, no
+change to the website, and no agent ran the installed app. The DMG's
+size and hash are in the local file of the Mac it was built on. How
+to publish this very build is under "Next" in `HANDOFF.md`.
+
 ---
 
 # Part 2: the history of each design section

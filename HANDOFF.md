@@ -27,18 +27,18 @@ finished changes" below). The same evening Armadale learned to detect
 that macOS ended the sessions a quit left running (Armadale switched
 off under Background App Activity) and to say so; that change was
 checked live the same night, with the owner at the switch ("From
-finished changes" below has what is left), and is not in the installed
-0.1.2. On November 16, 2026 favorites moved into the New Session
+finished changes" below has what is left). On November 16, 2026
+favorites moved into the New Session
 chooser (drag, Move Up, Move Down, Save as Favorite… in the pane
 menu), the New Session dialog learned to add a host (New Host…, with
 the aliases of the ssh configuration offered), and Settings lost its
 Favorites tab; that change was checked live the same day on a test
 build ("From finished changes" below has what is left and what was
-found) and is not in the installed 0.1.2 either. The last gate run:
-914 tests, zero warnings.
-**Armadale 0.1.2 (28) is built, notarized and stapled from 76562b7
-(November 14, 2026) and installed on the owner's Mac, but not
-released: no tag, no GitHub Release, no fixture ("Next" below).**
+found). The last gate run: 914 tests, zero warnings.
+**Armadale 0.1.2 (29) is built, notarized and stapled from 77a02cf
+(November 16, 2026) and installed on the owner's Mac, with everything
+above in it, but not released: no tag, no GitHub Release, no fixture
+("Next" below).**
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -111,6 +111,9 @@ in the heading or the text under it, their commits:
   Host… with suggestions, Settings with four tabs) and
   `scripts/check-quit.sh` passed; two notes for live checks in
   AGENTS.md; no code changed.
+- November 16, 2026: bump to 0.1.2 (29) (77a02cf); that commit built,
+  notarized, stapled and installed in `~/Applications` over build 28.
+  Not tagged or published.
 
 ## Next
 
@@ -124,19 +127,17 @@ live"); "From finished changes" below has what is left. What comes
 next waits for the owner.
 
 Waiting for owner decisions:
-- **Publishing 0.1.2.** The notarized DMG of 76562b7 exists only on
-  the Mac it was built on (`HANDOFF.local.md` there; `docs/HISTORY.md`,
-  "Armadale 0.1.2 (28), built and notarized, not published"), in
-  `build/release/`, which the next run of `scripts/release.sh`
-  deletes. The owner does not plan to publish for now (November 14,
-  2026). To publish that very build: tag 76562b7 as `v0.1.2`, create
-  the GitHub Release with the DMG under both names, and add the tag's
-  state fixture (README, "Releasing", steps 4 and 5). If anything is
-  committed to the app before then, bump the build number and build
-  again instead; the detection of sessions macOS ends after a quit
-  (November 14, 2026) and the step of November 16, 2026 were committed
-  after 76562b7, so a release that has them is a new build. The release notes should say that 0.1.2
-  writes state file schema 2, which 0.1.0 and 0.1.1 refuse.
+- **Publishing 0.1.2.** The notarized DMG of 77a02cf, build 29,
+  exists only on the Mac it was built on (`HANDOFF.local.md` there;
+  `docs/HISTORY.md`, "Armadale 0.1.2 (29), built and notarized, not
+  published"), in `build/release/`, which the next run of
+  `scripts/release.sh` deletes. The owner does not plan to publish for
+  now (November 14, 2026). To publish that very build: tag 77a02cf as
+  `v0.1.2`, create the GitHub Release with the DMG under both names,
+  and add the tag's state fixture (README, "Releasing", steps 4 and
+  5). If anything is committed to the app before then, bump the build
+  number and build again instead. The release notes should say that
+  0.1.2 writes state file schema 2, which 0.1.0 and 0.1.1 refuse.
 - **Three decisions the coordinator made** when restored sessions
   were attached at launch (November 14, 2026), each the owner's to
   overrule: the launch holds at most six of a host's sessions (open
