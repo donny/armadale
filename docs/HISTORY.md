@@ -2441,7 +2441,9 @@ What was seen.
 
 Found. The two Return behaviours above, which follow from "Return in a
 field confirms" and are now in DESIGN; whether Return should take a
-suggestion first is an owner decision (`HANDOFF.md`). A favorite row's
+suggestion first was put to the owner, who decided the same day to
+leave it as it is (the item is removed from `HANDOFF.md`'s pending
+decisions). A favorite row's
 help text is repeated in its accessibility help, once per text or image
 in the row, and two favorites can carry the same proposed name; both
 are older than the step and are in `HANDOFF.md`, not fixed.
@@ -3786,7 +3788,9 @@ with none highlighted submits the field, so the dialog confirms with
 the text as typed, and Return on a highlighted suggestion completes
 and submits in one keystroke. Both come from the field's `onSubmit`
 confirming the sheet (step 10b, "Return in a text field"). Left as it
-is and written into DESIGN; changing it is an owner decision.
+is and written into DESIGN. Asked the same day whether Return should
+take a suggestion first and leave the dialog open, the owner decided
+to leave it as it is.
 
 ### App lifecycle
 

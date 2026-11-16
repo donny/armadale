@@ -124,15 +124,6 @@ live"); "From finished changes" below has what is left. What comes
 next waits for the owner.
 
 Waiting for owner decisions:
-- **What Return does while aliases are offered** (found live, November
-  16, 2026; `docs/DESIGN.md` section 8, "Aliases"). In New Host…'s
-  Destination field, Return with the suggestions open and none
-  highlighted confirms the dialog with the text as typed (typing `ga`
-  and Return starts on a host named `ga`), and ↓ then Return takes the
-  highlighted alias and confirms in the same keystroke. Both follow
-  from "Return in a field confirms". Whether Return should instead
-  take a suggestion first and leave the dialog open is the owner's
-  call.
 - **Publishing 0.1.2.** The notarized DMG of 76562b7 exists only on
   the Mac it was built on (`HANDOFF.local.md` there; `docs/HISTORY.md`,
   "Armadale 0.1.2 (28), built and notarized, not published"), in
@@ -472,10 +463,11 @@ From finished changes: not checked live, and found and not fixed
     Settings at a quit (the unit test ends a plain sheet on the
     Settings window, not that SwiftUI one).
 
-  **Found and not fixed** (none of it from this step's code, except
-  the first, which is a choice):
-  - Return while aliases are offered confirms the dialog ("Waiting for
-    owner decisions" above).
+  Decided (the owner, November 16, 2026): Return while aliases are
+  offered keeps confirming the dialog, with the text as typed or with
+  the alias ↓ highlighted (`docs/DESIGN.md` section 8, "New Host…").
+
+  **Found and not fixed** (neither from this step's code):
   - A favorite row's help text is repeated in its accessibility help,
     once per text or image in the row ("Start “Alpha”, Start “Alpha”,
     Start “Alpha”"; twice in a compact row), so VoiceOver would read it
