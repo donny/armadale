@@ -98,6 +98,17 @@ keys go through a keystroke helper as press and release events, never as
 event flags alone: one helper left ⌘ and ⇧ held system-wide for minutes.
 Afterwards `CGEventSource.flagsState(.combinedSessionState)` must print
 0 or 0x20000000. Do not clear the owner's clipboard in a copy test.
+The Dock owns a click-through window over the whole display at layer
+20 (macOS 27.2), so the frontmost window under any point is the Dock's:
+skip that one window (owner Dock, bounds equal to the display's) and
+judge by the next. A SwiftUI context menu opens with the row's
+`AXShowMenu` and its items answer `AXPress`, but `AXCancel` on it
+reports success and leaves it open; close it with Escape, after the
+window list shows a window of the app above layer 0. Escape typed with
+no menu up reaches the pane, and in an empty pane it closes the pane.
+To give a test build a home folder of its own (for what it reads
+under `~`, such as `~/.ssh/config`), add `CFFIXED_USER_HOME` to the
+copy's `LSEnvironment`: `NSHomeDirectory()` follows it.
 
 Probes that need no input and are safe at any time: the Dock's items
 through System Events (`tell process "Dock" to return name of every UI

@@ -2358,6 +2358,111 @@ first is moot (the tab is gone; a broken favorite is repaired through
 the chooser's Edit…, which was already there), the second names a
 button that no longer exists.
 
+## November 16, 2026: favorites in the chooser and New Host…, checked live
+
+November 16, 2026, about 10:20 to 10:31, with the owner's word that
+the Mac was free. The Debug build of the final tree (the code of
+3a5183c), as a copy under `/tmp` that carried its own state directory
+and defaults suite in its `Info.plist` and was started through Launch
+Services; the lock in the test directory was confirmed at every launch.
+The installed app was not running and was not touched. Five favorites
+(one broken) and a profile whose program reports a directory with
+OSC 7 were staged in the test state file. Everything was read from the
+accessibility tree, the on-screen window list and the state file
+(Screen Recording is not granted here, so nothing was seen as a
+picture). Buttons, menu items and the rows' accessibility actions were
+pressed by pid; the drags, the clicks on rows, the typing into the
+Destination field and five keys (Escape, Return three times, ↓) were
+synthetic events, each sent only with the screen unlocked, the test
+build frontmost by pid and its own window under the pointer. No code
+changed.
+
+What was seen.
+- **Move Up and Move Down.** The first row offers no Move Up and the
+  last no Move Down, as accessibility actions and, disabled, in the
+  context menu (Edit…, separator, Move Up, Move Down, separator,
+  Remove); pressed as an accessibility action and chosen from the menu,
+  each moved its row by one, the broken favorite included, and the
+  order reached the state file.
+- **Drag against click.** A row dragged down onto another landed below
+  it, one dragged up landed above it, a broken row dragged like the
+  rest, a press and release on the same row moved nothing and started
+  nothing; in a 205 pt (compact) chooser, and from a 99 pt (tiny)
+  chooser onto a row of another pane's chooser, the same. A plain click
+  then started a favorite (in the full-size and in a tiny chooser), and
+  a click on the broken row did nothing. No drag started a session, and
+  the app took every drag without a crash, so SwiftUI builds the drag's
+  payload where the code expects it. A favorite dropped on the sidebar,
+  on the tab bar and on a terminal changed nothing (the shell's screen,
+  read with the helper's `history`, held only its prompt), and a tab
+  dropped on a favorite row changed nothing.
+- **Save as Favorite….** The pane menu of a running pane reads Split
+  Right, Split Down, separator, Save as Favorite…, separator, Theme; an
+  empty pane's has no such item. It opened "New Favorite" on the
+  window with the name "Reporter in /private/tmp", Local, the directory
+  `/private/tmp` (what the program had reported; the session had
+  started in `~`), the session's profile and Cancel and Save. Saved
+  after the switch to SSH described next, it added the favorite and
+  started nothing. A row's Edit…, pressed as an accessibility action,
+  opened "Edit Favorite" the same way.
+- **New Host….** With no host saved, SSH showed the picker on New
+  Host…, the Destination field with keyboard focus, the message asking
+  for a destination and Save disabled, and the sheet grew by the row
+  (309 to 412 pt). With hosts saved the picker lists them, a separator
+  and New Host…; with several it reads "Choose a Host". Typing made
+  the name follow ("Reporter on gamma.invalid in /private/tmp"), Return
+  in the field saved: one plain host named after the destination, a
+  favorite on it, no session, no ssh process. Cancel after typing
+  another destination added nothing. New Host… with a destination
+  already saved added no second host. In the New Session dialog, Start
+  with a destination that resolves nowhere (`epsilon.invalid`) added
+  the host, started the session on it, and the pane showed
+  "Reconnecting…" with ssh's "Could not resolve hostname"; Close Pane
+  ended it. Nothing connected anywhere. Settings › Hosts listed the
+  added host with only its destination set.
+- **Aliases.** This Mac has no `~/.ssh/config`, so nothing was offered
+  (and nothing went wrong). To see the suggestions, the copy was given a
+  home folder of its own (`CFFIXED_USER_HOME` in `LSEnvironment`, which
+  `NSHomeDirectory()` follows) holding a config of fake names: two on
+  one `Host` line, a wildcard and a negated pattern, an `Include`, a
+  quoted pattern with a space and one starting with `-`. The list
+  appeared under the field as soon as it had focus, in the sheet, with
+  the four usable names in the file's order, the included one in its
+  place; `g` narrowed it to three and `ga` to two. **Return with the
+  list open and nothing highlighted confirmed the dialog with the text
+  as typed** (a host named `ga` was saved); **↓ highlighted an alias and
+  Return then took it and confirmed in the same keystroke.**
+- **Settings.** Four tabs: General, Appearance, Profiles, Hosts. With
+  `settingsTab` saved as `favorites` it opened General and saved
+  `general`.
+- **Quit.** SIGTERM with a New Session sheet up: gone in 0.4 s, the
+  state saved with the pane still empty. `scripts/check-quit.sh`
+  against the Debug build passed its three cases (128, 67 and 133 ms).
+
+Found. The two Return behaviours above, which follow from "Return in a
+field confirms" and are now in DESIGN; whether Return should take a
+suggestion first is an owner decision (`HANDOFF.md`). A favorite row's
+help text is repeated in its accessibility help, once per text or image
+in the row, and two favorites can carry the same proposed name; both
+are older than the step and are in `HANDOFF.md`, not fixed.
+
+On the way. The Dock owns a click-through window over the whole
+display at layer 20, so "the frontmost window under the point" was the
+Dock's everywhere and the first drag was refused by the helper's own
+guard; the guard now skips that one window. A SwiftUI context menu
+opened with the row's `AXShowMenu` and its items answered `AXPress`,
+but `AXCancel` on it returned success and left it open (Escape closed
+it, sent only after the window list showed the menu). Both are in
+`AGENTS.md` now. The helper's source is in the sessions' shared notes
+folder, not in the repository.
+
+Afterwards: the test sessions ended with the test directory's own
+helper before each quit, the build ended by pid, the test directories,
+the copy and the defaults suite removed, no Armadale or helper process,
+no Dock item, modifier flags 0x20000000, the real state directory last
+written on November 14. In `HANDOFF.md` the step's not-checked-live
+list is replaced by what is left.
+
 ---
 
 # Part 2: the history of each design section
@@ -3672,6 +3777,16 @@ headers, so the menu cannot be opened then; the remaining case is a
 full-screen transition, where New Session… does nothing either);
 aliases are deduplicated case-sensitively and destinations compared
 exactly; `Include ${VAR}` and `%` tokens are not expanded.
+
+**November 16, 2026: checked live; Return while aliases are offered.**
+The step was checked live the same day (Part 1, "favorites in the
+chooser and New Host…, checked live"). One thing no test could show:
+with SwiftUI's suggestions open under the Destination field, Return
+with none highlighted submits the field, so the dialog confirms with
+the text as typed, and Return on a highlighted suggestion completes
+and submits in one keystroke. Both come from the field's `onSubmit`
+confirming the sheet (step 10b, "Return in a text field"). Left as it
+is and written into DESIGN; changing it is an owner decision.
 
 ### App lifecycle
 

@@ -2852,7 +2852,10 @@ And for the dialog:
   (`AppModel.newHostName(forDestination:)`), so the name shown is the name
   saved, and it equals the proposal for the saved request. Return
   in the Destination field confirms like the other fields; choosing New
-  Host… moves keyboard focus to it.
+  Host… moves keyboard focus to it. While aliases are offered (below)
+  Return still confirms: with none highlighted, with the text as typed;
+  after ↓ has highlighted one, with that alias, taken and confirmed by
+  the same keystroke.
 - **Aliases.** Choosing New Host… reads the host aliases of the user's
   ssh configuration once per form, off the main actor
   (`NewSessionForm.loadAliases()`, a detached task), with the loader the
@@ -2860,7 +2863,8 @@ And for the dialog:
   home folder (`WorkspaceActions.sshAliasLoader`, set by the app
   delegate); the defaults of both find none, so no test reads the real
   `~/.ssh/config`. Nothing is read at launch. They are offered with
-  SwiftUI's text input suggestions on the Destination field, matched by
+  SwiftUI's text input suggestions on the Destination field (a list under
+  the field, shown as soon as the field has focus, in the sheet too), matched by
   `SSHConfigAliases.suggestions(for:in:limit:)` (pure, tested): all of
   them while nothing is typed, else those starting with the text, then
   those containing it, ignoring case, at most 20, leaving out an exact

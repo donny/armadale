@@ -32,9 +32,10 @@ finished changes" below has what is left), and is not in the installed
 chooser (drag, Move Up, Move Down, Save as Favorite… in the pane
 menu), the New Session dialog learned to add a host (New Host…, with
 the aliases of the ssh configuration offered), and Settings lost its
-Favorites tab; that change has unit tests only, is **not checked
-live** ("Next" below) and is not in the installed 0.1.2 either. The
-last gate run: 914 tests, zero warnings.
+Favorites tab; that change was checked live the same day on a test
+build ("From finished changes" below has what is left and what was
+found) and is not in the installed 0.1.2 either. The last gate run:
+914 tests, zero warnings.
 **Armadale 0.1.2 (28) is built, notarized and stapled from 76562b7
 (November 14, 2026) and installed on the owner's Mac, but not
 released: no tag, no GitHub Release, no fixture ("Next" below).**
@@ -104,7 +105,12 @@ in the heading or the text under it, their commits:
   Up, Move Down), Save as Favorite… in the pane menu, New Host… with
   ssh config aliases in the New Session dialog, and Settings loses its
   Favorites tab; the owner's six decisions of that day, after a read
-  of how about 34 other apps do it (3a5183c). Not checked live.
+  of how about 34 other apps do it (3a5183c).
+- November 16, 2026: that step checked live (the chooser's drag
+  against its click, Move Up and Move Down, Save as Favorite…, New
+  Host… with suggestions, Settings with four tabs) and
+  `scripts/check-quit.sh` passed; two notes for live checks in
+  AGENTS.md; no code changed.
 
 ## Next
 
@@ -112,13 +118,21 @@ Nothing is being built. Everything the owner gave the go-ahead for on
 November 14, 2026 is built, and checked live where the Mac was free
 (`docs/HISTORY.md`, the entries of that day). The step of November 16,
 2026 (favorites in the chooser, New Host…, Settings without Favorites)
-is built, reviewed and committed, and **its live checks are owed**:
-the list is under "From finished changes" below, and
-`scripts/check-quit.sh` is due with them, since the step touches
-sheets and the chooser. Both wait for the owner's word that the Mac is
-free. What comes after that waits for the owner.
+is built, reviewed, committed and checked live
+(`docs/HISTORY.md`, "favorites in the chooser and New Host…, checked
+live"); "From finished changes" below has what is left. What comes
+next waits for the owner.
 
 Waiting for owner decisions:
+- **What Return does while aliases are offered** (found live, November
+  16, 2026; `docs/DESIGN.md` section 8, "Aliases"). In New Host…'s
+  Destination field, Return with the suggestions open and none
+  highlighted confirms the dialog with the text as typed (typing `ga`
+  and Return starts on a host named `ga`), and ↓ then Return takes the
+  highlighted alias and confirms in the same keystroke. Both follow
+  from "Return in a field confirms". Whether Return should instead
+  take a suggestion first and leave the dialog open is the owner's
+  call.
 - **Publishing 0.1.2.** The notarized DMG of 76562b7 exists only on
   the Mac it was built on (`HANDOFF.local.md` there; `docs/HISTORY.md`,
   "Armadale 0.1.2 (28), built and notarized, not published"), in
@@ -435,38 +449,44 @@ From finished changes: not checked live, and found and not fixed
     not show its host.
 - Favorites in the chooser, Save as Favorite…, New Host…, Settings
   without Favorites (November 16, 2026, 3a5183c; `docs/DESIGN.md` section 8,
-  "New sessions"). Unit-tested only; **nothing checked live yet**:
-  - In the chooser: a drag reordering the favorites while a plain click
-    still starts one (the drag and the tap gesture together), the drop
-    indicator on the right edge (it relies on SwiftUI building the drag
-    payload when the drag starts), a drag in the scrolling variant of the
-    list, in a compact (< 340 pt) and a tiny (< 180 pt) pane, and between
-    two panes' choosers; a broken favorite dragged and moved; a favorite
-    dropped on a terminal, the sidebar or the tab bar doing nothing, and
-    a tab dropped on a favorite row doing nothing; Move Up and Move Down
-    from the context menu (disabled at the ends) and as accessibility
-    actions (VoiceOver too); the arrow-key selection after a move;
-    that SwiftUI builds the drag's payload on the main thread (the
-    payload notes the dragged favorite for the indicator).
-  - Save as Favorite… from a running pane's "…" and right-click: the
-    sheet, the directory after `cd` with a shell that sends OSC 7 (with
-    a shell that sends none it is the directory the session started in), a
-    remote pane, a pane whose host or profile was removed, the item
-    absent from an empty pane's menu; a pane of a window that is not
-    the key one.
-  - New Host…: the picker's divider and item, the Destination field
-    appearing and taking keyboard focus (focus is set on the next turn),
-    SSH with no host saved going there at once (and the picker then
-    showing New Host… with no separator above it), the alias
-    suggestions popup in a sheet (`textInputSuggestions`), Return in
-    the field, and whether Return with the popup open takes the
-    suggestion or confirms the sheet, Cancel adding nothing, the
-    sheet's height following the new row, and a real start on a host
-    added this way (Lima).
-  - Settings with four tabs; a saved Favorites tab opening General;
-    ⌘Q with each kind of sheet up, Profiles' Configure… in Settings
-    included (the unit test ends a plain sheet on the Settings window,
-    not that SwiftUI one). `scripts/check-quit.sh` was not run.
+  "New sessions"). Checked live the same day on a test build with its
+  own state directory (`docs/HISTORY.md`, "favorites in the chooser and
+  New Host…, checked live"). **Not checked:**
+  - What the eye would see: the drop indicator and its edge, the
+    dragged row's preview, the compact and tiny cards' look (Screen
+    Recording is not granted where it was checked; everything was read
+    from the accessibility tree and the state file).
+  - A drag in the scrolling variant of the list (seven favorites did
+    not scroll); the arrow-key selection after a move; VoiceOver.
+  - Save as Favorite… from a right-click on the header (the "…" button
+    was used), on a remote pane, on a pane whose host or profile was
+    removed, and in a window that is not the key one.
+  - A real start on a host added through New Host… that connects (the
+    start was made on a name that resolves nowhere: the host was added,
+    the session started and the pane showed ssh's message). New Host…
+    alone cannot reach the Lima VM, which needs its config file.
+  - The suggestions with a real `~/.ssh/config` (they were seen with a
+    staged home folder, `CFFIXED_USER_HOME`); a click on a suggestion.
+  - ⌘Q with a sheet up (SIGTERM with a New Session sheet up was seen:
+    quit in 0.4 s, the pane saved empty), and Profiles' Configure… in
+    Settings at a quit (the unit test ends a plain sheet on the
+    Settings window, not that SwiftUI one).
+
+  **Found and not fixed** (none of it from this step's code, except
+  the first, which is a choice):
+  - Return while aliases are offered confirms the dialog ("Waiting for
+    owner decisions" above).
+  - A favorite row's help text is repeated in its accessibility help,
+    once per text or image in the row ("Start “Alpha”, Start “Alpha”,
+    Start “Alpha”"; twice in a compact row), so VoiceOver would read it
+    two or three times: `.help` on the row reaches each leaf and the
+    row combines its children. Older than this step (the row has had
+    both modifiers since step 10c).
+  - Two favorites can carry the same name: Save as Favorite… twice
+    from one pane gives two "Reporter on gamma.invalid in /private/tmp".
+    The form passes its proposed name as a name, and `addFavorite`
+    makes only a blank name unique (as Add to Favorites has since step
+    10b).
 - Help › Keyboard Shortcuts (October 29, 2026, c4e45e0). **Not checked
   live** (the Mac was not free): the window itself (Help › Keyboard
   Shortcuts, its size, ⌘W closing it, menu bar mode).
