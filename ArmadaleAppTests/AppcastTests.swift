@@ -154,8 +154,10 @@ struct AppcastTests {
     }
 
     /// scripts/appcast.py, as scripts/release.sh and scripts/appcast.sh
-    /// run it (`item`, then `insert` into a copy of the feed), checked by
-    /// the same rule, so the script and the rule cannot drift.
+    /// run it (`item`, then `insert` into the feed), checked by the same
+    /// rule, so the script and the rule cannot drift. The feed it inserts
+    /// into is the real one as it was before its first item, so the test
+    /// does not depend on which releases the real feed holds.
     @Test func theScriptWritesItemsTheRuleAccepts() throws {
         let root = Self.feedURL.deletingLastPathComponent().deletingLastPathComponent()
         let directory = FileManager.default.temporaryDirectory
@@ -163,7 +165,10 @@ struct AppcastTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let feed = directory.appendingPathComponent("appcast.xml")
-        try FileManager.default.copyItem(at: Self.feedURL, to: feed)
+        let real = try String(contentsOf: Self.feedURL, encoding: .utf8)
+        let marker = try #require(real.range(of: "<!-- Items, newest first. -->"))
+        try (String(real[..<marker.upperBound]) + "\n  </channel>\n</rss>\n")
+            .write(to: feed, atomically: true, encoding: .utf8)
         let notes = directory.appendingPathComponent("notes.html")
         try "<p><strong>November 16, 2026</strong></p>\n<h3>Updates</h3>\n<p>Armadale updates itself.</p>"
             .write(to: notes, atomically: true, encoding: .utf8)

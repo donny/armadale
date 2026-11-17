@@ -11,5 +11,33 @@
     <description>New versions of Armadale.</description>
     <language>en</language>
     <!-- Items, newest first. -->
+    <item>
+      <title>Armadale 0.1.2</title>
+      <pubDate>Tue, 17 Nov 2026 16:55:20 +0000</pubDate>
+      <sparkle:version>30</sparkle:version>
+      <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>27.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+<p><strong>November 16, 2026</strong></p>
+<h3>Favorites are managed in the New Session chooser</h3>
+<p>Drag a favorite to reorder it, or right-click it for Edit…, Move Up, Move Down and Remove. A running pane’s menu has Save as Favorite…, and Settings no longer has a Favorites tab.</p>
+<h3>Add a host while starting a session</h3>
+<p>The New Session dialog has New Host…: type a destination, with the aliases of your <code>~/.ssh/config</code> offered as you type.</p>
+<h3>Armadale updates itself</h3>
+<p>Check for Updates… in the Armadale menu looks for a new version, and Armadale can look once a day if you allow it. Your sessions keep running through an update as they do through a quit, and Armadale asks first if any would end.</p>
+<p><strong>November 14, 2026</strong></p>
+<h3>Sessions in tabs you are not looking at come back at launch</h3>
+<p>After a relaunch they are reattached in the background, so an agent that finishes there still asks for your attention. Before, a session waited until its tab was shown.</p>
+<h3>Armadale says when macOS ended your sessions</h3>
+<p>With Armadale switched off under Background App Activity in System Settings, macOS ends local sessions a few seconds after a quit. Armadale now notices at the next launch and offers to open that setting.</p>
+<h3>A safer saved layout</h3>
+<p>Only one copy of Armadale uses a saved layout at a time, the layout file is backed up, and sessions Armadale cannot account for are left running. The file has a new format: 0.1.1 and earlier refuse a layout saved by this version, and leave it as it is.</p>
+<p><strong>November 12, 2026</strong></p>
+<h3>Armadale comes to the front when it is asked for</h3>
+<p>Settings… and Open Armadale in the menu bar item’s menu, and the question asked when quitting from the Dock or a script, no longer open behind the app you were in.</p>
+      ]]></description>
+      <sparkle:fullReleaseNotesLink>https://armadale.dev/changelog.html</sparkle:fullReleaseNotesLink>
+      <enclosure url="https://github.com/donny/armadale/releases/download/v0.1.2/Armadale-0.1.2.dmg" length="17162822" type="application/octet-stream" sparkle:edSignature="qui1R/1gp2NRWAv6oN2zub0RyAaTkRuNOd6XqVuihd8ImO2OeTJtlnahwRyag6oZaIdtglfBJbcljFR1/vkoCQ=="/>
+    </item>
   </channel>
 </rss>
