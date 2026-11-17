@@ -3864,8 +3864,9 @@ armadale/
 │                                    render-dmg-background.swift, dmg/ (settings.py and the
 │                                    generated window background)
 ├── docs/                            DESIGN.md (the contract), HISTORY.md (why and when),
-│                                    index.html, CNAME, .nojekyll (the website, served by
-│                                    GitHub Pages at armadale.dev; README),
+│                                    index.html, changelog.html, CNAME, .nojekyll (the
+│                                    website, served by GitHub Pages at armadale.dev; README;
+│                                    the changelog page is kept as AGENTS.md says),
 │                                    icon/AppIcon.svg (generated master vector)
 ├── LICENSE, CONTRIBUTING.md         MIT license; contribution terms
 ├── THIRD_PARTY_LICENSES.md          bundled components' licenses, colour-scheme credits

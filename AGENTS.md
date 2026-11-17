@@ -49,9 +49,10 @@ loop, and it has worked well:
 3. Findings go back to the implementer as a numbered fix list with
    decisions already made (blocker / medium / low); it fixes and re-verifies.
 4. The coordinating session runs the full build and test command itself,
-   checks for stray processes, commits `Step N: …` on `main` with no
-   Claude attribution (no `Co-Authored-By` trailer, no "Generated with"
-   line), pushes, and notifies the owner.
+   checks for stray processes, checks that a change a user would notice
+   is on the changelog page ("The changelog page" below), commits
+   `Step N: …` on `main` with no Claude attribution (no `Co-Authored-By`
+   trailer, no "Generated with" line), pushes, and notifies the owner.
 
 The owner wants to give the go-ahead before each step starts, and
 sometimes runs other UI-driving agents on this Mac. Ask before starting a
@@ -67,6 +68,57 @@ the change that resolved them. HANDOFF says what is open and points to
 the account; the account itself (an investigation, a comparison, what
 was measured) belongs in HISTORY. Nothing about a particular Mac goes
 into HANDOFF: it goes into `HANDOFF.local.md`.
+
+## The changelog page
+
+`docs/changelog.html` (https://armadale.dev/changelog.html) tells the
+people who use Armadale what changed, newest first. It is a static
+page kept by hand, and it is the third account of a change, the short
+one: `git log` has every commit, `docs/HISTORY.md` has how and why,
+and the page has what a user would notice. **A change a user of the
+app would notice gets its item on the page in the commit that makes
+the change**; with the process above, the implementer writes it and
+the coordinating session checks it before committing. A change nobody
+using the app can see leaves the page alone.
+
+- **What goes in:** a new feature; a change in how something behaves
+  or looks; a fix for something a user could have met in a released
+  build; anything a user has to know before updating (a saved layout
+  that older versions refuse). **What stays out:** refactors, tests,
+  scripts, the release pipeline, documents, rules for agents, live
+  checks, build number bumps, and a fix to something that has not been
+  released yet (that belongs in the item of the thing it fixes).
+- **How much.** The owner wants the page short. One item per change
+  as a user would name it, never one per commit: a title of a few
+  words (`<h3>`) and at most one short paragraph of one or two plain
+  sentences (`<p>`; a small change has the title alone). No type
+  names, file names, commit hashes or names of internals, and nothing
+  about how it was built or checked. A day of work is one to three
+  items; when a day has more, they are too small, so merge them or
+  leave the smallest out. When later work changes something that is
+  still under "Next release", rewrite its item to say how it ended up
+  and move it to the day that work was finished, rather than add a
+  second item.
+- **Where.** New work goes into the first section, "Next release", in
+  the `<li>` of the day it was committed: one `<li>` per day in a
+  section, newest day first, with the date written out ("November 16,
+  2026") and the ISO date in `datetime`. When a release has used that
+  section up, start it again; the comment at the top of the page's
+  `<main>` has the markup for a day and for the section.
+- **At a release** (README, "Releasing", step 4), once the GitHub
+  Release exists: "Next release" becomes the version's section, with
+  the version as its heading, `v<version>` as its id, the release date
+  beside the heading, and the "Latest release" pill, which the release
+  before gives up. The GitHub Release's notes are written from that
+  section.
+- The page is user-visible text, so the product rules hold: "the
+  persistence helper", never the runtime's name.
+
+`ChangelogPageTests` (in `ArmadaleAppTests`, so in the gate) holds the
+page's form: sections and days newest first, dates that are real and
+written out, one section marked as the latest release, and the
+runtime's name nowhere on the site. No test can tell that an item is
+missing or too long; that is on whoever commits.
 
 ## Rules learned the hard way
 

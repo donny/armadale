@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Changelog · Armadale</title>
+  <meta name="description" content="What has changed in Armadale, the native macOS terminal for persistent agent sessions, newest first.">
+  <link rel="icon" type="image/svg+xml" href="icon/AppIcon.svg">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f5f7;
+      --fg: #1d1d1f;
+      --muted: #6e6e73;
+      --accent: #f26b4a;
+      --accent-fg: #1d1d1f;
+      --rule: rgba(0, 0, 0, 0.12);
+      --tint: rgba(0, 0, 0, 0.06);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1e2228;
+        --fg: #f0f0f2;
+        --muted: #9a9ea6;
+        --rule: rgba(255, 255, 255, 0.14);
+        --tint: rgba(255, 255, 255, 0.1);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font: 17px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      padding: 0 16px;
+    }
+    a { color: inherit; }
+    .top, main { width: 100%; max-width: 720px; margin: 0 auto; }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 0;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .brand img { width: 32px; height: 32px; }
+    .download {
+      background: var(--accent);
+      color: var(--accent-fg);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 7px 16px;
+      border-radius: 999px;
+    }
+    .download:hover { filter: brightness(1.06); }
+    .brand:focus-visible, .download:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+    main { flex: 1; padding: 40px 0 72px; }
+    h1 {
+      font-size: 40px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin: 0 0 8px;
+    }
+    .lede { margin: 0; color: var(--muted); font-size: 19px; }
+
+    /* A release: its heading, one line about it, then its days. */
+    .release { margin-top: 56px; }
+    .release-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 4px 12px;
+    }
+    .release h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      line-height: 1.2;
+      margin: 0;
+    }
+    .pill {
+      position: relative;
+      top: -4px;
+      background: var(--tint);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .pill.latest { background: var(--accent); color: var(--accent-fg); }
+    .release-head time { margin-left: auto; color: var(--muted); font-size: 15px; }
+    .release-note { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
+
+    /* A day: the date beside what changed on it. */
+    .entries { list-style: none; margin: 20px 0 0; padding: 0; }
+    .entries > li {
+      display: grid;
+      grid-template-columns: 9.5rem minmax(0, 1fr);
+      column-gap: 24px;
+      align-items: baseline;
+      padding: 20px 0;
+      border-top: 1px solid var(--rule);
+    }
+    .entries time { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+    .entries h3 { font-size: 17px; font-weight: 600; margin: 0; text-wrap: balance; }
+    .entries h3:not(:first-child) { margin-top: 16px; }
+    .entries p { margin: 2px 0 0; color: var(--muted); font-size: 16px; text-wrap: pretty; }
+    code { font: 0.9em ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; }
+
+    footer {
+      border-top: 1px solid var(--rule);
+      padding: 16px 0 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    @media (max-width: 600px) {
+      h1 { font-size: 32px; }
+      main { padding-top: 24px; }
+      .release { margin-top: 44px; }
+      .release-head time { margin-left: 0; flex-basis: 100%; }
+      .entries > li { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./"><img src="icon/AppIcon.svg" alt="" width="32" height="32">Armadale</a>
+    <a class="download" href="https://github.com/donny/armadale/releases/latest/download/Armadale.dmg">Download</a>
+  </header>
+  <main>
+    <h1>Changelog</h1>
+    <p class="lede">What has changed in Armadale, newest first.</p>
+
+    <!--
+      How this page is kept: AGENTS.md, "The changelog page". In short:
+
+      - A change a user of the app would notice gets an item here in the
+        commit that makes it: an <h3> of a few words and at most one short
+        <p>. Not one item per commit, and nothing a user cannot see.
+      - Items sit in the <li> of the day they were finished, newest day
+        first, one <li> per day in a section:
+
+          <li>
+            <time datetime="2026-11-16">November 16, 2026</time>
+            <div>
+              <h3>What changed</h3>
+              <p>One or two plain sentences.</p>
+            </div>
+          </li>
+
+      - New work goes into "Next release", the first section. When a release
+        has used that section up, start it again above the others:
+
+          <section class="release" id="next">
+            <div class="release-head">
+              <h2>Next release</h2>
+              <span class="pill">Not yet released</span>
+            </div>
+            <p class="release-note">In the <a href="https://github.com/donny/armadale">source on GitHub</a> now, and in the download with the next release.</p>
+            <ol class="entries">
+            </ol>
+          </section>
+
+      - At a release, "Next release" becomes that version's section: id
+        "v0.1.2", <h2>0.1.2</h2>, the "Latest release" pill (taken off the
+        release before), the release date as a <time> in the heading, and a
+        note with the links, as 0.1.1 has below.
+
+      ChangelogPageTests (ArmadaleAppTests) holds the form of the page.
+    -->
+
+    <section class="release" id="next">
+      <div class="release-head">
+        <h2>Next release</h2>
+        <span class="pill">Not yet released</span>
+      </div>
+      <p class="release-note">In the <a href="https://github.com/donny/armadale">source on GitHub</a> now, and in the download with the next release.</p>
+      <ol class="entries">
+        <li>
+          <time datetime="2026-11-16">November 16, 2026</time>
+          <div>
+            <h3>Favorites are managed in the New Session chooser</h3>
+            <p>Drag a favorite to reorder it, or right-click it for Edit…, Move Up, Move Down and Remove. A running pane’s menu has Save as Favorite…, and Settings no longer has a Favorites tab.</p>
+            <h3>Add a host while starting a session</h3>
+            <p>The New Session dialog has New Host…: type a destination, with the aliases of your <code>~/.ssh/config</code> offered as you type.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-11-14">November 14, 2026</time>
+          <div>
+            <h3>Sessions in tabs you are not looking at come back at launch</h3>
+            <p>After a relaunch they are reattached in the background, so an agent that finishes there still asks for your attention. Before, a session waited until its tab was shown.</p>
+            <h3>Armadale says when macOS ended your sessions</h3>
+            <p>With Armadale switched off under Background App Activity in System Settings, macOS ends local sessions a few seconds after a quit. Armadale now notices at the next launch and offers to open that setting.</p>
+            <h3>A safer saved layout</h3>
+            <p>Only one copy of Armadale uses a saved layout at a time, the layout file is backed up, and sessions Armadale cannot account for are left running. The file has a new format: 0.1.1 and earlier refuse a layout saved by this version, and leave it as it is.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-11-12">November 12, 2026</time>
+          <div>
+            <h3>Armadale comes to the front when it is asked for</h3>
+            <p>Settings… and Open Armadale in the menu bar item’s menu, and the question asked when quitting from the Dock or a script, no longer open behind the app you were in.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="release" id="v0.1.1">
+      <div class="release-head">
+        <h2>0.1.1</h2>
+        <span class="pill latest">Latest release</span>
+        <time datetime="2026-11-05">November 5, 2026</time>
+      </div>
+      <p class="release-note">The first public release. <a href="https://github.com/donny/armadale/releases/latest/download/Armadale.dmg">Download</a> · <a href="https://github.com/donny/armadale/releases/tag/v0.1.1">Release on GitHub</a></p>
+      <ol class="entries">
+        <li>
+          <time datetime="2026-11-05">November 5, 2026</time>
+          <div>
+            <h3>A disk image with directions</h3>
+            <p>The download opens to a window that shows where to drag Armadale.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-11-04">November 4, 2026</time>
+          <div>
+            <h3>Open source</h3>
+            <p>Armadale is under the MIT License, with its source on GitHub. Help&nbsp;›&nbsp;Acknowledgements lists the components it bundles, and this site is live.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-31">October 31, 2026</time>
+          <div>
+            <h3>Panes are cards</h3>
+            <p>Each pane is a rounded card with a header for its status, title and working directory. The “…” in the header opens the pane menu: Split Right, Split Down, and a theme for that pane alone.</p>
+            <h3>Splits, tab switches and zoom leave programs alone</h3>
+            <p>They no longer reset the terminal modes of the program running in a pane.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-30">October 30, 2026</time>
+          <div>
+            <h3>A tab bar like the system’s</h3>
+            <p>The tab bar is drawn like the macOS 27 window tab bar. Tabs share its whole width, and the selected tab is scrolled into view.</p>
+            <h3>A quieter sidebar</h3>
+            <p>The selection highlight is gone: what a window shows is in semibold, with coloured icons in the active window. A click goes there, a double-click renames.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-29">October 29, 2026</time>
+          <div>
+            <h3>Keyboard Shortcuts moved from Settings to the Help menu</h3>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-24">October 24, 2026</time>
+          <div>
+            <h3>The New Session chooser</h3>
+            <p>A new tab, window or split no longer starts a shell by itself. Its pane lists your favorites, and New Session… opens a dialog for the place (this Mac or an SSH host), the directory, the profile and the options of Claude Code and Codex.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-23">October 23, 2026</time>
+          <div>
+            <h3>A clean exit closes its pane</h3>
+            <p>When a program exits with status 0, or you leave the shell with <code>exit</code> or ^D, the pane closes. A program that fails or is killed still shows Session Ended, now with its status or signal.</p>
+            <h3>Empty workspaces go away</h3>
+            <p>Closing a workspace’s last tab removes the workspace and its window.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="release" id="v0.1.0">
+      <div class="release-head">
+        <h2>0.1.0</h2>
+        <time datetime="2026-10-23">October 23, 2026</time>
+      </div>
+      <p class="release-note">The first build, made before Armadale was public. It was not published.</p>
+      <ol class="entries">
+        <li>
+          <time datetime="2026-10-20">October 20, 2026</time>
+          <div>
+            <h3>Rename in place</h3>
+            <p>Double-click a workspace, tab group or tab to rename it where it is.</p>
+            <h3>Full screen is remembered</h3>
+            <p>A workspace in full screen comes back in full screen after a relaunch.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-19">October 19, 2026</time>
+          <div>
+            <h3>Menu bar mode</h3>
+            <p>Quitting while sessions run asks first: keep them running with Armadale in the menu bar, or end them and quit.</p>
+            <h3>Signed and notarized</h3>
+            <p>Armadale is built as a Developer ID signed, notarized disk image.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-18">October 18, 2026</time>
+          <div>
+            <h3>Agents and attention</h3>
+            <p>A pane that rings the bell or sends a notification while you are not looking is marked on its tab, in the sidebar and on the Dock icon, and can post a macOS notification. The Claude Code and Codex profiles are set up for it.</p>
+            <h3>Remote hosts</h3>
+            <p>Sessions can run on SSH hosts, where they keep running through a quit or a lost connection and are reattached afterwards.</p>
+            <h3>Settings, themes and profiles</h3>
+            <p>Fonts, light and dark themes, Ghostty theme import, and profiles for the programs you start.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-16">October 16, 2026</time>
+          <div>
+            <h3>Persistent sessions</h3>
+            <p>Sessions keep running when Armadale quits. A relaunch restores windows and layouts and reattaches each session with its screen and scrollback.</p>
+            <h3>Workspaces, tab groups, tabs and panes</h3>
+            <p>A sidebar, a tab bar and split panes, with keyboard shortcuts, drag and drop, and a window per workspace.</p>
+          </div>
+        </li>
+        <li>
+          <time datetime="2026-10-15">October 15, 2026</time>
+          <div>
+            <h3>The first commit</h3>
+            <p>A model, a saved layout and one window.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+  </main>
+  <footer>
+    Open source under the MIT License · <a href="https://github.com/donny/armadale">Source on GitHub</a>
+  </footer>
+</body>
+</html>

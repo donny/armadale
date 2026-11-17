@@ -2493,6 +2493,80 @@ change to the website, and no agent ran the installed app. The DMG's
 size and hash are in the local file of the Mac it was built on. How
 to publish this very build is under "Next" in `HANDOFF.md`.
 
+## November 16, 2026: a changelog page on the site
+
+November 16, 2026, evening (owner's request: a static changelog page
+with dates for the website, written for the commits so far, "not too
+micro", and kept up by agents from now on; done by the coordinating
+session through the gate, no agents): **the site has a changelog
+page**, `docs/changelog.html`, linked under the Download button of
+`docs/index.html`.
+
+- **The page.** Self-contained like the home page (inline styles, no
+  script, the same colours, light and dark, phone width): a section
+  per release, newest first, and in each section one entry per day,
+  the date beside that day's items; an item is a title and at most
+  one short paragraph. The sections now: "Next release" (not yet
+  released: what 0.1.2 would ship), 0.1.1 with the "Latest release"
+  pill and its links, and 0.1.0.
+- **The past.** The 118 commits up to 03e4f34 became 26 items on 15
+  days: 6 under "Next release" (November 12 to 16, 2026), 10 under
+  0.1.1 (October 23 to November 5, 2026) and 10 under 0.1.0 (October
+  15 to 20, 2026), written from the commit subjects, Part 1 of this
+  file and the README. Left out as nothing a user sees: documents,
+  rules for agents, live checks, build bumps, scripts, the
+  architecture review as such, the file splits. Left out as too
+  small: the app icon, the About panel's lines, the sidebar toggle's
+  place, the folder icon and the ⇧⌘N badge of tab group rows, the
+  Window menu's hidden Show Tab items, unfocused panes and ended
+  sessions no longer dimmed, the full-screen serializer. Folded
+  together: the two activation fixes of November 9 and 12, 2026 (one
+  item, on the later day); the instance lock, the reclaim and save
+  safety and schema 2 (one item, "A safer saved layout", which also
+  says that 0.1.1 and earlier refuse the new file); the pane menu's
+  path (a context menu, its removal, then the header's "…") inside
+  "Panes are cards".
+- **Keeping it.** AGENTS.md has a new section, "The changelog page":
+  a change a user of the app would notice gets its item in the commit
+  that makes it; what goes in and what stays out; how much (one item
+  per change as a user would name it, one to three for a day of
+  work); where (the day's entry under "Next release"); and what
+  happens at a release. Step 4 of the process has the coordinating
+  session check it. README "Releasing", step 4, has the release notes
+  written from that section and the section turned into the version's
+  once the GitHub Release exists; "The website" describes the page. A
+  comment at the top of the page's `<main>` holds the markup for a
+  day and for a new "Next release" section.
+- **`ChangelogPageTests`** (4 tests, `ArmadaleAppTests`) reads the two
+  pages from `docs/`: sections newest first with "Next release" only
+  on top, ids `v<version>`, the latest pill on the newest release and
+  no other; every `<time>` a real date whose text is that date written
+  out; one entry per day and the days newest first in a section;
+  nothing in a section older than the release below it; the runtime's
+  name on neither page; the two pages linking to each other.
+
+Decisions the coordinator made, each the owner's to overrule. (1) The
+page shows work that is on `main` and not released, under "Next
+release": the owner asked for the page to follow the commits, and
+0.1.2 is not published; the section says it is not in the download
+yet. (2) 0.1.0 has a section although it was never published (the
+repository was private then), described as "The first build, made
+before Armadale was public. It was not published." (3) An item is
+dated by the day its work was finished, and a day has one entry in a
+section. (4) No generator and no second source: the page is the only
+copy and is written as HTML by hand, because the site has no build
+step (Pages serves `docs/` as it is, Actions are off) and a
+`CHANGELOG.md` beside it would be a second copy to keep in step.
+
+Checked: both pages served from `docs/` by `python3 -m http.server`,
+in the Claude app's browser pane, 1100 px wide in light and in dark
+and 375 px wide: no horizontal scroll at 375 px, no console message,
+the home page's link opens the page. Not checked: Safari, and the
+page as GitHub Pages serves it (nothing is pushed). Gate: 918
+tests, zero warnings (the SSH integration tests did not run, as in
+every gate run). No app code changed, so 0.1.2 (29) of 77a02cf is
+still the app as it is on `main`.
+
 ---
 
 # Part 2: the history of each design section

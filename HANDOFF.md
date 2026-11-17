@@ -34,7 +34,10 @@ menu), the New Session dialog learned to add a host (New Host…, with
 the aliases of the ssh configuration offered), and Settings lost its
 Favorites tab; that change was checked live the same day on a test
 build ("From finished changes" below has what is left and what was
-found). The last gate run: 914 tests, zero warnings.
+found). The same day the site gained a changelog page
+(`docs/changelog.html`), written for everything so far and kept by a
+rule in AGENTS.md from now on. The last gate run: 918 tests,
+zero warnings.
 **Armadale 0.1.2 (29) is built, notarized and stapled from 77a02cf
 (November 16, 2026) and installed on the owner's Mac, with everything
 above in it, but not released: no tag, no GitHub Release, no fixture
@@ -114,6 +117,12 @@ in the heading or the text under it, their commits:
 - November 16, 2026: bump to 0.1.2 (29) (77a02cf); that commit built,
   notarized, stapled and installed in `~/Applications` over build 28.
   Not tagged or published.
+- November 16, 2026: a changelog page on the site
+  (`docs/changelog.html`, linked under the Download button): everything
+  so far as 26 items under "Next release", 0.1.1 and 0.1.0; AGENTS.md,
+  "The changelog page", says how it is kept from now on, and
+  `ChangelogPageTests` holds its form. No app code changed, so build
+  29 stands.
 
 ## Next
 
@@ -123,8 +132,10 @@ November 14, 2026 is built, and checked live where the Mac was free
 2026 (favorites in the chooser, New Host…, Settings without Favorites)
 is built, reviewed, committed and checked live
 (`docs/HISTORY.md`, "favorites in the chooser and New Host…, checked
-live"); "From finished changes" below has what is left. What comes
-next waits for the owner.
+live"); "From finished changes" below has what is left. The site has
+a changelog page since the same day, and from now on a change a user
+would notice adds its item there in the same commit (AGENTS.md, "The
+changelog page"). What comes next waits for the owner.
 
 Waiting for owner decisions:
 - **Publishing 0.1.2.** The notarized DMG of 77a02cf, build 29,
@@ -134,10 +145,18 @@ Waiting for owner decisions:
   `scripts/release.sh` deletes. The owner does not plan to publish for
   now (November 14, 2026). To publish that very build: tag 77a02cf as
   `v0.1.2`, create the GitHub Release with the DMG under both names,
-  and add the tag's state fixture (README, "Releasing", steps 4 and
-  5). If anything is committed to the app before then, bump the build
-  number and build again instead. The release notes should say that
-  0.1.2 writes state file schema 2, which 0.1.0 and 0.1.1 refuse.
+  turn the "Next release" section of `docs/changelog.html` into
+  0.1.2's, and add the tag's state fixture (README, "Releasing", steps
+  4 and 5). If anything is committed to the app before then, bump the
+  build number and build again instead. The release notes should say
+  that 0.1.2 writes state file schema 2, which 0.1.0 and 0.1.1 refuse
+  (the changelog page says so under November 14, 2026).
+- **Three decisions the coordinator made on the changelog page**
+  (November 16, 2026), each the owner's to overrule: the page shows
+  what is on `main` and not yet released, under "Next release"; 0.1.0
+  has a section, described as a build that was not published; and the
+  page went up with 26 items for the 118 commits so far
+  (`docs/HISTORY.md`, "a changelog page on the site").
 - **Three decisions the coordinator made** when restored sessions
   were attached at launch (November 14, 2026), each the owner's to
   overrule: the launch holds at most six of a host's sessions (open

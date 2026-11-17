@@ -557,7 +557,11 @@ To release:
    ```
 
    The DMG must be the notarized one: Gatekeeper refuses a `--skip-notarize`
-   build downloaded from the web.
+   build downloaded from the web. Write the notes from the "Next
+   release" section of `docs/changelog.html`, and once the release
+   exists turn that section into the version's (AGENTS.md, "The
+   changelog page") and commit: the site's changelog then names the
+   version the Download button gives.
 5. Once the tag exists, add its state fixture, written by the tagged
    version's own code, as `scripts/state-fixtures/README.md` describes.
 
@@ -570,8 +574,9 @@ already in `build/release/` without building again.
 
 ### The website
 
-[armadale.dev](https://armadale.dev) is the static page in `docs/`
-(`index.html`, the icon, `CNAME`, `.nojekyll`), served by GitHub Pages
+[armadale.dev](https://armadale.dev) is two static pages in `docs/`
+(`index.html` and `changelog.html`, with the icon, `CNAME` and
+`.nojekyll`), served by GitHub Pages
 from the `docs` folder of `main`: Settings › Pages › "Deploy from a
 branch", `main`, `/docs`, custom domain `armadale.dev`, Enforce HTTPS
 (a `.dev` domain is HTTPS-only). GitHub Pages is free for a public
@@ -580,8 +585,20 @@ GitHub Pages (185.199.108.153, 185.199.109.153, 185.199.110.153,
 185.199.111.153), `CNAME www` to `donny.github.io`, and the
 `_github-pages-challenge-donny` TXT record from GitHub's domain
 verification. `docs/DESIGN.md` and `docs/HISTORY.md` are served too,
-as raw files; that is fine, the repository is public. A change to the page is a normal commit
+as raw files; that is fine, the repository is public. A change to a page is a normal commit
 on `main`; Pages redeploys within a minute or two.
+
+`changelog.html` ([armadale.dev/changelog.html](https://armadale.dev/changelog.html),
+linked under the Download button) says what changed for the people
+who use the app, newest first: a section per release, with "Next
+release" on top for what is on `main` and not yet in a release, and in
+each section one entry per day. It is written by hand, in the commit
+that makes a change a user would notice; what goes on it, how short
+it stays and what happens to it at a release are in AGENTS.md, "The
+changelog page". Both pages are self-contained (inline styles, no
+scripts); to look at them as served, run
+`python3 -m http.server --directory docs` and open
+`http://localhost:8000/`.
 
 `scripts/release.sh --skip-notarize` (no credentials needed) stops after
 the signature checks and builds `build/release/Armadale-<version>-unnotarized.dmg`,
@@ -600,7 +617,7 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `docs/` | `DESIGN.md` (the design contract: what is true now), `HISTORY.md` (why and when: the change log and each design section's history), `index.html`, `CNAME` (the website), `icon/AppIcon.svg` (master vector of the app icon, generated) |
+| `docs/` | `DESIGN.md` (the design contract: what is true now), `HISTORY.md` (why and when: the change log and each design section's history), `index.html`, `changelog.html`, `CNAME` (the website; the changelog page is kept as AGENTS.md says), `icon/AppIcon.svg` (master vector of the app icon, generated) |
 | `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), `AttentionCenter`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog`, `AppSettings` and `UserNotificationService` (`Support/`), `Resources/armadale-notify`, `Resources/Acknowledgements.txt` (the third-party notices shown by Help › Acknowledgements) |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `AttentionTracker`, `AgentIntegration`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
