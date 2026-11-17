@@ -38,9 +38,12 @@ found). The same day the site gained a changelog page
 (`docs/changelog.html`), written for everything so far and kept by a
 rule in AGENTS.md from now on. The same night an updater was built,
 reviewed and committed (Sparkle 2.10.1); it runs in no build until the
-owner has made the update signing key, and none of it was seen running
-("Waiting for owner decisions" and "From finished changes" below). The
-last gate run: 945 tests, no warning from Armadale's code.
+owner has made the update signing key ("Waiting for owner decisions"
+below). A real update was checked live the same night on test builds
+with a bundle identifier of their own: sessions lived through every
+update, also with Armadale switched off under Background App Activity
+("From finished changes" below has what is left). The last gate run:
+945 tests, no warning from Armadale's code.
 **Armadale 0.1.2 (29) is built, notarized and stapled from 77a02cf
 (November 16, 2026) and installed on the owner's Mac, with everything
 above except the updater in it, but not released: no tag, no GitHub Release, no fixture
@@ -131,7 +134,10 @@ in the heading or the text under it, their commits:
   mode, the update's quit keeping sessions, the feed
   `docs/appcast.xml` with no item, the release scripts); off in every
   build until the owner's key exists; the owner's eight decisions of
-  that day (`docs/HISTORY.md`, "an updater, with Sparkle").
+  that day (`docs/HISTORY.md`, "an updater, with Sparkle") (13f12c2).
+- November 16, 2026 (night): the updater checked live on test builds,
+  five real updates with sessions running (`docs/HISTORY.md`, "the
+  updater, checked live"); no code changed.
 
 ## Next
 
@@ -200,14 +206,11 @@ Waiting for owner decisions:
   and gives its public half, which goes into `project.yml` as
   `SUPublicEDKey` (one line, commented there now). Until then no build
   starts the updater and `scripts/release.sh` refuses to build. (2) The
-  live test of a real update, which needs the owner's word that the Mac
-  is free; it is designed in the design note of November 16, 2026 (a
-  test bundle identifier `com.tinylittleapps.armadale.updatetest`, two
-  Debug copies with builds 9001 and 9002 carrying
-  `ARMADALE_STATE_DIR`, `ARMADALE_DEFAULTS_SUITE` and
-  `ARMADALE_UPDATER_FOR_TEST=1` in `LSEnvironment`, a throwaway
-  key in a file, a feed on 127.0.0.1) and must answer what Background
-  App Activity switched off does to Sparkle's installer. (3) Publishing:
+  live test of a real update is done, on ad hoc signed test builds
+  (`docs/HISTORY.md`, "the updater, checked live"); an update between
+  Developer ID signed builds can only be seen with the first real
+  release, so check the first update after 0.1.2 on a second Mac or a
+  test account before telling anyone. (3) Publishing:
   0.1.2 (30) with the updater, then `scripts/appcast.sh` and the push of
   the feed.
 - **An `SMAppService` prototype**, optional ("Decisions pending"
@@ -473,54 +476,50 @@ Shipping (step 9)
 
 From finished changes: not checked live, and found and not fixed
 - The updater (November 16, 2026; `docs/DESIGN.md` section 8,
-  "Updates"). Built and unit-tested; the app was not launched at all,
-  so **nothing of it was seen running**. Not checked live:
-  - Sparkle starting in a build with a key (none exists): the log line
-    of a run where it is off, Sparkle's question about automatic checks
-    at the second launch and after the launch alerts, the daily check,
-    the request the feed server receives (its user agent and headers).
-  - Check for Updates… enabled and disabled, its "You’re up to date!"
-    against the empty feed, the update window, its embedded release
-    notes, Version History opening the changelog.
-  - Settings › General › Updates: the checkbox following Sparkle's
-    answer, the footer in a run with and without the updater, the
-    General tab at 620 × 640 pt.
-  - The update's quit: no question with only persistent sessions; the
-    "N sessions will end" alert with plain PTY or plain-ssh sessions; the
-    loss warning with a staged `lossSeenAt`, in and out of menu bar
-    mode; each answer (Install and Relaunch, Install Anyway, Cancel,
-    Open System Settings); Sparkle's window closing after Cancel; the
-    quit going straight through, sessions kept, the last-quit record
-    written as a user quit; a later ⌘Q asking as usual; the install at
-    the next ordinary quit after Cancel, without a relaunch.
-  - The relaunch: the new build at the same path attaching every
-    session, from menu bar mode with windows shown, the last-quit check
-    on the update's quit; `bin/` intact.
-  - Menu bar mode: a scheduled update held back, Update Available…
-    appearing and bringing Sparkle's window forward, the item going
-    after Remind Me Later or Install, the app hiding again when the
-    session ends, the update shown on leaving menu bar mode.
-  - Background App Activity switched off during an install (not known
-    what macOS does to Sparkle's installer jobs; DESIGN section 13).
-  - A Release build: `scripts/release.sh` was not run, so the
-    Developer ID signing of Sparkle's helpers, the preflight against the
-    keychain, notarization with the framework, `sign_update --account
-    armadale` and `appcast-item.xml` from a real run are unchecked; the
-    script's parts were checked on scratch files with a throwaway key.
-    `scripts/appcast.sh` against a real GitHub Release asset.
-  - The app delegate's wiring, which has no test harness: the quit
-    consulting the gate (`applicationShouldTerminate`), what
-    `updateQuitContext()` counts in a real run, leaving menu bar mode
-    with an update waiting, the updater's start after the launch
-    alerts, and that a Debug build logs "updates are off in this run
-    (debugBuild)".
+  "Updates"). Checked live the same night on ad hoc signed test builds
+  with their own bundle identifier, a throwaway key and a feed on
+  127.0.0.1 (`docs/HISTORY.md`, "the updater, checked live"): a check
+  and its two requests, Sparkle's question at the second launch,
+  Settings, an update with sessions running, the loss warning, Cancel
+  and the install at the next quit, menu bar mode's Update Available…,
+  and an update with Armadale switched off under Background App
+  Activity. Not checked live:
+  - A Release build: `scripts/release.sh` was not run, so the Developer
+    ID signing of Sparkle's helpers, the preflight against the keychain,
+    notarization with the framework, `sign_update --account armadale`
+    and `appcast-item.xml` from a real run are unchecked, and so is an
+    update between Developer ID signed builds. `scripts/appcast.sh`
+    against a real GitHub Release asset, and the real feed at
+    armadale.dev.
+  - The "N sessions will end" alert (the plain PTY fallback, a host
+    without the persistence helper); the answers Open System Settings
+    and Skip This Version; the daily check by its own timer (the test
+    moved `SULastCheckTime`); Version History (no such control was in
+    the accessibility tree); and what only a picture shows (no Screen
+    Recording): how the windows look, the General tab at 620 × 640 pt.
+  - With Armadale switched off under Background App Activity: one run
+    only (DESIGN section 13); a slower install and an installer left
+    waiting after Cancel were not tried.
   - Whether Sparkle's quit event reaches `applicationShouldTerminate`
-    while an app-modal alert of Armadale's is up (a launch alert, the
-    late loss alert).
+    while an app-modal alert of Armadale's is up (the late loss alert;
+    that the updater does not start before the launch alerts are
+    answered was seen).
   - Sparkle's retry after a quit that did not happen (its quit then
     gets the ordinary question: DESIGN section 8, "Updates").
   - Entering menu bar mode while Sparkle's update window is showing:
     that window then has no Update Available… route back.
+  - The log line of a run where the updater is off (none was found
+    with `log show`; the test builds carried the switch).
+  Found and not fixed:
+  - Switching Armadale off under Background App Activity while it is
+    closed ended the sessions it had left running, at once; the next
+    launch showed them as Ended and said nothing about macOS, because
+    they ended minutes after the quit, outside the window the launch
+    check looks at.
+  - After Remind Me Later in menu bar mode no window was on screen and
+    the app was not active, but `NSRunningApplication.isHidden` read
+    false; whether the app hid as it does when Settings closes there
+    was not told apart.
 - Step 10, New Session (October 24, 2026).
   - 10b live check to do: nobody has run a real Codex session with
     `--model`, `--sandbox` or

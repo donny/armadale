@@ -3655,8 +3655,9 @@ which holds every decision and is tested through a fake.
   question, menu bar mode, End Sessions and Quit). Not always: the
   installer's launchd jobs do not outlive a logout or restart; Skip This
   Version at a later check cancels the waiting installer (Install Update
-  there asks again); and what Background App Activity switched off does
-  to those jobs is not known (section 13). Hence "normally" in the
+  there asks again); and a waiting installer was not tried with
+  Armadale switched off under Background App Activity (section 13 has
+  what was seen of an install in that state). Hence "normally" in the
   alert.
 - **The relaunch** is a normal launch of the new build through Launch
   Services (`NSWorkspace.open`): it attaches every restored session as any
@@ -4575,17 +4576,22 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
   only the bundle, never `bin/`. It does make a helper bump reach every
   install within a day, so the bump must keep the previous `zmx-<ver>`
   copy for sessions started by it (section 4, "Bundling").
-- **The updater and Background App Activity** (not known). Sparkle's
-  installer runs as two launchd jobs the app submits with `SMJobSubmit`
+- **The updater and Background App Activity** (seen once, in the live
+  test of November 16, 2026). Sparkle's installer runs as two launchd
+  jobs the app submits with `SMJobSubmit`
   (`<bundle id>-sparkle-updater` and `-sparkle-progress`;
   `InstallerLauncher/SUInstallerLauncher.m`), which must outlive the
   app's quit to replace the bundle and relaunch it. With Armadale
   switched off under Background App Activity, macOS ends what the app
-  leaves behind about one second after a regular quit; whether that
-  reaches these jobs, so that an update fails in that state (and the
-  local sessions are lost anyway), is not known. Sparkle's issue tracker
-  has nothing on it. The live test of a real update (HANDOFF) must
-  answer it, with the owner at the switch.
+  leaves behind about one second after a regular quit. An update
+  installs all the same: in the one run in that state the bundle was
+  replaced and the new build was up within a second of the quit, and
+  the sessions the quit left behind stayed alive (a plain quit in the
+  same state ended a session within two seconds). That a relaunch is
+  always that quick is not established (a larger bundle, a slower disk;
+  the test builds were ad hoc signed), so the warning before such an
+  update stays; and an installer left waiting after Cancel was not
+  tried in that state. Sparkle's issue tracker has nothing on it.
 - **The update's quit, two limits** (section 8, "Updates"): End
   Sessions and Quit chosen between Armadale's yes and Sparkle's quit
   ends the sessions and the installer still relaunches Armadale; and a

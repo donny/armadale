@@ -2718,6 +2718,106 @@ and Xcode's "'ArmadaleAppTests' is missing a dependency on 'Armadale'"
 review). The SSH integration tests did not run (no
 `ARMADALE_TEST_SSH_HOST`).
 
+## November 16, 2026: the updater, checked live
+
+November 16, 2026, 22:17 to 22:48 (the owner said the Mac was free and
+was at the Background App Activity switch for the last part; run by the
+coordinating session; no code changed): **a real update was installed
+five times on test builds, with sessions running, and each time the
+sessions lived through it.** The installed app was not running and was
+never touched.
+
+- **The setup**, as designed that day: copies of the Debug build of
+  13f12c2 under `/tmp/armadale-upd` with a bundle identifier of their
+  own (`com.tinylittleapps.armadale.updatetest`, so Sparkle's launchd
+  jobs, cache and settings were theirs), builds 9001 to 9006 (versions
+  0.1.2 to 0.1.7), `LSEnvironment` with the test state directory, the
+  defaults suite and `ARMADALE_UPDATER_FOR_TEST=1`; a feed on
+  `127.0.0.1:8765` served by a small script that logged every request
+  with its headers; DMGs made with `hdiutil` and signed with
+  `sign_update --ed-key-file` and a throwaway key in a file (never the
+  keychain); `NSAllowsArbitraryLoads` in the copies for the http feed.
+  Everything was driven by accessibility presses by pid; no synthetic
+  keystroke or click was posted. The builds were ad hoc signed, so the
+  Developer ID path (`scripts/release.sh`, an update between notarized
+  builds) is still unchecked.
+- **A check and what it sends.** Check for Updates… showed "A new
+  version of Armadale is available! Armadale 0.1.3 is now available—you
+  have 0.1.2." with the embedded notes rendered. Two requests per
+  update and nothing else: `GET /appcast.xml` with no query (Host,
+  Accept, `Accept-Language: en-US,en;q=0.9`, Connection,
+  Accept-Encoding, `User-Agent: Armadale/0.1.2 Sparkle/2.10.1`) and the
+  DMG with the same headers. The language header is part of "what
+  every web request carries" in the Settings line.
+- **An update with two sessions running** (9001 to 9002): Install and
+  Relaunch raised no question; within a second the old process was
+  gone, the bundle was the new build and the new process was up at the
+  same path, holding the lock, both tabs Running; the two session
+  daemons kept their pids through all of the first four updates. `bin/`
+  got `ctty-exec-0.1.3` in place of `ctty-exec-0.1.2`, the persistence
+  helper's copy was untouched; Sparkle's two launchd jobs were gone
+  afterwards.
+- **Sparkle's question** came at the new build's launch (the second
+  launch), after the window was up: "Check for updates automatically?"
+  with Don’t Check and Check Automatically and no checkbox. The answer
+  wrote `SUEnableAutomaticChecks` and `SUSendProfileInfo = 0` into the
+  test identifier's domain; Settings › General › Updates showed the
+  switch on, and switching it wrote the setting both ways. The real
+  `com.tinylittleapps.armadale` domain got no `SU` key.
+- **The loss warning and Cancel** (9002 to 9003, with a staged
+  `lossSeenAt`): "macOS may end 2 sessions when Armadale quits", the
+  Background App Activity text and "If you cancel, the update stays
+  ready and is normally installed the next time Armadale quits.", with
+  Open System Settings, Install Anyway and Cancel. After Cancel the
+  alert and Sparkle's window closed, the build kept running, Sparkle's
+  jobs stayed. A quit event without a reason (what Sparkle sends) then
+  raised the ordinary question ("2 sessions are still running"): the
+  gate was shut. Keep Running in Menu Bar, then Quit, Keep Sessions
+  Running and Quit Anyway: within a second of that quit the bundle was
+  build 9003, no Armadale was running, the daemons were alive, and the
+  last-quit record was of kind `user`.
+- **Menu bar mode** (9003 to 9004): with `SULastCheckTime` moved so the
+  scheduled check was due, the check came on time while the build was
+  in menu bar mode; no window opened, the app in front stayed in front,
+  and the status menu had Update Available…. Pressing it brought
+  Sparkle's window forward and removed the item; Remind Me Later closed
+  the window and gave the front back. Installing from there (Check for
+  Updates… is reachable in menu bar mode) raised no question, and the
+  new build came up as a regular app with its window and both sessions.
+- **Background App Activity switched off** (9005 to 9006). The first
+  attempt (9004 to 9005) proved nothing: the entry the owner had
+  switched off was not the test builds' (a plain quit left three
+  sessions alive for 40 s); the test identifier had an entry of its
+  own. With every Armadale entry off, the three sessions the closed
+  build had left were ended at once; a plain quit then ended a fresh
+  session within two seconds; and the next launch said "macOS ended 1
+  session after Armadale quit" (Check for Updates… stayed disabled
+  until that alert was answered: the updater starts after the launch
+  alerts). Then the update, with two fresh sessions: the loss warning,
+  Install Anyway at 22:47:27, and within a second the bundle was 9006
+  and the new build was up; **macOS did not stop Sparkle's installer,
+  and both sessions were still running half a minute later**, attached
+  to the new build. `lossSeenAt` stayed set, as it should with the
+  entry off. One run; DESIGN section 13 says what it does not settle.
+- **Found on the way.** (a) A menu item pressed by a substring of its
+  title ("Settings…") was the Apple menu's System Settings…, which
+  opened System Settings; it was closed by its pid. Menu items are
+  matched exactly. (b) The three sessions ended by switching the entry
+  off while the build was closed came back as Ended with no word about
+  macOS: their end was minutes after the quit, outside the window the
+  launch check looks at (HANDOFF). (c) After Remind Me Later in menu
+  bar mode `NSRunningApplication.isHidden` read false, though no window
+  was on screen and the app was not active. (d) A search of `~/Library`
+  with `find` hung for two minutes and was stopped; the test builds'
+  leftovers are at known paths (`Caches`, `HTTPStorages`, `WebKit`,
+  `Preferences`, each under the bundle identifier).
+- **Not checked**: HANDOFF's list for the updater, now shorter.
+- **Cleanup**: the builds, the state directory and the feed removed,
+  the server stopped, both defaults domains and the three folders under
+  `~/Library` deleted, the throwaway key deleted, no Armadale, helper
+  or Sparkle process and no Sparkle launchd job left. The test builds'
+  entry stays in the Background App Activity list.
+
 ---
 
 # Part 2: the history of each design section
@@ -4844,3 +4944,12 @@ the loss of the update key, with Sparkle's key rotation as the way out
 (its documentation, "Rotating signing keys": a Developer ID signed DMG
 is required for a key change with `SUVerifyUpdateBeforeExtraction`);
 and a helper version bump reaching every install within a day.
+
+**November 16, 2026 (night). The updater and Background App Activity,
+seen** (section 13): in the live test an update installed with every
+Armadale entry switched off (the plain quit in the same state ended a
+session within two seconds): the bundle was replaced and the new build
+was up within a second of the quit, and the two sessions were alive
+half a minute later (Part 1, "the updater, checked live"). One run, on
+ad hoc signed builds of 59 MB; a waiting installer
+after Cancel was not tried in that state.
