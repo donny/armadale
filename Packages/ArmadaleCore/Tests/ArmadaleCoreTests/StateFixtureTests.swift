@@ -16,6 +16,7 @@ struct StateFixtureTests {
     nonisolated static let writtenSchema: [String: Int] = [
         "0.1.0": 1,
         "0.1.1": 1,
+        "0.1.2": 2,
     ]
     /// In version order ("0.1.2" before "0.1.10").
     nonisolated static let versions = writtenSchema.keys.sorted { $0.compare($1, options: .numeric) == .orderedAscending }
@@ -157,9 +158,47 @@ struct StateFixtureTests {
         #expect(model.emptyPaneIDs(in: project.id) == [editor.panes[2].id])
     }
 
+    // MARK: 0.1.2
+
+    @Test func contentOf012() throws {
+        let state = try StateStore.decode(Self.fixture("0.1.2"))
+        try Self.checkCommonContent(state)
+        #expect(state.sessions.count == 6)
+
+        // What 0.1.2 saves and 0.1.1 did not: the orphan reclaim's record
+        // (two spared sessions no saved session refers to, and the flag
+        // that the saved sessions are not known to be complete) and the
+        // grid size last applied to a session's program.
+        #expect(state.sparedSessionIDs.count == 2)
+        #expect(Set(state.sparedSessionIDs).count == 2)
+        #expect(Set(state.sparedSessionIDs).isDisjoint(with: state.sessions.map(\.id)))
+        #expect(state.sessionListIncomplete)
+        let editor = try Self.tab(titled: "Editor", in: state)
+        let shell = try #require(state.sessions.first { $0.id == editor.panes[0].sessionID })
+        #expect(shell.gridSize == SessionGridSize(columns: 132, rows: 43))
+        #expect(state.sessions.filter { $0.gridSize != nil }.map(\.id) == [shell.id])
+
+        // The rest is what 0.1.1's generator set too: the session carried
+        // over from a 0.1.0 file, the zoomed pane's theme and options, and
+        // the favorites.
+        let scratch = try #require(state.workspaces.first { $0.name == "Scratch" })
+        let carriedID = try #require(scratch.tabGroups.first?.tabs.first?.panes.first?.sessionID)
+        #expect(state.sessions.filter { $0.options == nil }.map(\.id) == [carriedID])
+        let zoomedID = try #require(editor.zoomedPaneID)
+        let zoomed = try #require(editor.pane(zoomedID))
+        #expect(zoomed.themeID == "builtin.dracula")
+        let agent = try #require(state.sessions.first { $0.id == zoomed.sessionID })
+        #expect(agent.options == SessionOptions(
+            skipPermissions: true, continueConversation: true, model: "opus", additionalArguments: ["--verbose"]))
+        #expect(state.favorites.map(\.name) == ["Claude here", "Codex on build", "Old shell", "Build Watcher in ~"])
+        let model = AppModel(state: state, defaultWorkingDirectory: "/Users/fixture")
+        #expect(state.favorites.map { model.favoriteProblem($0) } == [nil, nil, "Host removed", nil])
+        #expect(model.sparedSessionIDs == state.sparedSessionIDs && model.sessionListIncomplete)
+    }
+
     // MARK: Helpers
 
-    /// What both released versions' generators make alike: four workspaces
+    /// What every released version's generator makes alike: four workspaces
     /// ("Project" full screen, "Notes" closed, "Inbox" with no frame,
     /// "Scratch" with no window state, a shape no version saves but older or
     /// hand-edited files hold), tab groups "Main" and

@@ -12,8 +12,9 @@ are in `README.md`.
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
-23, 2026) and 0.1.1 (tag `v0.1.1`, the first public release, November
-5, 2026) are released, notarized and stapled; the code is under the MIT
+23, 2026), 0.1.1 (tag `v0.1.1`, the first public release, November
+5, 2026) and 0.1.2 (tag `v0.1.2`, November 17, 2026, the first with an
+updater) are released, notarized and stapled; the code is under the MIT
 License and https://armadale.dev is live. Since the build order the
 sidebar, the tab bar and the panes (now cards with a header and a pane
 menu) were reworked, a clean exit closes its pane, menu bar mode and the
@@ -42,13 +43,12 @@ live on test builds with a bundle identifier of their own: sessions
 lived through every update, also with Armadale switched off under
 Background App Activity ("From finished changes" below has what is
 left). On November 17, 2026 the owner made the update signing key and
-its public half went into `project.yml`, so a Release build starts the
-updater ("Waiting for owner decisions" below). The last gate run: 945
-tests, no warning from Armadale's code.
-**Armadale 0.1.2 (30) is built, notarized and stapled from dc03cc5
-(November 17, 2026) and installed on the owner's Mac, with everything
-above in it, the updater included, but not released: no tag, no GitHub
-Release, no feed item, no fixture ("Next" below).**
+its public half went into `project.yml`.
+**The same day Armadale 0.1.2 was released, with everything above in
+it: build 30 from dc03cc5, tagged `v0.1.2`, on GitHub with the
+notarized DMG, on the changelog page as the latest release and in the
+update feed. It is the build installed on the owner's Mac.**
+The last gate run: 946 tests, no warning from Armadale's code.
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -65,124 +65,26 @@ is in `docs/HISTORY.md`.
 | 9 Ship | cb63ef7 | Developer ID signing, `scripts/release.sh`, notarized stapled DMG |
 | 10 New Session | 507a52a, 9168f0b, 18faf87 | empty panes, the New Session dialog, favorites, the chooser in every new pane (October 24, 2026) |
 
-Since the last release. The earlier changes, back to the build order,
-are the headings of Part 1 of `docs/HISTORY.md`, with their dates and,
-in the heading or the text under it, their commits:
-- November 5, 2026: the release DMG opens to a designed Finder window
-  (a39f3ab); 0.1.1 build 27 (7560281), tagged `v0.1.1` and released
-  on GitHub (ade6f27).
-- November 5 and 9, 2026: Help › Acknowledgements checked live; new
-  live-testing rules in AGENTS.md (8ef4178).
-- November 9, 2026: menu bar mode activates the app again (dcdeb50).
-- November 12, 2026: the quit alert comes forward again (704a941).
-- November 12, 2026: an architecture review, recorded (298e881); its
-  second pass, November 14, 2026 (75a22c8).
-- November 14, 2026: one Armadale process per state directory
-  (ab27dfe).
-- November 14, 2026: reclaim and save safety (64221bb).
-- November 14, 2026: a rule for the state file's version; schema 2
-  (d34d3af).
-- November 14, 2026: the documents split: `docs/DESIGN.md` holds the
-  contract, `docs/HISTORY.md` the change log and each section's
-  history, and this file where things stand (fe20ea1).
-- November 14, 2026: restored sessions are attached at launch; the
-  session registry owns the controllers (7353b3a).
-- November 14, 2026: `AppDelegate` and `SessionRegistry` split into
-  files, code moved only (8d6bb99).
-- November 14, 2026: the live checks of attaching at launch;
-  `scripts/check-quit.sh` uses defaults suites of its own (cdfc8b0).
-- November 14, 2026: the Dock badge and notifications checked live,
-  also for a session in a tab not shown; no code changed (6d07126).
-- November 14, 2026: the Mac used that day set up for releases and
-  host tests; a signing dry run and the SSH integration tests passed
-  there; no code changed.
-- November 14, 2026: bump to 0.1.2 (28) (76562b7); that commit built,
-  notarized, stapled and installed in `~/Applications` on that Mac.
-  Not tagged or published.
-- November 14, 2026: housekeeping: the state of a Mac moved out of
-  this file into `HANDOFF.local.md` (git-ignored); this file trimmed
-  (e926467).
-- November 14, 2026: hosts checked live: the limit of six at launch,
-  more than ten sessions on one host, an unreachable host coming
-  back; no code changed.
-- November 14, 2026: sessions macOS ends after a quit are detected
-  and told (Background App Activity); the owner's choice among three
-  options (14ec35c).
-- November 14, 2026: the background detection checked live, switched
-  off and on; a rule in AGENTS.md after a test build ran on the real
-  state directory; no code changed.
-- November 16, 2026: favorites are managed in the chooser (drag, Move
-  Up, Move Down), Save as Favorite… in the pane menu, New Host… with
-  ssh config aliases in the New Session dialog, and Settings loses its
-  Favorites tab; the owner's six decisions of that day, after a read
-  of how about 34 other apps do it (3a5183c).
-- November 16, 2026: that step checked live (the chooser's drag
-  against its click, Move Up and Move Down, Save as Favorite…, New
-  Host… with suggestions, Settings with four tabs) and
-  `scripts/check-quit.sh` passed; two notes for live checks in
-  AGENTS.md; no code changed.
-- November 16, 2026: bump to 0.1.2 (29) (77a02cf); that commit built,
-  notarized, stapled and installed in `~/Applications` over build 28.
-  Not tagged or published.
-- November 16, 2026: a changelog page on the site
-  (`docs/changelog.html`, linked under the Download button): everything
-  so far as 26 items under "Next release", 0.1.1 and 0.1.0; AGENTS.md,
-  "The changelog page", says how it is kept from now on, and
-  `ChangelogPageTests` holds its form. No app code changed, so build
-  29 stands.
-- November 16, 2026: an updater with Sparkle 2.10.1 (Check for
-  Updates…, Settings › General › Updates, Update Available… in menu bar
-  mode, the update's quit keeping sessions, the feed
-  `docs/appcast.xml` with no item, the release scripts); off in every
-  build until the owner's key exists; the owner's eight decisions of
-  that day (`docs/HISTORY.md`, "an updater, with Sparkle") (13f12c2).
-- November 16, 2026 (night): the updater checked live on test builds,
-  five real updates with sessions running (`docs/HISTORY.md`, "the
-  updater, checked live"); no code changed.
-- November 17, 2026: the update signing key exists and its public half
-  is `SUPublicEDKey` in `project.yml`, so a Release build starts the
-  updater (`docs/HISTORY.md`, "the update key exists"); no app code
-  changed.
-- November 17, 2026: 0.1.2 (30) built, notarized and installed, not
-  published: the first release run with the updater in it and the
-  first signatures with the update key (`docs/HISTORY.md`, "Armadale
-  0.1.2 (30), built and notarized, not published") (dc03cc5).
+Since the last release (0.1.2, November 17, 2026). The earlier
+changes, back to the build order, are the headings of Part 1 of
+`docs/HISTORY.md`, with their dates and, in the heading or the text
+under it, their commits:
+- November 17, 2026: 0.1.2 build 30 (dc03cc5), tagged `v0.1.2` and
+  released on GitHub, on the changelog page and in the update feed
+  (f1e0fca); its state fixture (`docs/HISTORY.md`, "Armadale 0.1.2,
+  released"). No app code changed since the build.
 
 ## Next
 
-Nothing is being built. The updater (the owner's go-ahead of November
-16, 2026, "Build as recommended") is built, reviewed and committed
-(`docs/HISTORY.md`, "an updater, with Sparkle"); "Waiting for owner
-decisions" has what is left of it: the updater seen running in the
-installed build 30, the first update between Developer ID signed
-builds, publishing. Everything the owner gave the go-ahead for on
-November 14, 2026 is built, and checked live where the Mac was free
-(`docs/HISTORY.md`, the entries of that day). The step of November 16,
-2026 (favorites in the chooser, New Host…, Settings without Favorites)
-is built, reviewed, committed and checked live
-(`docs/HISTORY.md`, "favorites in the chooser and New Host…, checked
-live"); "From finished changes" below has what is left. The site has
-a changelog page since the same day, and from now on a change a user
-would notice adds its item there in the same commit (AGENTS.md, "The
-changelog page"). What comes next waits for the owner.
+Nothing is being built. 0.1.2 is released with everything the owner
+gave the go-ahead for up to November 17, 2026 (`docs/HISTORY.md`,
+"Armadale 0.1.2, released"); "From finished changes" below has what
+was not checked live. From now on a change a user would notice adds
+its item to the changelog page in the same commit, under a new "Next
+release" section (AGENTS.md, "The changelog page"). What comes next
+waits for the owner.
 
 Waiting for owner decisions:
-- **Publishing 0.1.2.** The notarized DMG of dc03cc5, build 30, the
-  first with the updater, exists only on the Mac it was built on
-  (`HANDOFF.local.md` there; `docs/HISTORY.md`, "Armadale 0.1.2 (30),
-  built and notarized, not published"), in `build/release/` together
-  with its `appcast-item.xml`; the next run of `scripts/release.sh`
-  deletes both. The owner does not plan to publish for now (November
-  14, 2026). To publish that very build: tag dc03cc5 as `v0.1.2`,
-  create the GitHub Release with the DMG under both names, turn the
-  "Next release" section of `docs/changelog.html` into 0.1.2's, add
-  the release to the feed with `scripts/appcast.sh` and push it, and
-  add the tag's state fixture (README, "Releasing", steps 4 and 5). If
-  anything is committed to the app before then, bump the build number
-  and build again instead. The release notes should say that 0.1.2 writes
-  state file schema 2, which 0.1.0 and 0.1.1 refuse (the changelog
-  page says so under November 14, 2026), and that 0.1.1 and earlier
-  cannot update themselves: 0.1.2 is downloaded once by hand.
 - **Three decisions the coordinator made on the changelog page**
   (November 16, 2026), each the owner's to overrule: the page shows
   what is on `main` and not yet released, under "Next release"; 0.1.0
@@ -205,20 +107,13 @@ Waiting for owner decisions:
 - **A fork of the persistence helper** ("The persistence helper's
   workarounds").
 - **The Ghostty second renderer** ("Decisions pending" below).
-- **The updater: what is left** (built November 16, 2026;
-  `docs/DESIGN.md` section 8, "Updates"). (1) Build 30, the first
-  Release build with the updater and the key, is installed on the
-  owner's Mac (November 17, 2026), but no agent has run it, so the
-  updater has not been seen starting in a Release build. The key's
-  backup and its import on a second Mac are the owner's (README,
-  "Releasing"). (2) The
-  live test of a real update is done, on ad hoc signed test builds
-  (`docs/HISTORY.md`, "the updater, checked live"); an update between
-  Developer ID signed builds can only be seen with the first real
-  release, so check the first update after 0.1.2 on a second Mac or a
-  test account before telling anyone. (3) Publishing:
-  0.1.2 (30) with the updater, then `scripts/appcast.sh` and the push of
-  the feed.
+- **The updater: what is left** (released with 0.1.2;
+  `docs/DESIGN.md` section 8, "Updates"). (1) An update between
+  Developer ID signed builds can only be seen with the next release:
+  check the first update after 0.1.2 on a copy of 0.1.2 (the owner's
+  installed one is such a copy) before telling anyone. (2) The update
+  key's backup and its import on a second Mac are the owner's (README,
+  "Releasing").
 - **An `SMAppService` prototype**, optional ("Decisions pending"
   below): whether a registered background item's `status` follows the
   same switch, which would let Armadale know before a loss instead of
@@ -459,9 +354,9 @@ Shipping (step 9)
   colour (Dock badge, status glyphs); today those use their own colours.
 - No crash reporting (decided for v1, October 19, 2026). The updater
   is built (November 16, 2026) and has its key (November 17, 2026);
-  0.1.2 (30), not published, is the first build that runs it. 0.1.1 and
-  earlier cannot update themselves, so 0.1.2 must
-  be downloaded once by hand (the release notes say so).
+  0.1.2 is the first release that runs it. 0.1.1 and earlier cannot
+  update themselves, so 0.1.2 is downloaded once by hand (its release
+  notes and the changelog page say so).
 - `scripts/release.sh` compares the DMG's app with the archived one by
   `diff -r`, which follows the links in Sparkle's framework: it writes
   "Directory loop detected" into `build/release/verify/dmg-app.diff`
@@ -486,7 +381,7 @@ Shipping (step 9)
   and a newer build are not kept apart; AGENTS.md's isolation rule
   still stands.
 - 0.1.1, the last published release, has neither activation fix
-  (dcdeb50, 704a941); 0.1.2 has both and is not published.
+  (dcdeb50, 704a941); 0.1.2 has both.
 
 From finished changes: not checked live, and found and not fixed
 - The updater (November 16, 2026; `docs/DESIGN.md` section 8,
@@ -498,16 +393,13 @@ From finished changes: not checked live, and found and not fixed
   and the install at the next quit, menu bar mode's Update Available…,
   and an update with Armadale switched off under Background App
   Activity. Not checked live:
-  - A Release build running: `scripts/release.sh` ran for 0.1.2 (30)
-    on November 17, 2026 (the Developer ID signing of Sparkle's code,
-    the preflight against the keychain, notarization with the
-    framework, `sign_update --account armadale` and
-    `appcast-item.xml`; `docs/HISTORY.md`, "Armadale 0.1.2 (30), built
-    and notarized, not published"), but no agent ran that build, so
-    the updater was not seen starting in it. An update between
-    Developer ID signed builds, `scripts/appcast.sh` against a real
-    GitHub Release asset, and the real feed at armadale.dev with an
-    item in it are unchecked.
+  - In a Release build: the owner opened the released 0.1.2 (30) on
+    November 17, 2026 and Check for Updates… answered that it was up
+    to date, with the feed still empty (`docs/HISTORY.md`, "Armadale
+    0.1.2, released"). Not seen in a Release build: a check against
+    the feed with its item (0.1.2 should again be up to date),
+    Sparkle's question at the second launch, and an update between
+    Developer ID signed builds.
   - The "N sessions will end" alert (the plain PTY fallback, a host
     without the persistence helper); the answers Open System Settings
     and Skip This Version; the daily check by its own timer (the test

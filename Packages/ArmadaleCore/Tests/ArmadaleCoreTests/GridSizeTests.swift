@@ -82,9 +82,11 @@ struct GridSizeTests {
         #expect(unwritten != nil && unwritten?["gridSize"] == nil)
     }
 
-    /// Files of the released versions have no grid sizes: they decode as
-    /// absent, so those sessions are attached when first shown.
-    @Test(arguments: StateFixtureTests.versions)
+    /// Files of the versions before 0.1.2, which did not record grid
+    /// sizes, have none: they decode as absent, so those sessions are
+    /// attached when first shown. (0.1.2's fixture has one:
+    /// `StateFixtureTests.contentOf012`.)
+    @Test(arguments: ["0.1.0", "0.1.1"])
     func olderFilesHaveNone(version: String) throws {
         let state = try StateStore.decode(StateFixtureTests.fixture(version))
         #expect(!state.sessions.isEmpty)

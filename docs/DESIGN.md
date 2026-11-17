@@ -518,7 +518,8 @@ persistence.
   A window's frame is always its normal (windowed) frame; `isFullScreen`
   says whether it was in full screen (section 8, "App lifecycle").
 - **The version rule.** Released builds are real readers of newer files
-  (0.1.0 and 0.1.1 are released, and going back to one is allowed). A
+  (0.1.0, 0.1.1 and 0.1.2 are released, and going back to one is
+  allowed). A
   build that cannot decode a file treats it as damaged: quarantine and a
   fresh start, the layout gone and its sessions orphaned. A file with a
   higher `schemaVersion` gets the safe refusal instead: an alert, with the
@@ -605,8 +606,9 @@ persistence.
   `--as-schema N` hands the tags the same file with another version, to
   show what the check catches. It builds every released version, so it is
   not part of the gate: run it before a release and whenever the state
-  file's shape changes. At schema 2 it answers `newerVersion` for both
-  v0.1.0 and v0.1.1.
+  file's shape changes. At schema 2 it answers `newerVersion` for
+  v0.1.0 and v0.1.1 and `loaded` for v0.1.2, which writes schema 2
+  itself.
 - Loading drops empty closed workspaces (no tab groups, window closed),
   which only files from older builds hold (closing a workspace's last tab
   group deletes the workspace, section 1), even when that leaves none (the
@@ -4338,10 +4340,11 @@ organisation name.
   image, frame or `src=`, and one enclosure whose URL is exactly the
   release asset's, with a positive length and a 64-byte signature; no
   "zmx" anywhere, and no script, test or design-document name in the
-  served file. The feed with no item passes; it holds none until a
-  release is published. A second test runs `scripts/appcast.py` (`item`
-  twice and `insert` into a copy of the feed in a temporary directory,
-  and an older build refused) and checks the result with the same rule,
+  served file. The feed with no item passes; its first item is
+  0.1.2's. A second test runs `scripts/appcast.py` (`item` twice and
+  `insert` into the feed as it was before its first item, in a
+  temporary directory, and an older build refused) and checks the
+  result with the same rule,
   so the script and the rule cannot drift.
 - **`scripts/sparkle-tool.sh <tool> [args…]`** runs `generate_keys`,
   `sign_update` or `generate_appcast` from the pinned package's artifact

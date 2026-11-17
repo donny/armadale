@@ -60,5 +60,12 @@ scripts/state-fixtures/run.sh v0.1.1 scripts/state-fixtures/v0.1.1.swift \
     Packages/ArmadaleCore/Tests/ArmadaleCoreTests/Fixtures/state-0.1.1.json
 ```
 
+and 0.1.2's on November 17, 2026, the day of its release, with:
+
+```sh
+scripts/state-fixtures/run.sh v0.1.2 scripts/state-fixtures/v0.1.2.swift \
+    Packages/ArmadaleCore/Tests/ArmadaleCoreTests/Fixtures/state-0.1.2.json
+```
+
 IDs and creation times are random, so running a generator again gives a
 different file with the same content; the tests look things up by name.

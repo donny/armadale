@@ -12,12 +12,13 @@ versioned JSON in `~/Library/Application Support/Armadale/`.
 ## Status
 
 All ten steps of the build order in [docs/DESIGN.md](docs/DESIGN.md)
-section 12 are implemented and committed on `main`, and 0.1.1 is the
+section 12 are implemented and committed on `main`, and 0.1.2 is the
 current release. Step 8 is menu bar mode, asking before quitting with
 running sessions; step 9 is Developer ID signing and
 `scripts/release.sh`, which builds a notarized, stapled DMG (see
-[Releasing](#releasing)); step 10 is the New Session chooser. There is
-no updater and no crash reporting in v1.
+[Releasing](#releasing)); step 10 is the New Session chooser. Since
+0.1.2 Armadale updates itself ([Updates](#updates)); there is no crash
+reporting in v1.
 Where development stands, what is next and the open items are in
 [HANDOFF.md](HANDOFF.md); what is true of the design now is in
 [docs/DESIGN.md](docs/DESIGN.md), and why and when in

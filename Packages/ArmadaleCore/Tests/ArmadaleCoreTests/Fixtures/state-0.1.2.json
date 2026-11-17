@@ -1,0 +1,585 @@
+{
+  "favorites" : [
+    {
+      "id" : "m6mirzuofcg7bxze",
+      "name" : "Claude here",
+      "request" : {
+        "location" : {
+          "local" : {
+
+          }
+        },
+        "options" : {
+          "additionalArguments" : [
+
+          ],
+          "continueConversation" : true,
+          "model" : "sonnet",
+          "skipPermissions" : false
+        },
+        "profileID" : "builtin.claude-code",
+        "workingDirectory" : "~/src/armadale"
+      }
+    },
+    {
+      "id" : "zmohrkr27irkld5m",
+      "name" : "Codex on build",
+      "request" : {
+        "location" : {
+          "remote" : {
+            "host" : "a23kn64wntt2qvfs"
+          }
+        },
+        "options" : {
+          "additionalArguments" : [
+            "-c",
+            "x=1"
+          ],
+          "continueConversation" : false,
+          "sandbox" : "read-only",
+          "skipPermissions" : true
+        },
+        "profileID" : "builtin.codex",
+        "workingDirectory" : "~/work"
+      }
+    },
+    {
+      "id" : "zigwsfvbwlcj57cr",
+      "name" : "Old shell",
+      "request" : {
+        "location" : {
+          "remote" : {
+            "host" : "bo6g2mbayblzp3cd"
+          }
+        },
+        "options" : {
+          "additionalArguments" : [
+
+          ],
+          "continueConversation" : false,
+          "skipPermissions" : false
+        },
+        "profileID" : "builtin.shell",
+        "workingDirectory" : "/srv"
+      }
+    },
+    {
+      "id" : "7xarszeliqkhbnpu",
+      "name" : "Build Watcher in ~",
+      "request" : {
+        "location" : {
+          "local" : {
+
+          }
+        },
+        "options" : {
+          "additionalArguments" : [
+
+          ],
+          "continueConversation" : false,
+          "skipPermissions" : false
+        },
+        "profileID" : "gouwlkjixamslmr3",
+        "workingDirectory" : "~"
+      }
+    }
+  ],
+  "hosts" : [
+    {
+      "id" : "a23kn64wntt2qvfs",
+      "identityFile" : "~/.ssh/id_build",
+      "name" : "Build Box",
+      "port" : 2222,
+      "remoteDirectory" : "~/.armadale-build",
+      "sshConfigFile" : "~/.ssh/config.build",
+      "sshDestination" : "dev@build.example.com"
+    },
+    {
+      "id" : "4lpmpcnzyzr2gwxa",
+      "name" : "Bare",
+      "remoteDirectory" : "~/.armadale",
+      "sshDestination" : "bare.example.com"
+    }
+  ],
+  "profiles" : [
+    {
+      "arguments" : [
+
+      ],
+      "attentionIntegration" : true,
+      "environment" : {
+
+      },
+      "icon" : "terminal",
+      "id" : "builtin.shell",
+      "kind" : {
+        "type" : "shell"
+      },
+      "name" : "Shell"
+    },
+    {
+      "arguments" : [
+
+      ],
+      "attentionIntegration" : false,
+      "environment" : {
+
+      },
+      "icon" : "star",
+      "id" : "builtin.claude-code",
+      "kind" : {
+        "flavor" : "claude-code",
+        "type" : "agent"
+      },
+      "name" : "Claude (renamed)",
+      "program" : "claude"
+    },
+    {
+      "arguments" : [
+
+      ],
+      "attentionIntegration" : true,
+      "environment" : {
+
+      },
+      "icon" : "chevron.left.forwardslash.chevron.right",
+      "id" : "builtin.codex",
+      "kind" : {
+        "flavor" : "codex",
+        "type" : "agent"
+      },
+      "name" : "Codex",
+      "program" : "codex"
+    },
+    {
+      "arguments" : [
+        "-C",
+        "src",
+        "watch"
+      ],
+      "attentionIntegration" : true,
+      "environment" : {
+        "MAKEFLAGS" : "-j8"
+      },
+      "icon" : "hammer",
+      "id" : "gouwlkjixamslmr3",
+      "kind" : {
+        "type" : "command"
+      },
+      "name" : "Build Watcher",
+      "program" : "/usr/bin/make"
+    },
+    {
+      "arguments" : [
+
+      ],
+      "attentionIntegration" : true,
+      "environment" : {
+
+      },
+      "icon" : "bubble.left",
+      "id" : "kmlcgu7p2wy3yzak",
+      "kind" : {
+        "flavor" : "aider",
+        "type" : "agent"
+      },
+      "name" : "Aider",
+      "program" : "aider"
+    }
+  ],
+  "schemaVersion" : 2,
+  "sessionListIncomplete" : true,
+  "sessions" : [
+    {
+      "createdAt" : "2026-11-17T23:07:51Z",
+      "gridSize" : {
+        "columns" : 132,
+        "rows" : 43
+      },
+      "id" : "42qljjpo4ybh5ad7",
+      "launch" : {
+        "arguments" : [
+
+        ],
+        "environment" : {
+
+        }
+      },
+      "location" : {
+        "local" : {
+
+        }
+      },
+      "options" : {
+        "additionalArguments" : [
+
+        ],
+        "continueConversation" : false,
+        "skipPermissions" : false
+      },
+      "profileID" : "builtin.shell",
+      "runtimeVersion" : "0.8.1",
+      "title" : "vim Package.swift",
+      "workingDirectory" : "/Users/fixture/src/armadale"
+    },
+    {
+      "createdAt" : "2026-11-17T23:07:51Z",
+      "id" : "ycu3ziaokezmvryg",
+      "launch" : {
+        "arguments" : [
+          "--dangerously-skip-permissions",
+          "--continue",
+          "--model",
+          "opus",
+          "--verbose"
+        ],
+        "environment" : {
+
+        },
+        "program" : "claude"
+      },
+      "location" : {
+        "local" : {
+
+        }
+      },
+      "options" : {
+        "additionalArguments" : [
+          "--verbose"
+        ],
+        "continueConversation" : true,
+        "model" : "opus",
+        "skipPermissions" : true
+      },
+      "profileID" : "builtin.claude-code",
+      "title" : "Claude Code",
+      "workingDirectory" : "/Users/fixture/src/armadale"
+    },
+    {
+      "createdAt" : "2026-11-17T23:07:51Z",
+      "id" : "6mqbjggcvzcb23xp",
+      "launch" : {
+        "arguments" : [
+          "--sandbox",
+          "workspace-write",
+          "--model",
+          "gpt-5"
+        ],
+        "environment" : {
+
+        },
+        "program" : "codex"
+      },
+      "location" : {
+        "remote" : {
+          "host" : "a23kn64wntt2qvfs"
+        }
+      },
+      "options" : {
+        "additionalArguments" : [
+
+        ],
+        "continueConversation" : false,
+        "model" : "gpt-5",
+        "sandbox" : "workspace-write",
+        "skipPermissions" : false
+      },
+      "profileID" : "builtin.codex",
+      "title" : "",
+      "workingDirectory" : "~/work"
+    },
+    {
+      "createdAt" : "2026-11-17T23:07:51Z",
+      "id" : "tr24jezu5mousqde",
+      "launch" : {
+        "arguments" : [
+          "-C",
+          "src",
+          "watch"
+        ],
+        "environment" : {
+          "MAKEFLAGS" : "-j8"
+        },
+        "program" : "/usr/bin/make"
+      },
+      "location" : {
+        "local" : {
+
+        }
+      },
+      "options" : {
+        "additionalArguments" : [
+
+        ],
+        "continueConversation" : false,
+        "skipPermissions" : false
+      },
+      "profileID" : "gouwlkjixamslmr3",
+      "title" : "",
+      "workingDirectory" : "/opt/build"
+    },
+    {
+      "createdAt" : "2026-11-17T23:07:51Z",
+      "id" : "ah6gmjrhrtommxzi",
+      "launch" : {
+        "arguments" : [
+
+        ],
+        "environment" : {
+
+        }
+      },
+      "location" : {
+        "remote" : {
+          "host" : "bo6g2mbayblzp3cd"
+        }
+      },
+      "options" : {
+        "additionalArguments" : [
+
+        ],
+        "continueConversation" : false,
+        "skipPermissions" : false
+      },
+      "profileID" : "builtin.shell",
+      "title" : "",
+      "workingDirectory" : "~"
+    },
+    {
+      "createdAt" : "2026-11-17T23:07:51Z",
+      "id" : "mluazgpnxidd6mce",
+      "launch" : {
+        "arguments" : [
+
+        ],
+        "environment" : {
+
+        }
+      },
+      "location" : {
+        "local" : {
+
+        }
+      },
+      "profileID" : "builtin.shell",
+      "title" : "from 0.1.0",
+      "workingDirectory" : "/tmp"
+    }
+  ],
+  "sparedSessionIDs" : [
+    "anrdn6bf4wwmx2ek",
+    "ofhu6s43sjaahxlv"
+  ],
+  "workspaces" : [
+    {
+      "id" : "26b3dry3u3s66jgq",
+      "name" : "Project",
+      "selectedTabGroupID" : "ineaoynjtxm4csdo",
+      "tabGroups" : [
+        {
+          "id" : "ineaoynjtxm4csdo",
+          "name" : "Main",
+          "selectedTabID" : "urb4e4kvqusyhso5",
+          "tabs" : [
+            {
+              "customTitle" : "Editor",
+              "focusedPaneID" : "22kib3ihqbar6pqw",
+              "id" : "urb4e4kvqusyhso5",
+              "layout" : {
+                "split" : {
+                  "axis" : "horizontal",
+                  "first" : {
+                    "pane" : "4nmsq5k677c5wkoj"
+                  },
+                  "ratio" : 0.4,
+                  "second" : {
+                    "split" : {
+                      "axis" : "vertical",
+                      "first" : {
+                        "pane" : "22kib3ihqbar6pqw"
+                      },
+                      "ratio" : 0.5,
+                      "second" : {
+                        "pane" : "joo5w4xpb3ucg3ai"
+                      }
+                    }
+                  }
+                }
+              },
+              "panes" : [
+                {
+                  "id" : "4nmsq5k677c5wkoj",
+                  "sessionID" : "42qljjpo4ybh5ad7"
+                },
+                {
+                  "id" : "22kib3ihqbar6pqw",
+                  "sessionID" : "ycu3ziaokezmvryg",
+                  "themeID" : "builtin.dracula"
+                },
+                {
+                  "id" : "joo5w4xpb3ucg3ai"
+                }
+              ],
+              "zoomedPaneID" : "22kib3ihqbar6pqw"
+            },
+            {
+              "focusedPaneID" : "g4j4vxqmry72bs5d",
+              "id" : "36oran3dhaqusf6x",
+              "layout" : {
+                "pane" : "g4j4vxqmry72bs5d"
+              },
+              "panes" : [
+                {
+                  "id" : "g4j4vxqmry72bs5d",
+                  "sessionID" : "6mqbjggcvzcb23xp"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id" : "hp5gxbzq6mpzsqf4",
+          "name" : "Ops",
+          "selectedTabID" : "dynbyqfq2lz4v5h3",
+          "tabs" : [
+            {
+              "focusedPaneID" : "b2n5cb7mkkf7274x",
+              "id" : "cuc6cdohikgbmmpu",
+              "layout" : {
+                "pane" : "b2n5cb7mkkf7274x"
+              },
+              "panes" : [
+                {
+                  "id" : "b2n5cb7mkkf7274x",
+                  "sessionID" : "tr24jezu5mousqde"
+                }
+              ]
+            },
+            {
+              "focusedPaneID" : "ymmopxbaqtsszv2a",
+              "id" : "dynbyqfq2lz4v5h3",
+              "layout" : {
+                "pane" : "ymmopxbaqtsszv2a"
+              },
+              "panes" : [
+                {
+                  "id" : "ymmopxbaqtsszv2a",
+                  "sessionID" : "ah6gmjrhrtommxzi"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "window" : {
+        "frame" : {
+          "height" : 982,
+          "width" : 1512,
+          "x" : 0,
+          "y" : 0
+        },
+        "isFullScreen" : true,
+        "isOpen" : true,
+        "sidebarCollapsed" : false,
+        "sidebarWidth" : 260
+      }
+    },
+    {
+      "id" : "gpsjewmgdtm5m5vt",
+      "name" : "Notes",
+      "selectedTabGroupID" : "gb4cb42saalydbnl",
+      "tabGroups" : [
+        {
+          "id" : "gb4cb42saalydbnl",
+          "name" : "Main",
+          "selectedTabID" : "w6te43yoqu4hj25w",
+          "tabs" : [
+            {
+              "focusedPaneID" : "h57mo62snt3xecjt",
+              "id" : "w6te43yoqu4hj25w",
+              "layout" : {
+                "pane" : "h57mo62snt3xecjt"
+              },
+              "panes" : [
+                {
+                  "id" : "h57mo62snt3xecjt",
+                  "themeID" : "builtin.solarized-light"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "window" : {
+        "frame" : {
+          "height" : 600,
+          "width" : 900,
+          "x" : 120.5,
+          "y" : 80
+        },
+        "isFullScreen" : false,
+        "isOpen" : false,
+        "sidebarCollapsed" : true
+      }
+    },
+    {
+      "id" : "vbazgrq5oud7qvni",
+      "name" : "Inbox",
+      "selectedTabGroupID" : "6et2bpm7guxqsilb",
+      "tabGroups" : [
+        {
+          "id" : "6et2bpm7guxqsilb",
+          "name" : "Main",
+          "selectedTabID" : "pbuipmavpu24i3ng",
+          "tabs" : [
+            {
+              "focusedPaneID" : "wzzv6zzme2vs4uag",
+              "id" : "pbuipmavpu24i3ng",
+              "layout" : {
+                "pane" : "wzzv6zzme2vs4uag"
+              },
+              "panes" : [
+                {
+                  "id" : "wzzv6zzme2vs4uag"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "window" : {
+        "isFullScreen" : false,
+        "isOpen" : true,
+        "sidebarCollapsed" : false,
+        "sidebarWidth" : 180
+      }
+    },
+    {
+      "id" : "g5yelo7pqfovligk",
+      "name" : "Scratch",
+      "selectedTabGroupID" : "vy5qiskzwfpkbuju",
+      "tabGroups" : [
+        {
+          "id" : "vy5qiskzwfpkbuju",
+          "name" : "Main",
+          "selectedTabID" : "4o7s2vrzwg7ube3w",
+          "tabs" : [
+            {
+              "focusedPaneID" : "5vr6f2cae3x7mllg",
+              "id" : "4o7s2vrzwg7ube3w",
+              "layout" : {
+                "pane" : "5vr6f2cae3x7mllg"
+              },
+              "panes" : [
+                {
+                  "id" : "5vr6f2cae3x7mllg",
+                  "sessionID" : "mluazgpnxidd6mce"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

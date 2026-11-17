@@ -2923,6 +2923,75 @@ and `appcast-item.xml` are checked by this run. The DMG's size and
 hash are in the local file of the Mac it was built on. How to publish
 this very build is under "Next" in `HANDOFF.md`.
 
+## November 17, 2026: Armadale 0.1.2, released
+
+November 17, 2026, afternoon, on the owner's word ("Please cut a
+release 0.1.2"): **Armadale 0.1.2 is released: build 30 from dc03cc5,
+the build of that morning, tagged `v0.1.2`, on GitHub with the
+notarized DMG, on the changelog page as the latest release and in the
+update feed.** It is the first release with an updater and the first
+that writes state file schema 2. Nothing was built again: the DMG in
+`build/release/` still had the hash recorded in the morning, and only
+documents had changed since dc03cc5.
+
+- **A launch first.** No one had launched build 30: the owner's
+  settings held no key of the updater and the state directory was last
+  written on November 14. Asked whether to publish like that, the
+  owner opened the installed build and chose Check for Updates…; it
+  answered that Armadale was up to date (the feed was empty then).
+  Afterwards the settings held `SUHasLaunchedBefore` and
+  `SULastCheckTime`. Before that, on disk only: the Release binary
+  links `@rpath/Sparkle.framework/Versions/B/Sparkle` with the rpath
+  `@executable_path/../Frameworks`, which is where the framework is.
+- **The tag and the GitHub Release**: `v0.1.2`, annotated, at dc03cc5,
+  pushed; the release "Armadale 0.1.2" with `Armadale-0.1.2.dmg` and
+  `Armadale.dmg` (17,162,822 bytes each), published at 23:01 UTC and
+  now the latest, so the site's Download button gives 0.1.2. The notes
+  are written from the changelog page and say first what a user has to
+  know: 0.1.1 and earlier cannot update themselves and get 0.1.2 by
+  downloading it once, and 0.1.1 and earlier refuse a layout this
+  version saves.
+- **The changelog page**: "Next release" became the 0.1.2 section
+  (`v0.1.2`, November 17, 2026, the "Latest release" pill, a note with
+  the links); 0.1.1 gave up the pill and its link to the latest
+  download, which is 0.1.2 from now on. There is no "Next release"
+  section until there is new work.
+- **The feed**: `scripts/appcast.sh` downloaded the release asset,
+  checked its length and the item's signature against the key in
+  `project.yml`, made the notes from the 0.1.2 section (7 items) and
+  put the item into `docs/appcast.xml`. Committed with the changelog
+  as f1e0fca and pushed; a few minutes later
+  `https://armadale.dev/appcast.xml` served the same file and the
+  changelog page showed the 0.1.2 section.
+- **Found: a test that depended on the real feed.** `AppcastTests`'
+  script test inserted a sample 0.1.2 (30) into a copy of
+  `docs/appcast.xml`; with the real item in the feed the script
+  refused the second build 30, and the gate failed on that one test.
+  The test now starts from the real feed as it was before its first
+  item (f1e0fca). The script and the feed were right.
+- **The state fixture**: `scripts/state-fixtures/v0.1.2.swift`, a copy
+  of `current.swift`, run against the tag, wrote `state-0.1.2.json`
+  (schema 2, with the orphan reclaim's record and a session's grid
+  size); `StateFixtureTests` has its line and `contentOf012`.
+  `scripts/check-state-compat.sh` now also runs v0.1.2, which loads
+  the working tree's file and loses nothing. One more test had counted
+  on the list of fixtures: `GridSizeTests.olderFilesHaveNone` ran for
+  every released version and failed for 0.1.2, whose fixture has a
+  grid size; it now names 0.1.0 and 0.1.1, the versions it is about.
+- **Gate**: 945 tests before the fixture and 946 with it, no warning
+  from Armadale's code. The runs that recompiled the test target have
+  the two tool warnings described under "an updater, with Sparkle".
+  The SSH integration tests did not run.
+
+Resolved in HANDOFF by this change: "Publishing 0.1.2" under "Waiting
+for owner decisions", and from the updater's list the updater seen
+running in a Release build, `scripts/appcast.sh` against a real
+release asset and the real feed with an item. Its status list starts
+again from this release. Still open there: a check against the feed
+with its item, Sparkle's question at the second launch in a Release
+build, and an update between two Developer ID signed builds, which
+only the next release can show.
+
 ---
 
 # Part 2: the history of each design section
@@ -3189,6 +3258,11 @@ keeps the lock. Builds before this lock (0.1.1 included) take none.
 
 **SwiftData considered.** SwiftData was considered and rejected: the state
 is a small tree that is easier to inspect, diff and migrate as JSON.
+
+**November 17, 2026. 0.1.2 is a released reader.** With its release,
+0.1.2 joined the versions the rule is about: it writes schema 2, its
+fixture is `state-0.1.2.json`, and `scripts/check-state-compat.sh`
+answers `loaded` for it (Part 1, "Armadale 0.1.2, released").
 
 
 ## 4. Session persistence: the zmx backend
@@ -4935,6 +5009,12 @@ private key for verification. No option reads the private key from a
 file (Sparkle's `--ed-key-file` exists; the release uses the keychain
 only). The feed's items are generated, never hand-written, and their
 release notes come from the changelog page, so the text exists once.
+
+**November 17, 2026. The first release through it.** 0.1.2 was the
+first release with a feed item. The script test of `AppcastTests` had
+inserted its sample into a copy of the real feed, which holds a real
+0.1.2 (30) since then; it now starts from the feed as it was before
+its first item (Part 1, "Armadale 0.1.2, released").
 
 ---
 
