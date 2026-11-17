@@ -178,7 +178,12 @@ synthetic event at all: an alert's buttons and the status menu's items
 answer an accessibility press (`AXPress`; the status menu's items are
 under the app's `AXExtrasMenuBar` without the menu being open), and
 `NSRunningApplication(processIdentifier:)?.terminate()` sends one
-process the quit event that ⌘Q's question answers.
+process the quit event that ⌘Q's question answers. The main menu's
+items answer a press too, also in menu bar mode and while an alert is
+up, but find a menu item by its exact title, never by a part of it:
+the Apple menu is in every app's menu bar, and a press meant for
+Armadale's Settings… landed on System Settings… and opened System
+Settings (November 16, 2026).
 
 Which process macOS holds responsible decides what an agent may do. A
 session run from the Claude desktop app runs its commands under the
@@ -244,7 +249,12 @@ including a remote one (this killed an agent's own cleanup once).
 Confirm with `pgrep -lx Armadale; pgrep -lx zmx-0.8.1; pgrep -fl 'ssh
 -tt'` (`pgrep -fl 'zmx|Armadale'` matches the agent's own shell). Never
 put a shell variable inside an `rm` path (`rm -rf $DIR/*` was denied
-once and is banned); literal paths only, including `$TMPDIR`.
+once and is banned); literal paths only, including `$TMPDIR`. A test
+build with a bundle identifier of its own leaves folders under
+`~/Library`: look at the known paths (`Caches`, `HTTPStorages`,
+`WebKit`, `Saved Application State` and `Preferences`, each under the
+bundle identifier), never with `find` over `~/Library`, which hung for
+two minutes and had to be stopped (November 16, 2026).
 
 **Other people's processes.** The owner runs Claude Code in other sessions
 on this Mac. Never kill a `claude` or `codex` process you did not start.

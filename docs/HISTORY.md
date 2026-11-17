@@ -2810,7 +2810,9 @@ never touched.
   was on screen and the app was not active. (d) A search of `~/Library`
   with `find` hung for two minutes and was stopped; the test builds'
   leftovers are at known paths (`Caches`, `HTTPStorages`, `WebKit`,
-  `Preferences`, each under the bundle identifier).
+  `Preferences`, each under the bundle identifier). (a) and (d) are
+  rules in AGENTS.md since the same night ("Rules learned the hard
+  way").
 - **Not checked**: HANDOFF's list for the updater, now shorter.
 - **Cleanup**: the builds, the state directory and the feed removed,
   the server stopped, both defaults domains and the three folders under
