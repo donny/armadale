@@ -8,7 +8,7 @@ is `docs/DESIGN.md`; why and when (the change log, and the history of
 each design section) is `docs/HISTORY.md`; build and run instructions
 are in `README.md`.
 
-## Status (November 16, 2026)
+## Status (November 17, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
@@ -37,13 +37,15 @@ build ("From finished changes" below has what is left and what was
 found). The same day the site gained a changelog page
 (`docs/changelog.html`), written for everything so far and kept by a
 rule in AGENTS.md from now on. The same night an updater was built,
-reviewed and committed (Sparkle 2.10.1); it runs in no build until the
-owner has made the update signing key ("Waiting for owner decisions"
-below). A real update was checked live the same night on test builds
-with a bundle identifier of their own: sessions lived through every
-update, also with Armadale switched off under Background App Activity
-("From finished changes" below has what is left). The last gate run:
-945 tests, no warning from Armadale's code.
+reviewed and committed (Sparkle 2.10.1), and a real update was checked
+live on test builds with a bundle identifier of their own: sessions
+lived through every update, also with Armadale switched off under
+Background App Activity ("From finished changes" below has what is
+left). On November 17, 2026 the owner made the update signing key and
+its public half went into `project.yml`: the next Release build starts
+the updater, and no such build exists yet ("Waiting for owner
+decisions" below). The last gate run: 945 tests, no warning from
+Armadale's code.
 **Armadale 0.1.2 (29) is built, notarized and stapled from 77a02cf
 (November 16, 2026) and installed on the owner's Mac, with everything
 above except the updater in it, but not released: no tag, no GitHub Release, no fixture
@@ -138,14 +140,19 @@ in the heading or the text under it, their commits:
 - November 16, 2026 (night): the updater checked live on test builds,
   five real updates with sessions running (`docs/HISTORY.md`, "the
   updater, checked live"); no code changed.
+- November 17, 2026: the update signing key exists and its public half
+  is `SUPublicEDKey` in `project.yml`, so a Release build starts the
+  updater (`docs/HISTORY.md`, "the update key exists"); no app code
+  changed.
 
 ## Next
 
 Nothing is being built. The updater (the owner's go-ahead of November
 16, 2026, "Build as recommended") is built, reviewed and committed
 (`docs/HISTORY.md`, "an updater, with Sparkle"); "Waiting for owner
-decisions" has what is left of it: the owner's key, the live test,
-publishing. Everything the owner gave the go-ahead for on
+decisions" has what is left of it: the first signature with the
+owner's key (made November 17, 2026), the first update between
+Developer ID signed builds, publishing. Everything the owner gave the go-ahead for on
 November 14, 2026 is built, and checked live where the Mac was free
 (`docs/HISTORY.md`, the entries of that day). The step of November 16,
 2026 (favorites in the chooser, New Host…, Settings without Favorites)
@@ -200,12 +207,13 @@ Waiting for owner decisions:
   workarounds").
 - **The Ghostty second renderer** ("Decisions pending" below).
 - **The updater: what is left** (built November 16, 2026;
-  `docs/DESIGN.md` section 8, "Updates"). (1) The owner makes the update
-  signing key, `scripts/sparkle-tool.sh generate_keys --account
-  armadale` (README, "Releasing", has the backup and the second Mac),
-  and gives its public half, which goes into `project.yml` as
-  `SUPublicEDKey` (one line, commented there now). Until then no build
-  starts the updater and `scripts/release.sh` refuses to build. (2) The
+  `docs/DESIGN.md` section 8, "Updates"). (1) The update signing
+  key exists (November 17, 2026) and its public half is
+  `SUPublicEDKey` in `project.yml`, but it has signed nothing yet:
+  `scripts/release.sh` checks it against `project.yml` before it
+  builds, and no Release build with the key has been made, so the
+  updater has not been seen starting in one. The key's backup and its
+  import on a second Mac are the owner's (README, "Releasing"). (2) The
   live test of a real update is done, on ad hoc signed test builds
   (`docs/HISTORY.md`, "the updater, checked live"); an update between
   Developer ID signed builds can only be seen with the first real
@@ -452,8 +460,9 @@ Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
 - No crash reporting (decided for v1, October 19, 2026). The updater
-  is built (November 16, 2026) but runs in no build until the owner's
-  key exists; 0.1.1 and earlier cannot update themselves, so 0.1.2 must
+  is built (November 16, 2026) and has its key (November 17, 2026);
+  the first build that runs it is the next Release build. 0.1.1 and
+  earlier cannot update themselves, so 0.1.2 must
   be downloaded once by hand (the release notes say so).
 - Older builds on a newer state directory (November 14, 2026). Once a
   build with schema 2 has saved a state directory, 0.1.0 and 0.1.1

@@ -87,10 +87,11 @@ targets:
         SUVerifyUpdateBeforeExtraction: true
         SUAllowsAutomaticUpdates: false
         # The public half of the update signing key (keychain account
-        # `armadale`, README "Releasing"). Until it is set the updater never
-        # starts and scripts/release.sh refuses to build. Adding it is this
-        # one line, uncommented, with the key `generate_keys` printed:
-        # SUPublicEDKey: <base64 public key>
+        # `armadale`, README "Releasing"). Without it the updater never
+        # starts and scripts/release.sh refuses to build. Installed copies
+        # accept only updates signed with its private half, so leave it as
+        # it is (docs/DESIGN.md section 13, "The update key").
+        SUPublicEDKey: in0F6WnhaRwJKjq/X2e8QccvqOKNBwlniNy3voutwNo=
     # No App Sandbox, by design (docs/DESIGN.md, "Distribution"): Armadale
     # spawns the user's login shell and arbitrary agents with full access to
     # their files, runs a private zmx helper copied to

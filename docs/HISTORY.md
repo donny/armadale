@@ -2820,6 +2820,36 @@ never touched.
   or Sparkle process and no Sparkle launchd job left. The test builds'
   entry stays in the Background App Activity list.
 
+## November 17, 2026: the update key exists
+
+November 17, 2026 (the owner made the key and put its public half into
+`project.yml`; the coordinating session checked and committed it; no
+app code changed): **the update signing key exists and its public half
+is `SUPublicEDKey` in `project.yml`, so a Release build starts the
+updater.** A Debug build still never does, and no Release build has
+been made with the key.
+
+- **The key**: the owner ran `scripts/sparkle-tool.sh generate_keys
+  --account armadale` that morning and uncommented the `SUPublicEDKey`
+  line in `project.yml` with the key it printed. `xcodegen generate`
+  carries it into `Armadale/Resources/Info.plist`.
+- **Checked**: the login keychain has the item (service
+  `https://sparkle-project.org`, account `armadale`), read by its
+  attributes only, never the key. The item's comment, which
+  `generate_keys` wrote, names the same public key as `project.yml`,
+  and that key decodes to 32 bytes. Gate: 945 tests, no warning from
+  Armadale's code.
+- **Not checked**: no signature was made with the key
+  (`scripts/release.sh` signs a scratch file with it and verifies the
+  signature against `project.yml` before it builds); no Release build
+  was made, so the updater was not seen starting in one.
+- **Documents**: README, "Releasing", now says that the key exists and
+  that `generate_keys` must not be run on a Mac that lacks it (it would
+  make a different key; such a Mac imports the key). DESIGN section 8,
+  "Updates", says the key is set. HANDOFF: making the key is no longer
+  open; what is left of item (1) of "The updater: what is left" is the
+  first signature and the first Release build.
+
 ---
 
 # Part 2: the history of each design section
@@ -4561,6 +4591,12 @@ limits that remain (End Sessions and Quit between the yes and the quit;
 Sparkle's retry, which is not reported again because of
 `_notifiedDelegateInstallationWillFinish`, `SPUInstallerDriver.m`
 551–554) are in DESIGN sections 8 and 13.
+
+**November 17, 2026. The key.** The owner made the update key
+(`generate_keys --account armadale`) and its public half went into
+`project.yml` as `SUPublicEDKey`. Until then that line was a comment
+and no build started the updater, by the rule that still holds for a
+build without the key (Part 1, "the update key exists").
 
 
 ## 9. Keyboard shortcuts

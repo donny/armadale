@@ -3513,9 +3513,9 @@ is mounted) and `SUAllowsAutomaticUpdates` false (nothing is downloaded or
 installed without the user), and has no `SUEnableAutomaticChecks` (Sparkle
 asks once, at the second launch, "Check for updates automatically?", then
 checks once a day while that is on) and none of `SUSendProfileInfo`,
-`SUEnableSystemProfiling` and `SUEnableJavaScript`. No
-`SUPublicEDKey` is set yet: the owner has not made the key, so no build
-starts the updater (below); adding it is one line in `project.yml`.
+`SUEnableSystemProfiling` and `SUEnableJavaScript`. `SUPublicEDKey` is
+set in `project.yml`, so a Release build starts the updater (below); a
+build without it never does.
 `App/SparkleUpdater.swift` is the only file that imports Sparkle (kept out
 of `ArmadaleAppTests`, which does not link it); everything else talks to
 the `AppUpdater` protocol and to `UpdateCoordinator` (`App/Updates.swift`),

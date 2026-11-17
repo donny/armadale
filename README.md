@@ -481,10 +481,10 @@ waiting installer, nor after Skip This Version at a later check). In
 menu bar mode a scheduled check that finds an update opens no window;
 the menu bar item's menu shows Update Available…. The updater never runs
 in a Debug build, in a run with `ARMADALE_STATE_DIR` or a defaults suite
-(Run in Xcode, test builds), nor in a build without an `SUPublicEDKey`,
-which is every build until the owner has made the update key
-("Releasing"); `ARMADALE_UPDATER_FOR_TEST=1` lifts the first two for a
-live test. Sparkle
+(Run in Xcode, test builds), nor in a build without an `SUPublicEDKey`
+(the update key's public half, "Releasing");
+`ARMADALE_UPDATER_FOR_TEST=1` lifts the first two for a live test.
+Sparkle
 keeps its settings (`SUEnableAutomaticChecks`, `SULastCheckTime`, …) in
 the app's standard defaults domain.
 
@@ -529,19 +529,22 @@ Prerequisites, once per Mac:
   verifies. `release.sh`
   checks it before building and says to run the script if it is missing.
 - **The update signing key** (docs/DESIGN.md section 8, "Updates"): one
-  EdDSA key under the login keychain's account `armadale`, made and kept
-  by the owner. `scripts/sparkle-tool.sh` runs Sparkle's tools from the
-  pinned package (build once first, so the package is fetched). Once:
+  EdDSA key under the login keychain's account `armadale`, made by the
+  owner on November 17, 2026 and kept by the owner. Its public half is
+  `SUPublicEDKey` in `project.yml`; without that line the updater never
+  starts and `release.sh` refuses to build. `scripts/sparkle-tool.sh`
+  runs Sparkle's tools from the pinned package (build once first, so
+  the package is fetched). The key was made with
 
   ```sh
   scripts/sparkle-tool.sh generate_keys --account armadale
   ```
 
-  It stores the private key in the login keychain and prints the public
-  key, which goes into `project.yml` as `SUPublicEDKey` (the commented
-  line under `SUAllowsAutomaticUpdates`). Until it is there the updater
-  never starts and `release.sh` refuses to build. For the backup and the
-  other Mac, export it:
+  which stores the private key in the login keychain and prints the
+  public key. Do not run that on a Mac that lacks the key: it would
+  make a different one, and installed copies accept only updates signed
+  with the first. A Mac that releases gets the key by import. For the
+  backup and the other Mac, export it:
 
   ```sh
   scripts/sparkle-tool.sh generate_keys --account armadale -x ~/armadale-update-key.txt
@@ -558,7 +561,7 @@ Prerequisites, once per Mac:
 
   Never by mail, chat, a cloud folder or the repository. `generate_keys`
   run with no key under that account creates a new one, so run it only
-  for these three purposes.
+  for these two purposes.
 
 To release:
 

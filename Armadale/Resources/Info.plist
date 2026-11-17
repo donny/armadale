@@ -37,6 +37,8 @@ MIT License.</string>
 	<false/>
 	<key>SUFeedURL</key>
 	<string>https://armadale.dev/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>in0F6WnhaRwJKjq/X2e8QccvqOKNBwlniNy3voutwNo=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
 	<key>UTExportedTypeDeclarations</key>
