@@ -27,12 +27,14 @@ extension AppDelegate {
                 model: model, settings: settings,
                 hostTools: HostTools(
                     testConnection: { try await registry.testConnection(to: $0) },
-                    deploy: { try await registry.deployHelper(to: $0) }))
+                    deploy: { try await registry.deployHelper(to: $0) }),
+                updates: updateSettings)
             settingsWindowController?.onClose = { [weak self] in
                 self?.auxiliaryWindowDidClose()
             }
         }
         NSApp.unhide(nil) // hidden after Settings closed in menu bar mode
+        updateSettings.refresh()
         settingsWindowController?.show()
         AppActivation.bringForward()
     }
@@ -101,6 +103,7 @@ extension AppDelegate {
         case #selector(increaseFontSize(_:)): return preferences.canIncreaseFontSize
         case #selector(decreaseFontSize(_:)): return preferences.canDecreaseFontSize
         case #selector(resetFontSize(_:)): return preferences.fontSize != Preferences.defaultFontSize
+        case #selector(checkForUpdates(_:)): return updater?.canCheckForUpdates ?? false
         default: return true
         }
     }

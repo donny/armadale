@@ -263,6 +263,7 @@ the test process without the prefix.
 | `ARMADALE_ZMX=/path/to/zmx` | zmx binary to bundle-install and test with, instead of the app's `Contents/Helpers/zmx` or `Vendor/zmx`. |
 | `ARMADALE_CTTY_EXEC=/path/to/ctty-exec` | `ctty-exec` to use (see below). |
 | `ARMADALE_DEFAULTS_SUITE=name` | Keep settings in the UserDefaults suite `name` instead of the app's domain (same as the `-ArmadaleDefaultsSuite name` argument). |
+| `ARMADALE_UPDATER_FOR_TEST=1` | Start the updater in a Debug build and in a run with `ARMADALE_STATE_DIR` or a defaults suite set (it starts in neither otherwise), for the live test of a real update. It never lifts a missing `SUPublicEDKey` or `SUFeedURL`, or a launch that cannot go on. Sparkle's own settings stay in the app's standard defaults domain, so a test copy needs a bundle identifier of its own. |
 
 Each running Armadale holds a lock (`flock`) on `armadale.lock` in its
 state directory; the file holds its pid. A second process started on the
@@ -460,6 +461,33 @@ its own suite, named by an absolute path inside a fresh temporary folder
 (CFPreferences then keeps the plist there, not in `~/Library/Preferences`),
 and removes the folder at the end.
 
+## Updates
+
+Armadale › Check for Updates… asks https://armadale.dev/appcast.xml for
+newer versions (Sparkle; docs/DESIGN.md section 8, "Updates"). At the
+second launch Armadale asks once whether to check automatically (then
+once a day); Settings › General › Updates changes that. Besides what
+every web request carries, a check sends only the version of Armadale
+and of its updater, in the request's user agent. Nothing is
+downloaded or installed until you choose to install. Installing quits
+Armadale and keeps your sessions, as Quit, Keep Sessions Running does,
+then relaunches the new version, which reattaches them; Armadale asks
+first only when some sessions would end (the plain PTY fallback, a host
+without the persistence helper) or after macOS was seen ending sessions
+at a quit (Background App Activity, above). Cancel there, and the update
+stays ready and is normally installed the next time Armadale quits,
+without reopening it (not after a logout or restart, which ends the
+waiting installer, nor after Skip This Version at a later check). In
+menu bar mode a scheduled check that finds an update opens no window;
+the menu bar item's menu shows Update Available…. The updater never runs
+in a Debug build, in a run with `ARMADALE_STATE_DIR` or a defaults suite
+(Run in Xcode, test builds), nor in a build without an `SUPublicEDKey`,
+which is every build until the owner has made the update key
+("Releasing"); `ARMADALE_UPDATER_FOR_TEST=1` lifts the first two for a
+live test. Sparkle
+keeps its settings (`SUEnableAutomaticChecks`, `SULastCheckTime`, …) in
+the app's standard defaults domain.
+
 ## Releasing
 
 A release is a Developer ID signed, notarized and stapled DMG built by
@@ -500,6 +528,37 @@ Prerequisites, once per Mac:
   that file's SHA-256) with the pinned versions, and `--check` only
   verifies. `release.sh`
   checks it before building and says to run the script if it is missing.
+- **The update signing key** (docs/DESIGN.md section 8, "Updates"): one
+  EdDSA key under the login keychain's account `armadale`, made and kept
+  by the owner. `scripts/sparkle-tool.sh` runs Sparkle's tools from the
+  pinned package (build once first, so the package is fetched). Once:
+
+  ```sh
+  scripts/sparkle-tool.sh generate_keys --account armadale
+  ```
+
+  It stores the private key in the login keychain and prints the public
+  key, which goes into `project.yml` as `SUPublicEDKey` (the commented
+  line under `SUAllowsAutomaticUpdates`). Until it is there the updater
+  never starts and `release.sh` refuses to build. For the backup and the
+  other Mac, export it:
+
+  ```sh
+  scripts/sparkle-tool.sh generate_keys --account armadale -x ~/armadale-update-key.txt
+  ```
+
+  move that file by AirDrop or as an attachment in a password manager
+  (which is then also the backup), import it on the other Mac, and delete
+  the file on both:
+
+  ```sh
+  scripts/sparkle-tool.sh generate_keys --account armadale -f ~/armadale-update-key.txt
+  rm ~/armadale-update-key.txt
+  ```
+
+  Never by mail, chat, a cloud folder or the repository. `generate_keys`
+  run with no key under that account creates a new one, so run it only
+  for these three purposes.
 
 To release:
 
@@ -538,6 +597,25 @@ To release:
    notarizes and staples it, and checks both with Gatekeeper (`spctl`) and
    `stapler validate`. Notarization usually takes a few minutes per submission; a
    rejected submission fails the script and prints the notary log.
+   For the updater, before anything is built it checks that `project.yml`
+   has the feed URL, `SUAllowsAutomaticUpdates: false`, an
+   `SUPublicEDKey` and none of `SUSendProfileInfo`,
+   `SUEnableSystemProfiling` and `SUEnableJavaScript`, and that the key in the
+   keychain (account `armadale`) signs a scratch file so that the
+   signature verifies against that public key (the keychain may ask to
+   let `sign_update` use it; when it cannot sign, `sign_update`'s own
+   message is shown); it checks Sparkle's code in the app like the
+   helpers (Developer ID, runtime, timestamp, no entitlements, no XPC
+   services) and the built Info.plist's updater keys (the feed, the
+   public key, `SUAllowsAutomaticUpdates` false,
+   `SUVerifyUpdateBeforeExtraction` true, none of the three above); and at the end it signs the stapled DMG with
+   `sign_update --account armadale`, verifies that signature against the
+   public key in the built app, and writes
+   `build/release/appcast-item.xml`. It reminds you when the state
+   file's schema version is higher than at the last release tag: the
+   release notes must then say that older versions refuse a layout this
+   one saves. It stops if it cannot read the current schema version
+   from the source, and warns if it cannot read the tag's.
 3. The result is `build/release/Armadale-<version>.dmg`. Until every
    check has passed the DMG is called `Armadale-<version>-pending.dmg`, so
    a file with that name is not a release. The script prints the suggested
@@ -560,8 +638,23 @@ To release:
    build downloaded from the web. Write the notes from the "Next
    release" section of `docs/changelog.html`, and once the release
    exists turn that section into the version's (AGENTS.md, "The
-   changelog page") and commit: the site's changelog then names the
-   version the Download button gives.
+   changelog page"). Then add the release to the update feed:
+
+   ```sh
+   scripts/appcast.sh
+   ```
+
+   It downloads the release asset `Armadale-<version>.dmg`, checks that
+   it has the length and EdDSA signature recorded in
+   `build/release/appcast-item.xml` (against `SUPublicEDKey` in
+   `project.yml`), makes the item's release notes from the version's
+   section of the changelog page, and puts the item at the top of
+   `docs/appcast.xml`. It commits nothing. Commit the feed with the
+   changelog change and push: **that push publishes the update** to
+   every copy of Armadale that checks, and the site's changelog then
+   names the version the Download button gives. Never edit an item of `docs/appcast.xml`
+   by hand: its signature and length belong to the DMG on GitHub, and
+   `AppcastTests` (in the gate) holds the file's form.
 5. Once the tag exists, add its state fixture, written by the tagged
    version's own code, as `scripts/state-fixtures/README.md` describes.
 
@@ -617,13 +710,13 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 | Path | Contents |
 |---|---|
 | `project.yml` | XcodeGen spec (app target, scheme, signing) |
-| `docs/` | `DESIGN.md` (the design contract: what is true now), `HISTORY.md` (why and when: the change log and each design section's history), `index.html`, `changelog.html`, `CNAME` (the website; the changelog page is kept as AGENTS.md says), `icon/AppIcon.svg` (master vector of the app icon, generated) |
+| `docs/` | `DESIGN.md` (the design contract: what is true now), `HISTORY.md` (why and when: the change log and each design section's history), `index.html`, `changelog.html`, `appcast.xml` (the update feed, served at armadale.dev/appcast.xml), `CNAME` (the website; the changelog page is kept as AGENTS.md says), `icon/AppIcon.svg` (master vector of the app icon, generated) |
 | `Armadale/` | AppKit app: lifecycle, menus (the source of the shortcut table), windows, SwiftUI sidebar and tab bar, split tree and panes, `SessionRegistry` (a backend per host), `AttentionCenter`, Settings (`Settings/`: window, `Preferences`, tabs), `ThemeCatalog`, `AppSettings` and `UserNotificationService` (`Support/`), `Resources/armadale-notify`, `Resources/Acknowledgements.txt` (the third-party notices shown by Help › Acknowledgements) |
 | `Packages/ArmadaleCore` | Model, `PaneLayout` operations, `SplitTreeReconciler`, `AppModel`, `AttentionTracker`, `AgentIntegration`, `StateStore`, migrations (no AppKit) |
 | `Packages/ArmadaleSessions` | `PTYProcess`, `CommandRunner`, `ZmxSessionDriver` with `LocalZmxBackend` and `RemoteZmxBackend` (+ `ZmxRuntime`, `ZmxOutputFilter`), `SSHTransport`, `RemoteDeployer`, `ReconnectSchedule`, `EphemeralBackend`, `LaunchResolver`, `SessionController`, `HelperLocator`, `HelperInstaller`, and the `ctty-exec` helper source |
 | `Packages/TerminalSurface` | Renderer protocol, appearance types, `SurfaceRegistry`, Ghostty theme parser |
 | `Packages/SwiftTermSurface` | SwiftTerm adapter |
-| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `check-state-compat.sh` (every release tag refuses a state file the working tree wrote, or reads it without loss) and `state-fixtures/` (writes a state fixture with a release tag's own code; see its README), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `fetch-dmgbuild.sh` and `dmgbuild-requirements.txt` (the pinned dmgbuild for the DMG), `dmg/settings.py` (the DMG's dmgbuild settings: contents, window, icon positions), `render-dmg-background.swift` (regenerates the DMG window's background, `dmg/background.png`, `dmg/background@2x.png` and `dmg/background.tiff`), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`); edit the scripts, not the generated files |
+| `scripts/` | `fetch-zmx.sh`, `zmx.lock`, `embed-zmx.sh` (build phase), `check-quit.sh` (quit check against a built app), `check-state-compat.sh` (every release tag refuses a state file the working tree wrote, or reads it without loss) and `state-fixtures/` (writes a state fixture with a release tag's own code; see its README), `bump-build.sh` (raises the build number, optionally the version, in `project.yml`), `embed-sparkle.sh` (build phase: embeds and signs the updater framework), `sparkle-tool.sh` (Sparkle's `generate_keys`, `sign_update`, `generate_appcast` from the pinned package), `appcast.sh` and `appcast.py` (the update feed's items), `ed25519-verify.swift` (checks an update signature against a public key), `release.sh` (the release DMG) and `install-release.sh` (builds it and installs the app to `~/Applications`; see [Releasing](#releasing)), `fetch-dmgbuild.sh` and `dmgbuild-requirements.txt` (the pinned dmgbuild for the DMG), `dmg/settings.py` (the DMG's dmgbuild settings: contents, window, icon positions), `render-dmg-background.swift` (regenerates the DMG window's background, `dmg/background.png`, `dmg/background@2x.png` and `dmg/background.tiff`), `render-app-icon.swift` (regenerates the app icon: `Armadale/Resources/AppIcon.icon`, `Armadale/Resources/Assets.xcassets/AppIcon.appiconset`, the menu bar glyph `Armadale/Resources/Assets.xcassets/StatusItem.imageset` and `docs/icon/AppIcon.svg`); edit the scripts, not the generated files |
 | `Vendor/zmx/` | Fetched zmx binaries (git-ignored) |
 | `Vendor/dmgbuild/` | dmgbuild virtual environment for releases (`scripts/fetch-dmgbuild.sh`, git-ignored) |
 
@@ -631,7 +724,7 @@ over; privacy grants, which macOS ties to the code identity, and macOS
 
 Armadale is open source under the [MIT License](LICENSE). Contributions
 are accepted under the same terms ([CONTRIBUTING.md](CONTRIBUTING.md)).
-The licenses of the components it bundles, SwiftTerm and the persistence
-helper, and the credits for the built-in colour schemes are in
+The licenses of the components it bundles, SwiftTerm, the persistence
+helper and Sparkle (the updater), and the credits for the built-in colour schemes are in
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md); the app carries the
 same notices under Help › Acknowledgements.

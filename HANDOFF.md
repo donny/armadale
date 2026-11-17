@@ -36,11 +36,14 @@ Favorites tab; that change was checked live the same day on a test
 build ("From finished changes" below has what is left and what was
 found). The same day the site gained a changelog page
 (`docs/changelog.html`), written for everything so far and kept by a
-rule in AGENTS.md from now on. The last gate run: 918 tests,
-zero warnings.
+rule in AGENTS.md from now on. The same night an updater was built,
+reviewed and committed (Sparkle 2.10.1); it runs in no build until the
+owner has made the update signing key, and none of it was seen running
+("Waiting for owner decisions" and "From finished changes" below). The
+last gate run: 945 tests, no warning from Armadale's code.
 **Armadale 0.1.2 (29) is built, notarized and stapled from 77a02cf
 (November 16, 2026) and installed on the owner's Mac, with everything
-above in it, but not released: no tag, no GitHub Release, no fixture
+above except the updater in it, but not released: no tag, no GitHub Release, no fixture
 ("Next" below).**
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
@@ -123,10 +126,20 @@ in the heading or the text under it, their commits:
   "The changelog page", says how it is kept from now on, and
   `ChangelogPageTests` holds its form. No app code changed, so build
   29 stands.
+- November 16, 2026: an updater with Sparkle 2.10.1 (Check for
+  Updates…, Settings › General › Updates, Update Available… in menu bar
+  mode, the update's quit keeping sessions, the feed
+  `docs/appcast.xml` with no item, the release scripts); off in every
+  build until the owner's key exists; the owner's eight decisions of
+  that day (`docs/HISTORY.md`, "an updater, with Sparkle").
 
 ## Next
 
-Nothing is being built. Everything the owner gave the go-ahead for on
+Nothing is being built. The updater (the owner's go-ahead of November
+16, 2026, "Build as recommended") is built, reviewed and committed
+(`docs/HISTORY.md`, "an updater, with Sparkle"); "Waiting for owner
+decisions" has what is left of it: the owner's key, the live test,
+publishing. Everything the owner gave the go-ahead for on
 November 14, 2026 is built, and checked live where the Mac was free
 (`docs/HISTORY.md`, the entries of that day). The step of November 16,
 2026 (favorites in the chooser, New Host…, Settings without Favorites)
@@ -148,9 +161,16 @@ Waiting for owner decisions:
   turn the "Next release" section of `docs/changelog.html` into
   0.1.2's, and add the tag's state fixture (README, "Releasing", steps
   4 and 5). If anything is committed to the app before then, bump the
-  build number and build again instead. The release notes should say
-  that 0.1.2 writes state file schema 2, which 0.1.0 and 0.1.1 refuse
-  (the changelog page says so under November 14, 2026).
+  build number and build again instead. **That is now the case:** the
+  updater was committed on November 16, 2026, and the owner decided
+  that day that 0.1.2 ships with it, as build 30. So a release is now
+  README's "Releasing" from step 1 on `main` (bump to 30), once the
+  owner's key is in `project.yml` ("The updater: what is left" below;
+  `scripts/release.sh` refuses to build without it), and build 29's
+  DMG is superseded. The release notes should say that 0.1.2 writes
+  state file schema 2, which 0.1.0 and 0.1.1 refuse (the changelog
+  page says so under November 14, 2026), and that 0.1.1 and earlier
+  cannot update themselves: 0.1.2 is downloaded once by hand.
 - **Three decisions the coordinator made on the changelog page**
   (November 16, 2026), each the owner's to overrule: the page shows
   what is on `main` and not yet released, under "Next release"; 0.1.0
@@ -173,11 +193,23 @@ Waiting for owner decisions:
 - **A fork of the persistence helper** ("The persistence helper's
   workarounds").
 - **The Ghostty second renderer** ("Decisions pending" below).
-- **An updater.** There is no updater in v1 (step 9: the repository
-  was private then, so a Sparkle feed had no public home). The
-  repository is public now and https://armadale.dev is live, so a feed
-  has a home (GitHub Releases or the site); whether a later version
-  gets an updater is the owner's call.
+- **The updater: what is left** (built November 16, 2026;
+  `docs/DESIGN.md` section 8, "Updates"). (1) The owner makes the update
+  signing key, `scripts/sparkle-tool.sh generate_keys --account
+  armadale` (README, "Releasing", has the backup and the second Mac),
+  and gives its public half, which goes into `project.yml` as
+  `SUPublicEDKey` (one line, commented there now). Until then no build
+  starts the updater and `scripts/release.sh` refuses to build. (2) The
+  live test of a real update, which needs the owner's word that the Mac
+  is free; it is designed in the design note of November 16, 2026 (a
+  test bundle identifier `com.tinylittleapps.armadale.updatetest`, two
+  Debug copies with builds 9001 and 9002 carrying
+  `ARMADALE_STATE_DIR`, `ARMADALE_DEFAULTS_SUITE` and
+  `ARMADALE_UPDATER_FOR_TEST=1` in `LSEnvironment`, a throwaway
+  key in a file, a feed on 127.0.0.1) and must answer what Background
+  App Activity switched off does to Sparkle's installer. (3) Publishing:
+  0.1.2 (30) with the updater, then `scripts/appcast.sh` and the push of
+  the feed.
 - **An `SMAppService` prototype**, optional ("Decisions pending"
   below): whether a registered background item's `status` follows the
   same switch, which would let Armadale know before a loss instead of
@@ -416,7 +448,10 @@ Menu bar mode (step 8), from its review
 Shipping (step 9)
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
-- No updater and no crash reporting (decided for v1, October 19, 2026).
+- No crash reporting (decided for v1, October 19, 2026). The updater
+  is built (November 16, 2026) but runs in no build until the owner's
+  key exists; 0.1.1 and earlier cannot update themselves, so 0.1.2 must
+  be downloaded once by hand (the release notes say so).
 - Older builds on a newer state directory (November 14, 2026). Once a
   build with schema 2 has saved a state directory, 0.1.0 and 0.1.1
   refuse it by version, so going back to them means moving the state
@@ -437,6 +472,55 @@ Shipping (step 9)
   (dcdeb50, 704a941); 0.1.2 has both and is not published.
 
 From finished changes: not checked live, and found and not fixed
+- The updater (November 16, 2026; `docs/DESIGN.md` section 8,
+  "Updates"). Built and unit-tested; the app was not launched at all,
+  so **nothing of it was seen running**. Not checked live:
+  - Sparkle starting in a build with a key (none exists): the log line
+    of a run where it is off, Sparkle's question about automatic checks
+    at the second launch and after the launch alerts, the daily check,
+    the request the feed server receives (its user agent and headers).
+  - Check for Updates… enabled and disabled, its "You’re up to date!"
+    against the empty feed, the update window, its embedded release
+    notes, Version History opening the changelog.
+  - Settings › General › Updates: the checkbox following Sparkle's
+    answer, the footer in a run with and without the updater, the
+    General tab at 620 × 640 pt.
+  - The update's quit: no question with only persistent sessions; the
+    "N sessions will end" alert with plain PTY or plain-ssh sessions; the
+    loss warning with a staged `lossSeenAt`, in and out of menu bar
+    mode; each answer (Install and Relaunch, Install Anyway, Cancel,
+    Open System Settings); Sparkle's window closing after Cancel; the
+    quit going straight through, sessions kept, the last-quit record
+    written as a user quit; a later ⌘Q asking as usual; the install at
+    the next ordinary quit after Cancel, without a relaunch.
+  - The relaunch: the new build at the same path attaching every
+    session, from menu bar mode with windows shown, the last-quit check
+    on the update's quit; `bin/` intact.
+  - Menu bar mode: a scheduled update held back, Update Available…
+    appearing and bringing Sparkle's window forward, the item going
+    after Remind Me Later or Install, the app hiding again when the
+    session ends, the update shown on leaving menu bar mode.
+  - Background App Activity switched off during an install (not known
+    what macOS does to Sparkle's installer jobs; DESIGN section 13).
+  - A Release build: `scripts/release.sh` was not run, so the
+    Developer ID signing of Sparkle's helpers, the preflight against the
+    keychain, notarization with the framework, `sign_update --account
+    armadale` and `appcast-item.xml` from a real run are unchecked; the
+    script's parts were checked on scratch files with a throwaway key.
+    `scripts/appcast.sh` against a real GitHub Release asset.
+  - The app delegate's wiring, which has no test harness: the quit
+    consulting the gate (`applicationShouldTerminate`), what
+    `updateQuitContext()` counts in a real run, leaving menu bar mode
+    with an update waiting, the updater's start after the launch
+    alerts, and that a Debug build logs "updates are off in this run
+    (debugBuild)".
+  - Whether Sparkle's quit event reaches `applicationShouldTerminate`
+    while an app-modal alert of Armadale's is up (a launch alert, the
+    late loss alert).
+  - Sparkle's retry after a quit that did not happen (its quit then
+    gets the ordinary question: DESIGN section 8, "Updates").
+  - Entering menu bar mode while Sparkle's update window is showing:
+    that window then has no Update Available… route back.
 - Step 10, New Session (October 24, 2026).
   - 10b live check to do: nobody has run a real Codex session with
     `--model`, `--sandbox` or

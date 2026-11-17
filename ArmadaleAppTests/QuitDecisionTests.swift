@@ -245,6 +245,7 @@ struct QuitDecisionTests {
         @objc func settings(_ sender: Any?) {}
         @objc func quit(_ sender: Any?) {}
         @objc func end(_ sender: Any?) {}
+        @objc func update(_ sender: Any?) {}
     }
 
     private func statusMenu(target: Target, sessionsSurviveQuit: Bool = true) -> NSMenu {
@@ -252,23 +253,27 @@ struct QuitDecisionTests {
             target: target,
             actions: MenuBarStatusItem.Actions(
                 open: #selector(Target.open(_:)), settings: #selector(Target.settings(_:)),
-                quitKeepingSessions: #selector(Target.quit(_:)), endSessionsAndQuit: #selector(Target.end(_:))),
-            running: 2, sessionsSurviveQuit: sessionsSurviveQuit)
+                quitKeepingSessions: #selector(Target.quit(_:)), endSessionsAndQuit: #selector(Target.end(_:)),
+                showUpdate: #selector(Target.update(_:))),
+            running: 2, sessionsSurviveQuit: sessionsSurviveQuit, updateAvailable: false)
     }
 
     @Test func statusMenuItems() {
         let target = Target()
         let menu = statusMenu(target: target)
         #expect(menu.items.map(\.title) == [
-            "2 sessions running", "Open Armadale", "Settings…", "", "Quit, Keep Sessions Running", "End Sessions and Quit",
+            "2 sessions running", "Open Armadale", "Settings…", "Update Available…", "",
+            "Quit, Keep Sessions Running", "End Sessions and Quit",
         ])
         #expect(!menu.items[0].isEnabled, "the count is information only")
-        #expect(menu.items[3].isSeparatorItem)
+        #expect(menu.items[4].isSeparatorItem)
         #expect(menu.items[1].action == #selector(Target.open(_:)))
         #expect(menu.items[2].action == #selector(Target.settings(_:)))
-        #expect(menu.items[4].action == #selector(Target.quit(_:)))
-        #expect(menu.items[5].action == #selector(Target.end(_:)))
-        for entry in menu.items where !entry.isSeparatorItem && entry.action != nil {
+        #expect(menu.items[3].action == #selector(Target.update(_:)))
+        #expect(menu.items[3].isHidden, "no update waiting")
+        #expect(menu.items[5].action == #selector(Target.quit(_:)))
+        #expect(menu.items[6].action == #selector(Target.end(_:)))
+        for entry in menu.items where !entry.isSeparatorItem && entry.action != nil && entry.action != #selector(Target.update(_:)) {
             #expect(entry.target === target)
             #expect(entry.isEnabled)
             #expect(entry.keyEquivalent.isEmpty)

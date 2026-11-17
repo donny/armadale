@@ -32,6 +32,10 @@ enum MainMenu {
         let app = submenu(appName, in: main)
         app.addItem(withTitle: "About \(appName)",
                     action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        // Enabled while the updater runs (DESIGN §8, "Updates"); in a run
+        // without it the item is there and disabled.
+        app.addItem(withTitle: UpdateText.checkForUpdates,
+                    action: #selector(AppDelegate.checkForUpdates(_:)), keyEquivalent: "")
         app.addItem(.separator())
         app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
         app.addItem(.separator())

@@ -257,11 +257,11 @@ final class Preferences {
     /// Environment variable naming the UserDefaults suite to use instead of
     /// the app's own domain (tests, debugging). `-ArmadaleDefaultsSuite
     /// <name>` on the command line does the same.
-    static let suiteVariable = "ARMADALE_DEFAULTS_SUITE"
-    static let suiteArgument = "-ArmadaleDefaultsSuite"
+    nonisolated static let suiteVariable = "ARMADALE_DEFAULTS_SUITE"
+    nonisolated static let suiteArgument = "-ArmadaleDefaultsSuite"
 
     /// The suite named by ``suiteVariable`` or ``suiteArgument``, if any.
-    static func suiteName(environment: [String: String], arguments: [String]) -> String? {
+    nonisolated static func suiteName(environment: [String: String], arguments: [String]) -> String? {
         if let name = environment[suiteVariable], !name.isEmpty { return name }
         if let index = arguments.firstIndex(of: suiteArgument), arguments.indices.contains(index + 1) {
             let name = arguments[index + 1]

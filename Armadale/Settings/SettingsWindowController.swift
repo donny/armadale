@@ -35,7 +35,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
         /// Each tab's content size; the window resizes to it, keeping its top edge.
         var contentSize: NSSize {
             switch self {
-            case .general: NSSize(width: 620, height: 520)
+            case .general: NSSize(width: 620, height: 640)
             case .appearance: NSSize(width: 620, height: 640)
             case .profiles: NSSize(width: 780, height: 560)
             case .hosts: NSSize(width: 780, height: 600)
@@ -49,7 +49,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
     /// then gives up being the active app).
     var onClose: (() -> Void)?
 
-    init(model: AppModel, settings: AppSettings, hostTools: HostTools = .unavailable) {
+    init(
+        model: AppModel, settings: AppSettings, hostTools: HostTools = .unavailable,
+        updates: UpdateSettings = UpdateSettings()
+    ) {
         self.settings = settings
         // Read first: adding the tabs selects the first one, which is recorded.
         let saved = settings.preferences.settingsTab.flatMap(Tab.init(rawValue:)) ?? .general
@@ -60,7 +63,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSMe
         tabs.canPropagateSelectedChildViewControllerTitle = false
         for tab in Tab.allCases {
             let root: AnyView = switch tab {
-            case .general: AnyView(GeneralSettingsView(preferences: settings.preferences))
+            case .general: AnyView(GeneralSettingsView(preferences: settings.preferences, updates: updates))
             case .appearance: AnyView(AppearanceSettingsView(settings: settings, model: model))
             case .profiles: AnyView(ProfilesSettingsView(model: model))
             case .hosts: AnyView(HostsSettingsView(model: model, tools: hostTools))

@@ -53,17 +53,20 @@ struct AcknowledgementsTests {
         let copyrights = licenses.split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { $0.hasPrefix("Copyright (c)") }
-        #expect(copyrights.count == 5)
+        // SwiftTerm 4, the persistence helper 1, Sparkle 7 and three of the
+        // licenses it carries (sais-lite, Ed25519, SUSignatureVerifier).
+        #expect(copyrights.count == 15)
         for line in copyrights {
             #expect(text.contains(line), "missing: \(line)")
         }
         let fences = licenses.components(separatedBy: "```")
         let blocks = stride(from: 1, to: fences.count, by: 2).map { fences[$0].drop { $0 == "\n" } }
-        #expect(blocks.count == 2, "SwiftTerm and the persistence helper")
+        #expect(blocks.count == 3, "SwiftTerm, the persistence helper and Sparkle")
         for block in blocks {
             #expect(text.contains(String(block)), "license text not verbatim: \(block.prefix(60))")
         }
-        #expect(text.components(separatedBy: "Permission is hereby granted").count - 1 == 2)
+        // SwiftTerm, the persistence helper, Sparkle and sais-lite.
+        #expect(text.components(separatedBy: "Permission is hereby granted").count - 1 == 4)
         let schemesSection = try #require(licenses.components(separatedBy: "## Colour schemes").last)
         let credits = schemesSection.split(separator: "\n")
             .filter { $0.hasPrefix("- ") }
@@ -72,6 +75,28 @@ struct AcknowledgementsTests {
         for credit in credits {
             #expect(text.contains(credit), "missing: \(credit)")
         }
+    }
+
+    /// Sparkle's LICENSE at the pinned tag, verbatim with the external
+    /// licenses it carries (bsdiff, sais-lite, Ed25519, SUSignatureVerifier).
+    @Test func carriesSparklesLicenseWithItsExternalLicenses() throws {
+        let text = try bundled()
+        let licenses = try thirdPartyLicenses()
+        for source in [text, licenses] {
+            #expect(source.contains("Sparkle update framework"))
+            #expect(source.contains("Copyright (c) 2006-2013 Andy Matuschak."))
+            #expect(source.contains("EXTERNAL LICENSES"))
+            #expect(source.contains("Copyright 2003-2005 Colin Percival"))
+            #expect(source.contains("Copyright (c) 2008-2010 Yuta Mori All Rights Reserved."))
+            #expect(source.contains("Copyright (c) 2015 Orson Peters <orsonpeters@gmail.com>"))
+            #expect(source.contains("Copyright (c) 2011 Mark Hamlin."))
+        }
+        // The order of the sections: Sparkle after the persistence helper,
+        // before the colour schemes.
+        let helper = try #require(text.range(of: "\nThe persistence helper\n"))
+        let sparkle = try #require(text.range(of: "\nSparkle\n"))
+        let schemes = try #require(text.range(of: "\nColour schemes\n"))
+        #expect(helper.upperBound <= sparkle.lowerBound && sparkle.upperBound <= schemes.lowerBound)
     }
 
     /// Product rule (AGENTS.md): the runtime's name is never user-visible.

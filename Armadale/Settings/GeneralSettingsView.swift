@@ -3,10 +3,11 @@ import ArmadaleCore
 import SwiftUI
 
 /// Settings › General: notifications, close confirmation, quitting with
-/// running sessions. (The default profile and directory went with step 10:
-/// every new pane asks, DESIGN §8 "New sessions".)
+/// running sessions, updates. (The default profile and directory went with
+/// step 10: every new pane asks, DESIGN §8 "New sessions".)
 struct GeneralSettingsView: View {
     @Bindable var preferences: Preferences
+    @Bindable var updates: UpdateSettings
 
     var body: some View {
         Form {
@@ -32,6 +33,16 @@ struct GeneralSettingsView: View {
                 }
             } footer: {
                 Text("Armadale always reopens your windows at launch and reconnects to the sessions in them. Sessions kept running in the menu bar can be reopened or ended from Armadale’s icon there.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle(UpdateText.automaticChecks, isOn: $updates.automaticallyChecks)
+                    .disabled(!updates.isOn)
+            } header: {
+                Text(UpdateText.settingsHeader)
+            } footer: {
+                Text(updates.isOn ? UpdateText.whatACheckSends : UpdateText.offInThisRun)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -45,6 +45,10 @@ enum QuitDecision: Equatable, Sendable {
         /// to the system by a quit that keeps them (remote ones leave no
         /// local process).
         var localAtRisk = 0
+        /// The quit Sparkle sends to install an update, which Armadale
+        /// agreed to just before (``UpdateQuitGate``): it keeps the
+        /// sessions, as Quit, Keep Sessions Running does, and asks nothing.
+        var isUpdateQuit = false
     }
 
     static func decide(
@@ -52,6 +56,7 @@ enum QuitDecision: Equatable, Sendable {
     ) -> QuitDecision {
         if context.isForced || context.sessionsEnded { return .quitNow }
         if context.isEndingSessions { return .cancel }
+        if context.isUpdateQuit { return .quitNow }
         if context.isInMenuBar {
             return context.lossSeen && context.localAtRisk > 0 ? .confirmLeavingSessions(atRisk: context.localAtRisk) : .quitNow
         }
@@ -69,6 +74,47 @@ enum QuitDecision: Equatable, Sendable {
     /// count; ended and unavailable ones do not either.
     static func runningCount(_ items: [CloseRisk.Item]) -> Int {
         items.count(where: CloseRisk.mayBeRunning)
+    }
+}
+
+/// What Armadale tells the user before the quit Sparkle sends to install
+/// an update (docs/DESIGN.md section 8, "Updates"). Decided before Sparkle
+/// sends it; the quit itself then goes through as
+/// ``QuitDecision/Context/isUpdateQuit``. Pure, tested as a table.
+enum UpdateQuitDecision: Equatable, Sendable {
+    /// Every running session survives the quit: nothing to tell.
+    case install
+    /// Sessions that cannot survive a quit (the plain PTY fallback, a host
+    /// without the persistence helper) would end: Install and Relaunch or
+    /// Cancel.
+    case confirmEnding(sessions: Int)
+    /// macOS was found to have ended sessions after an earlier quit, and
+    /// local sessions would be left to it: Open System Settings, Install
+    /// Anyway or Cancel. `ending` counts the sessions that end anyway.
+    case confirmLeavingSessions(atRisk: Int, ending: Int)
+    /// End Sessions and Quit is under way, or a quit is already going
+    /// through: no install now.
+    case refuse
+
+    struct Context: Equatable, Sendable {
+        var isEndingSessions = false
+        /// A quit has been let through, or End Sessions and Quit finished.
+        var isQuitting = false
+        /// Sessions that may be running and end with any quit.
+        var endingAtQuit = 0
+        /// `lossSeenAt` is set (``LastQuitRecord``).
+        var lossSeen = false
+        /// Local persistent sessions the quit would leave to the system.
+        var localAtRisk = 0
+    }
+
+    static func decide(_ context: Context) -> UpdateQuitDecision {
+        if context.isEndingSessions || context.isQuitting { return .refuse }
+        if context.lossSeen, context.localAtRisk > 0 {
+            return .confirmLeavingSessions(atRisk: context.localAtRisk, ending: context.endingAtQuit)
+        }
+        if context.endingAtQuit > 0 { return .confirmEnding(sessions: context.endingAtQuit) }
+        return .install
     }
 }
 
@@ -235,11 +281,14 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         var settings: Selector
         var quitKeepingSessions: Selector
         var endSessionsAndQuit: Selector
+        /// Update Available… (docs/DESIGN.md section 8, "Updates").
+        var showUpdate: Selector
     }
 
     private let item: NSStatusItem
     private let runningCount: () -> Int
     private let sessionsSurviveQuit: () -> Bool
+    private let updateAvailable: () -> Bool
     private var attentionTask: Task<Void, Never>?
     private let menu: NSMenu
     /// End Sessions and Quit is running (``showEnding()``).
@@ -247,15 +296,20 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
     /// `sessionsSurviveQuit` false (the persistence fallback) hides Quit,
     /// Keep Sessions Running: every local session would end with it.
+    /// `updateAvailable` shows Update Available… (a scheduled check found
+    /// an update and, in menu bar mode, opened no window for it).
     init(
         target: AnyObject, actions: Actions, attention: AttentionCenter,
-        runningCount: @escaping () -> Int, sessionsSurviveQuit: @escaping () -> Bool
+        runningCount: @escaping () -> Int, sessionsSurviveQuit: @escaping () -> Bool,
+        updateAvailable: @escaping () -> Bool
     ) {
         self.runningCount = runningCount
         self.sessionsSurviveQuit = sessionsSurviveQuit
+        self.updateAvailable = updateAvailable
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         menu = Self.makeMenu(
-            target: target, actions: actions, running: runningCount(), sessionsSurviveQuit: sessionsSurviveQuit())
+            target: target, actions: actions, running: runningCount(), sessionsSurviveQuit: sessionsSurviveQuit(),
+            updateAvailable: updateAvailable())
         super.init()
         menu.delegate = self
         item.menu = menu
@@ -304,12 +358,16 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         guard !isEnding else { return }
         menu.items.first?.title = MenuBarText.runningLine(runningCount())
         menu.item(withTitle: MenuBarText.quitKeepingSessions)?.isHidden = !sessionsSurviveQuit()
+        menu.item(withTitle: UpdateText.updateAvailable)?.isHidden = !updateAvailable()
     }
 
-    /// "N sessions running" (disabled), Open Armadale, Settings…, a
+    /// "N sessions running" (disabled), Open Armadale, Settings…, Update
+    /// Available… (hidden unless an update waits to be shown), a
     /// separator, Quit, Keep Sessions Running (hidden unless sessions
     /// survive a quit), End Sessions and Quit.
-    static func makeMenu(target: AnyObject, actions: Actions, running: Int, sessionsSurviveQuit: Bool) -> NSMenu {
+    static func makeMenu(
+        target: AnyObject, actions: Actions, running: Int, sessionsSurviveQuit: Bool, updateAvailable: Bool
+    ) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let count = NSMenuItem(title: MenuBarText.runningLine(running), action: nil, keyEquivalent: "")
@@ -322,6 +380,8 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         }
         add(MenuBarText.open, actions.open)
         add(MenuBarText.settings, actions.settings)
+        add(UpdateText.updateAvailable, actions.showUpdate)
+        menu.items.last?.isHidden = !updateAvailable
         menu.addItem(.separator())
         add(MenuBarText.quitKeepingSessions, actions.quitKeepingSessions)
         menu.items.last?.isHidden = !sessionsSurviveQuit

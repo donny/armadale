@@ -16,21 +16,34 @@
 # Every run removes build/release first, including a DMG from an earlier
 # run: move a finished DMG out before running again.
 #
-# Steps: xcodegen; `xcodebuild archive` (Release) into build/release/;
-# verify the app and both helpers (Developer ID, hardened runtime, secure
-# timestamp, entitlements, universal zmx); notarize and staple the app;
-# build the DMG with dmgbuild (the designed Finder window: background,
-# icon positions, volume icon; scripts/dmg/settings.py), sign, notarize and
-# staple it; final Gatekeeper checks. Output:
-# build/release/Armadale-<MARKETING_VERSION>.dmg (named so only once every
-# check has passed). Nothing is tagged or uploaded; the suggested tag
-# command is printed at the end.
+# Steps: a preflight of the update feed and its signing key (project.yml
+# carries the feed URL and the public key and no system profiling, and
+# the private key under the keychain account `armadale` signs a scratch
+# file so that the signature verifies against that public key); xcodegen;
+# `xcodebuild archive` (Release) into build/release/; verify the app, both
+# helpers and Sparkle's nested code (Developer ID, hardened runtime, secure
+# timestamp, entitlements, universal zmx, no XPC services); notarize and
+# staple the app; build the DMG with dmgbuild (the designed Finder window:
+# background, icon positions, volume icon; scripts/dmg/settings.py), sign,
+# notarize and staple it; final Gatekeeper checks; sign the DMG for the
+# updater (`sign_update --account armadale`), verify that signature against
+# the public key in the built app, and write build/release/appcast-item.xml
+# (scripts/appcast.sh puts it into docs/appcast.xml once the GitHub Release
+# exists). Output: build/release/Armadale-<MARKETING_VERSION>.dmg (named so
+# only once every check has passed) and the item. Nothing is tagged,
+# uploaded or published; the suggested tag command is printed at the end.
+# A reminder is printed when the state file's schema version is higher
+# than at the last release tag (the release notes must say so).
 #
 # Prerequisites: the team's "Developer ID Application" certificate in the
 # login keychain (if several valid ones exist, for example after a renewal,
 # set ARMADALE_SIGNING_IDENTITY to the SHA-1 of the one to use); the pinned
 # dmgbuild in Vendor/dmgbuild, installed once with scripts/fetch-dmgbuild.sh;
-# and (unless --skip-notarize) the notary keychain profile, created once with
+# the update signing key in the login keychain under the account `armadale`
+# with its public half as SUPublicEDKey in project.yml (README,
+# "Releasing"); the Sparkle package fetched by a build (its sign_update is
+# run through scripts/sparkle-tool.sh); and (unless --skip-notarize) the
+# notary keychain profile, created once with
 #   xcrun notarytool store-credentials armadale-notary \
 #     --apple-id <apple id> --team-id YJ8LXVCB3T
 set -euo pipefail
@@ -46,7 +59,7 @@ for arg in "$@"; do
         --skip-notarize) skip_notarize=1 ;;
         --allow-dirty) allow_dirty=1 ;;
         --allow-existing-tag) allow_existing_tag=1 ;;
-        -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "release: unknown option: $arg (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -126,6 +139,66 @@ else
     info "--skip-notarize: no notarization, the DMG will not pass Gatekeeper"
 fi
 
+# The update feed and its signing key (docs/DESIGN.md section 11). Before
+# the archive, so a missing or wrong key fails before anything is submitted
+# to Apple. Only the public key is read from the repository; the private
+# one stays in the keychain, read by Sparkle's sign_update.
+FEED_URL="https://armadale.dev/appcast.xml"
+project_value() {
+    sed -n "s/^[[:space:]]*$1:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*\$/\1/p" project.yml | head -1
+}
+[ "$(project_value SUFeedURL)" = "$FEED_URL" ] \
+    || fail "project.yml's SUFeedURL is '$(project_value SUFeedURL)', not $FEED_URL"
+[ "$(project_value SUAllowsAutomaticUpdates)" = "false" ] \
+    || fail "project.yml must set SUAllowsAutomaticUpdates: false (no silent installs)"
+# No system profile by any of Sparkle's keys (SUSendProfileInfo sends it,
+# SUEnableSystemProfiling offers it in the prompt), and no JavaScript in
+# release notes.
+for key in SUSendProfileInfo SUEnableSystemProfiling SUEnableJavaScript; do
+    if grep -Eq "^[[:space:]]*$key:" project.yml; then
+        fail "project.yml sets $key: a check must send no system profile, and release notes run no script"
+    fi
+done
+public_key="$(project_value SUPublicEDKey)"
+[[ "$public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
+    || fail "project.yml has no SUPublicEDKey (the public half of the update signing key; README, \"Releasing\")"
+rm -rf build/release-preflight
+mkdir -p build/release-preflight
+head -c 4096 /dev/urandom >build/release-preflight/probe
+# sign_update prints its errors on standard output: both streams are kept
+# and shown when it fails (they hold no secret; on success the output is
+# only the signature, which is not printed).
+if ! probe_signature="$(scripts/sparkle-tool.sh sign_update --account armadale -p build/release-preflight/probe 2>&1)"; then
+    printf '%s\n' "$probe_signature" >&2
+    fail "Sparkle's sign_update could not sign with the key under the keychain account \"armadale\" (README, \"Releasing\")"
+fi
+/usr/bin/swift scripts/ed25519-verify.swift "$public_key" "$probe_signature" build/release-preflight/probe >/dev/null \
+    || fail "the key under the keychain account \"armadale\" does not match SUPublicEDKey in project.yml"
+rm -rf build/release-preflight
+info "update feed $FEED_URL; the keychain's update key matches SUPublicEDKey"
+
+# The state file's version against the last release tag: a higher one means
+# older versions refuse what this one saves, which the release notes say.
+schema_file="Packages/ArmadaleCore/Sources/ArmadaleCore/PersistedState.swift"
+schema_of() { sed -n 's/.*static let currentSchemaVersion = \([0-9][0-9]*\).*/\1/p' | head -1; }
+schema_now="$(schema_of <"$schema_file" || true)"
+[ -n "$schema_now" ] \
+    || fail "cannot read currentSchemaVersion from $schema_file (has its declaration changed? update schema_of in this script)"
+last_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+schema_reminder=""
+if [ -n "$last_tag" ]; then
+    schema_then="$(git show "$last_tag:$schema_file" 2>/dev/null | schema_of || true)"
+    if [ -z "$schema_then" ]; then
+        schema_reminder="could not read currentSchemaVersion at $last_tag, so the state file's version was not compared: check it by hand (the release notes must say if older versions refuse a layout this one saves)"
+        info "WARNING: $schema_reminder"
+    elif [ "$schema_now" -gt "$schema_then" ]; then
+        schema_reminder="state.json's schemaVersion is $schema_now, $schema_then at $last_tag: the release notes must say that older versions refuse a layout this version saves"
+        info "REMINDER: $schema_reminder"
+    fi
+else
+    info "WARNING: no v* release tag found, so the state file's version was not compared"
+fi
+
 # --- 1. Archive ---------------------------------------------------------------
 step "Archive (Release) into build/release"
 rm -rf build/release
@@ -193,8 +266,19 @@ check_signature() {
     info "$name: $authority, flags ($flags), $(grep -m1 '^Timestamp=' <<<"$details")"
     checked_authority="$authority"
 }
+# Sparkle's nested code, embedded and re-signed by the "Embed Sparkle"
+# build phase (scripts/embed-sparkle.sh): the framework, its two helpers,
+# and no XPC services (Armadale is not sandboxed).
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+sparkle_code=("$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"
+    "$SPARKLE/Versions/B/Updater.app/Contents/MacOS/Updater")
+for path in "$SPARKLE/XPCServices" "$SPARKLE/Versions/B/XPCServices"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        fail "${path#"$APP/"} is in the app: Sparkle's XPC services must be removed (scripts/embed-sparkle.sh)"
+    fi
+done
 signer=""
-for path in "$APP" "$APP/Contents/Helpers/zmx" "$APP/Contents/Helpers/ctty-exec"; do
+for path in "$APP" "$APP/Contents/Helpers/zmx" "$APP/Contents/Helpers/ctty-exec" "${sparkle_code[@]}"; do
     name="${path#"$APP"}"; name="Armadale.app${name}"
     check_signature "$path" "$name"
     if [ -z "$signer" ]; then signer="$checked_authority"; fi
@@ -226,6 +310,12 @@ for helper in zmx ctty-exec; do
     [ "$ents" = "none" ] || fail "Contents/Helpers/$helper carries entitlements: $ents"
     info "Armadale.app/Contents/Helpers/$helper: no entitlements"
 done
+for path in "${sparkle_code[@]}"; do
+    name="${path#"$APP/"}"
+    ents="$(entitlements_json "$path")"
+    [ "$ents" = "none" ] || fail "$name carries entitlements: $ents"
+    info "Armadale.app/$name: no entitlements"
+done
 ents="$(entitlements_json "$APP")"
 [ "$ents" = '{"com.apple.security.app-sandbox":false}' ] \
     || fail "Armadale.app has unexpected entitlements: $ents"
@@ -237,6 +327,17 @@ for arch in arm64 x86_64; do
         || fail "Contents/Helpers/zmx is not universal (architectures: $zmx_archs)"
 done
 info "Armadale.app/Contents/Helpers/zmx: universal ($zmx_archs)"
+
+# The updater's keys as built: the feed, the same public key, no profiling.
+plist_value() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/dev/null || true; }
+[ "$(plist_value SUFeedURL)" = "$FEED_URL" ] || fail "the app's SUFeedURL is '$(plist_value SUFeedURL)'"
+[ "$(plist_value SUPublicEDKey)" = "$public_key" ] || fail "the app's SUPublicEDKey is not project.yml's"
+for key in SUSendProfileInfo SUEnableSystemProfiling SUEnableJavaScript; do
+    [ -z "$(plist_value "$key")" ] || fail "the app's Info.plist has $key"
+done
+[ "$(plist_value SUAllowsAutomaticUpdates)" = "false" ] || fail "the app's SUAllowsAutomaticUpdates is not false"
+[ "$(plist_value SUVerifyUpdateBeforeExtraction)" = "true" ] || fail "the app's SUVerifyUpdateBeforeExtraction is not true"
+info "Armadale.app: SUFeedURL $FEED_URL, SUPublicEDKey as in project.yml, no automatic installs, verified before extraction, no system profiling, no JavaScript"
 
 # Submits $1 to the notary service and waits; fails unless it is Accepted,
 # printing the service's log.
@@ -426,6 +527,34 @@ for file in "$APP" "$DMG"; do
     fi
     echo "$out" | sed 's/^/    /'
 done
+
+# --- 6. Sign the update ---------------------------------------------------------
+# The stapled DMG is what GitHub will serve and Sparkle will download: its
+# EdDSA signature, with the key under the keychain account `armadale`,
+# checked against the public key read from the built app (what installed
+# copies verify with), not the keychain's. Then the feed's item, without
+# release notes (scripts/appcast.sh adds them from the changelog page).
+step "Sign the DMG for the updater"
+if ! sign_out="$(scripts/sparkle-tool.sh sign_update --account armadale "$DMG" 2>&1)"; then
+    echo "$sign_out" >&2
+    fail "sign_update could not sign the DMG"
+fi
+update_signature="$(sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p' <<<"$sign_out")"
+update_length="$(sed -n 's/.* length="\([0-9]*\)".*/\1/p' <<<"$sign_out")"
+[ -n "$update_signature" ] && [ -n "$update_length" ] || { echo "$sign_out" >&2; fail "unexpected sign_update output"; }
+[ "$update_length" = "$(stat -f %z "$DMG")" ] || fail "sign_update signed $update_length bytes, the DMG has $(stat -f %z "$DMG")"
+app_public_key="$(plist_value SUPublicEDKey)"
+/usr/bin/swift scripts/ed25519-verify.swift "$app_public_key" "$update_signature" "$DMG" >/dev/null \
+    || fail "the DMG's update signature does not verify against the public key in the built app"
+info "EdDSA signature of $update_length bytes verifies against the app's SUPublicEDKey"
+/usr/bin/python3 -I scripts/appcast.py item \
+    --version "$version" --build "$build" --length "$update_length" --signature "$update_signature" \
+    --minimum-system "$(plist_value LSMinimumSystemVersion)" \
+    --date "$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')" \
+    --out build/release/appcast-item.xml \
+    || fail "could not write build/release/appcast-item.xml"
+info "build/release/appcast-item.xml (scripts/appcast.sh adds it to docs/appcast.xml after the GitHub Release)"
+
 mv "$DMG" "$FINAL_DMG"
 
 step "Done"
@@ -436,4 +565,7 @@ if [ "$dirty_at_start" = 1 ]; then
     info "before tagging, so the tag names what was built"
 else
     info "suggested tag:  git tag -a v$version -m \"Armadale $version\" $commit && git push origin v$version"
+fi
+if [ -n "$schema_reminder" ]; then
+    info "REMINDER: $schema_reminder"
 fi

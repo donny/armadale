@@ -31,10 +31,12 @@ extension AppDelegate {
                 open: #selector(openFromMenuBar(_:)),
                 settings: #selector(showSettings(_:)),
                 quitKeepingSessions: #selector(quitKeepingSessions(_:)),
-                endSessionsAndQuit: #selector(endSessionsAndQuit(_:))),
+                endSessionsAndQuit: #selector(endSessionsAndQuit(_:)),
+                showUpdate: #selector(showUpdateFromMenuBar(_:))),
             attention: attention,
             runningCount: { registry.runningSessionCount() },
-            sessionsSurviveQuit: { registry.sessionsSurviveQuit })
+            sessionsSurviveQuit: { registry.sessionsSurviveQuit },
+            updateAvailable: { [updates] in updates.reminderPending })
     }
 
     /// Back to a regular app: Dock icon (with the attention badge, which
@@ -52,6 +54,10 @@ extension AppDelegate {
             controller.showWindow(nil)
             if controller.didShowAfterMenuBarMode() { queueFullScreen(id) }
         }
+        // An update a scheduled check found meanwhile, held back from menu
+        // bar mode: shown now, as Sparkle shows one when a regular app comes
+        // back to the front (DESIGN §8, "Updates").
+        if updates.reminderPending { updater?.checkForUpdates() }
     }
 
     /// Closing Settings, Keyboard Shortcuts or Acknowledgements (⌘W) in

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Armadale's update feed: the versions Armadale can update to, newest
+  first. Each item belongs to a published release and is never edited by
+  hand.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Armadale</title>
+    <link>https://armadale.dev/</link>
+    <description>New versions of Armadale.</description>
+    <language>en</language>
+    <!-- Items, newest first. -->
+  </channel>
+</rss>

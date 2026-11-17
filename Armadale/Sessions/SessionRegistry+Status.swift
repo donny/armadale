@@ -87,6 +87,30 @@ extension SessionRegistry {
         session.remoteHostID == nil && RestorePolicy.isPersistent(session) && CloseRisk.mayBeRunning(risk)
     }
 
+    /// The sessions that may still have a live process and end with any
+    /// quit (docs/DESIGN.md section 8, "Updates"): local ones on the plain
+    /// PTY fallback, and those on a host that could not take the
+    /// persistence helper (their client carries a persistence note).
+    func sessionsThatEndAtQuit() -> [SessionID] {
+        model.sessions.filter { session in
+            let controller = controllers[session.id]
+            return Self.endsAtQuit(
+                session, risk: riskItem(for: session.id),
+                isPlainLocal: controller?.activeBackend is EphemeralBackend,
+                hasPersistenceNote: controller?.persistenceNote != nil)
+        }.map(\.id)
+    }
+
+    /// One session's part of ``sessionsThatEndAtQuit()``. A session made by
+    /// the persistent runtime (it records the runtime's version) survives
+    /// a quit wherever it runs.
+    nonisolated static func endsAtQuit(
+        _ session: Session, risk: CloseRisk.Item, isPlainLocal: Bool, hasPersistenceNote: Bool
+    ) -> Bool {
+        guard CloseRisk.mayBeRunning(risk), !RestorePolicy.isPersistent(session) else { return false }
+        return session.remoteHostID == nil ? isPlainLocal : hasPersistenceNote
+    }
+
     func riskItem(for id: SessionID) -> CloseRisk.Item {
         let controller = controllers[id]
         return CloseRisk.Item(

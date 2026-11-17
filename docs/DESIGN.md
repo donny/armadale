@@ -2380,7 +2380,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   the window's actions, and an empty pane's).
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (notifications, "Ask before closing a pane with a running
-  process", and the picker "When quitting with running sessions"),
+  process", the picker "When quitting with running sessions", and
+  Updates: "Updates" below),
   **Appearance** (font, size, theme, cursor, renderer), **Profiles** and
   **Hosts**. Favorites are made and managed where they are used, in the
   New Session chooser, the dialog and the pane menu ("New sessions"
@@ -2393,7 +2394,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   than a SwiftUI `TabView`: outside a SwiftUI `Settings` scene a `TabView`
   does not produce the standard toolbar of settings tabs, and
   `NSTabViewController` does. The window (`toolbarStyle = .preference`)
-  resizes to each tab (General is 620 × 520 pt), keeping its top edge,
+  resizes to each tab (General is 620 × 640 pt), keeping its top edge,
   and remembers its position
   and last tab in preferences (not with `setFrameAutosaveName`, which
   would write to the standard defaults even when a test suite is in use).
@@ -2988,7 +2989,8 @@ And for the dialog:
   and exit files are collected (section 4, "Housekeeping"). Before
   any of that, before a pane is closed, the last quit is checked when it
   is due, and a loss it finds is told after the other launch alerts
-  ("Background App Activity" below).
+  ("Background App Activity" below). Last, after the launch alerts, the
+  updater starts when the run allows it ("Updates" below).
 - A plain quit never kills sessions (with sessions running, the quit asks
   first; see "Quitting with running sessions" below; only *End Sessions
   and Quit* ends them). `applicationShouldTerminate` writes the grid sizes
@@ -3308,6 +3310,12 @@ values `ask` / `keepInMenuBar` / `endSessions`, anything else reads as
   accessory app still handles key equivalents). While a loss has been
   seen, it asks first when it would leave local sessions running
   ("Background App Activity" below).
+- **The quit Sparkle sends to install an update** that Armadale agreed
+  to just before (`QuitDecision.Context.isUpdateQuit`, "Updates" below)
+  is a plain quit that keeps the sessions, whatever the preference and
+  in menu bar mode too, after the forced quits and End Sessions and
+  Quit's own quit and before everything else, except that while End
+  Sessions and Quit runs it is cancelled like any other.
 - **While End Sessions and Quit runs**, every other quit is cancelled
   (*cancel*) except a forced one. The kills run in one task group
   (controllers' `close()` and backend kills), so the wait is the bound
@@ -3491,6 +3499,175 @@ alert, `BackgroundActivityText` (`App/MenuBarMode.swift`) the wording.
   that one's check has run, replaces its record: that check never runs. A
   later helper version may word its log differently; the test against
   the bundled helper pins the line.
+
+### Updates
+
+Armadale updates itself with Sparkle 2.10.1 (a Swift package, one binary
+target; `project.yml`). The feed is `https://armadale.dev/appcast.xml`
+(`docs/appcast.xml`, section 11), compiled into every build as `SUFeedURL`;
+each item points at the notarized DMG of a GitHub Release, signed with
+EdDSA (`sparkle:edSignature`) by the key under the keychain account
+`armadale`, whose public half is `SUPublicEDKey`. Info.plist also sets
+`SUVerifyUpdateBeforeExtraction` (the DMG's signature is checked before it
+is mounted) and `SUAllowsAutomaticUpdates` false (nothing is downloaded or
+installed without the user), and has no `SUEnableAutomaticChecks` (Sparkle
+asks once, at the second launch, "Check for updates automatically?", then
+checks once a day while that is on) and none of `SUSendProfileInfo`,
+`SUEnableSystemProfiling` and `SUEnableJavaScript`. No
+`SUPublicEDKey` is set yet: the owner has not made the key, so no build
+starts the updater (below); adding it is one line in `project.yml`.
+`App/SparkleUpdater.swift` is the only file that imports Sparkle (kept out
+of `ArmadaleAppTests`, which does not link it); everything else talks to
+the `AppUpdater` protocol and to `UpdateCoordinator` (`App/Updates.swift`),
+which holds every decision and is tested through a fake.
+
+- **When it runs** (`UpdaterPolicy`, a table test). Never in a fatal or
+  locked-out launch, never without `SUPublicEDKey` (or `SUFeedURL`) in
+  Info.plist, never in a Debug build (`UpdaterPolicy.isDebugBuild`, the
+  one place that reads `DEBUG`, passed into the rule: a DerivedData copy
+  started from the Dock, Finder or a plain `open` without the isolation
+  variables would otherwise write Sparkle's settings into the real
+  defaults domain, use the installed app's launchd labels and could offer
+  to replace itself with the release DMG), and never in an isolated run:
+  `ARMADALE_STATE_DIR` set, or a defaults suite (`ARMADALE_DEFAULTS_SUITE`,
+  `-ArmadaleDefaultsSuite`), which covers Run in Xcode, test builds and
+  `scripts/check-quit.sh`. `ARMADALE_UPDATER_FOR_TEST=1` (for a test
+  copy's `LSEnvironment`) lifts the Debug build and the isolated run,
+  never a missing key or feed or a fatal launch. The updater (`SPUUpdater` with
+  `SPUStandardUserDriver`) starts at the end of
+  `applicationDidFinishLaunching`, after the launch alerts; a run where it
+  is off logs why (`state`: "updates are off in this run (reason)", the
+  reason one of `fatalLaunch`, `noPublicKey`, `noFeed`, `debugBuild`,
+  `isolatedRun`), and
+  one where Sparkle refuses to start logs the error and stays off. Sparkle
+  keeps its own settings (`SULastCheckTime`, its automatic-check answer)
+  in the app's standard defaults domain, not in a defaults suite.
+- **What a check sends.** One GET of the feed whose user agent is
+  `Armadale/<version> Sparkle/2.10.1`; no system profile, no added
+  parameters. Sparkle sends a profile when `SUSendProfileInfo` is true
+  (in Info.plist or in the user defaults, where its own prompt would
+  store the answer; `SUEnableSystemProfiling` only puts that checkbox in
+  the prompt). Info.plist has neither, and the profile is made
+  impossible in code: `SparkleUpdater` answers
+  `allowedSystemProfileKeys(for:)` with an empty list, Sparkle keeps
+  only profile entries whose keys are listed (`SPUUpdater.m`
+  1299–1315), and with no parameter left the feed URL is used as it is
+  (1270–1278). It is the second of the two possibilities: the setting
+  could still be on, but there is nothing to send. No
+  `feedParametersForUpdater` delegate method exists. Release notes are embedded in the item, so showing them
+  loads nothing; the full changelog opens in the browser only on a click.
+  An empty feed answers "You’re up to date!" / "Armadale <version> is
+  currently the newest version available." (Sparkle's
+  `SPUBasicUpdateDriver`, no item counts as on the latest version).
+- **Where it is offered.** Armadale › **Check for Updates…** under About
+  (enabled while the updater runs and `canCheckForUpdates`; present and
+  disabled in a run without it). Settings › General › **Updates**: "Check
+  for updates automatically", bound to Sparkle's
+  `automaticallyChecksForUpdates` (read again when Settings opens and
+  when Sparkle reschedules), with one line, "A check downloads the list
+  of versions from armadale.dev. Besides what every web request carries,
+  it sends only the version of Armadale and of its updater."; in a run without the updater the
+  checkbox is off and disabled and the line reads "Updates are off in
+  this run of Armadale." The General tab is 620 × 640 pt.
+- **Menu bar mode** (Sparkle's gentle reminders). Outside menu bar mode
+  Sparkle shows a scheduled check's update itself. In menu bar mode
+  (`standardUserDriverShouldHandleShowingScheduledUpdate` answers no) it
+  opens no window: the status menu gains **Update Available…** (after
+  Settings…, hidden otherwise; `UpdateCoordinator.reminderPending`),
+  which unhides the app, brings it forward (`AppActivation.bringForward()`)
+  and asks Sparkle to show the update (`checkForUpdates`, which brings
+  the update in focus). The item goes when the update gets the user's
+  attention or the session ends. Leaving menu bar mode with an update
+  waiting shows it, as Sparkle does when a regular app comes back to the
+  front. When an update session ends (Remind Me Later, Skip, Cancel, an
+  error) with the app active in menu bar mode and none of Settings,
+  Keyboard Shortcuts or Acknowledgements on screen, the app hides again
+  by the rule for closing Settings there (`hideIfWindowlessInMenuBar`);
+  not right after Open System Settings.
+- **The update's quit.** Sparkle installs by quitting the app: its
+  helper (`Updater.app`) calls `NSRunningApplication.terminate`, a quit
+  Apple event without a reason, which would get the quit question.
+  Armadale decides before Sparkle sends it. When the user chooses Install
+  and Relaunch, Sparkle asks
+  `updater(_:shouldPostponeRelaunchForUpdate:untilInvokingBlock:)` (once
+  per install); Armadale always postpones, and on the next run-loop turn
+  (default mode, outside Sparkle's main-queue block, so an alert's modal
+  session does not hold up the main actor) decides by
+  `UpdateQuitDecision` (`App/MenuBarMode.swift`, a table test):
+  - **Nothing to tell** when every running session survives a quit
+    (local persistent ones, those on hosts with the persistence helper).
+  - **"N sessions will end when Armadale quits to update"** ("1 session"
+    for one) when sessions that cannot survive a quit may be running
+    (`SessionRegistry.sessionsThatEndAtQuit()`: local ones on the plain
+    PTY fallback, ones on a host without the persistence helper, whose
+    client carries a persistence note; never one made by the persistent
+    runtime): that they cannot keep running while Armadale is closed and
+    "If you cancel, the update stays ready and is normally installed the
+    next time Armadale quits." Buttons **Install and Relaunch** (marked destructive) and
+    **Cancel**.
+  - **The loss warning** while `lossSeenAt` is set and local persistent
+    sessions would be left to macOS ("Background App Activity" above),
+    whether or not the app is in menu bar mode: "macOS may end N sessions
+    when Armadale quits", its text, a sentence on sessions that end
+    anyway when there are some, and the same last sentence. Buttons
+    **Open System Settings** (cancels, and opens Login Items &
+    Extensions), **Install Anyway** (destructive), **Cancel**.
+  - **Refused**, without a question, while End Sessions and Quit runs or
+    a quit is already going through (checked again after an alert).
+  Both alerts are warnings brought forward like the quit question. Then
+  Sparkle is resumed either way. On yes it calls
+  `updaterShouldRelaunchApplication` (yes) and
+  `updaterWillRelaunchApplication` just before telling its installer to
+  go on and send the quit; that opens `UpdateQuitGate`, and
+  `applicationShouldTerminate` lets the quit through
+  (`QuitDecision.Context.isUpdateQuit`, after a forced quit and End
+  Sessions and Quit, before everything else): clients hang up, sessions
+  keep running, nothing enters menu bar mode or ends a session, and the
+  last-quit record is written as a user's quit (no new kind; one `state`
+  line says the quit installs an update). The gate is one-shot: the
+  first `applicationShouldTerminate` that consults it closes it, whatever
+  that quit's outcome (`UpdateCoordinator.takeQuitThrough()`; every quit
+  path reaches that method once per quit, and End Sessions and Quit's
+  second quit is a new one that goes through as its own). It also closes
+  when Sparkle's update cycle ends (`didAbortWithError`,
+  `didFinishUpdateCycle`) and is never open longer than 60 s, so a later
+  ⌘Q gets the usual question even if Sparkle's quit never came or was
+  cancelled; without Armadale's yes it never opens. A no is one-shot too:
+  the first `updaterShouldRelaunchApplication` after it answers no and
+  clears it, since Sparkle asks that before the postpone hook on every
+  attempt (`SPUInstallerDriver.m` 515–519) and a no left standing would
+  abort the next install unasked. Two limits remain: End Sessions and
+  Quit chosen in the moment between Armadale's yes and Sparkle's quit
+  cancels Sparkle's quit (closing the gate), ends the sessions and quits,
+  and the waiting installer then installs and relaunches Armadale; and
+  Sparkle's own retry (Install and Relaunch again after a quit that did
+  not happen) does not call `updaterWillRelaunchApplication` again
+  (`_notifiedDelegateInstallationWillFinish`, `SPUInstallerDriver.m`
+  551–554), so the retry's quit gets the ordinary quit question.
+- **Cancel** (and Open System Settings, and a refusal): Armadale answers
+  `updaterShouldRelaunchApplication` no, which makes Sparkle abort the
+  install session: its "Ready to Install" window (which has no close
+  button) closes and nothing is left waiting on the user. Sparkle's
+  installer has already prepared the update by then and stays, waiting
+  for Armadale to terminate: the update is normally installed **the next
+  time Armadale quits, by any path, and Armadale is not reopened**; that
+  quit asks and behaves exactly as it would without an update (the
+  question, menu bar mode, End Sessions and Quit). Not always: the
+  installer's launchd jobs do not outlive a logout or restart; Skip This
+  Version at a later check cancels the waiting installer (Install Update
+  there asks again); and what Background App Activity switched off does
+  to those jobs is not known (section 13). Hence "normally" in the
+  alert.
+- **The relaunch** is a normal launch of the new build through Launch
+  Services (`NSWorkspace.open`): it attaches every restored session as any
+  launch does, comes up with its windows shown (menu bar mode is never
+  restored), and runs the last-quit check on the update's quit like any
+  user quit's (usually late, being within 12 s of the quit). Nothing in
+  the launch path knows it was an update.
+- **Helper copies.** Nothing new: session daemons run from the state
+  directory's `bin/`, never from the bundle, so replacing the bundle
+  touches no running session; section 13 has the constraint for a later
+  helper version.
 
 ---
 
@@ -3804,9 +3981,13 @@ armadale/
 │   │                                (the type, its state, init, the delegate's entry points) with
 │   │                                AppDelegate+Launch, +Quit, +MenuBar, +Windows, +Actions,
 │   │                                +Attention (and the notification centre's delegate), +Saving,
-│   │                                MainMenu, MenuBarMode (QuitDecision, MenuBarText,
-│   │                                MenuBarStatusItem, AppActivation: quitting and menu bar mode),
-│   │                                InstanceLock (a second process on one state directory)
+│   │                                MainMenu, MenuBarMode (QuitDecision, UpdateQuitDecision,
+│   │                                MenuBarText, MenuBarStatusItem, AppActivation: quitting and
+│   │                                menu bar mode), InstanceLock (a second process on one state
+│   │                                directory), Updates (AppUpdater, UpdaterPolicy,
+│   │                                UpdateCoordinator, UpdateQuitGate, UpdateSettings, UpdateText)
+│   │                                with AppDelegate+Updates, SparkleUpdater (the only file that
+│   │                                imports Sparkle; not in ArmadaleAppTests)
 │   ├── Windows/                     WorkspaceWindowController, WorkspaceActions, InlineRename,
 │   │                                ContentViewController (+ PaneContainerView),
 │   │                                FullScreenSerializer, WindowGeometry (saved frames and screens)
@@ -3862,9 +4043,14 @@ armadale/
 │                                    render-app-icon.swift, release.sh, install-release.sh,
 │                                    bump-build.sh, fetch-dmgbuild.sh, dmgbuild-requirements.txt,
 │                                    render-dmg-background.swift, dmg/ (settings.py and the
-│                                    generated window background)
+│                                    generated window background), embed-sparkle.sh (build
+│                                    phase), sparkle-tool.sh (Sparkle's tools from the pinned
+│                                    package), appcast.sh + appcast.py (the feed's items),
+│                                    ed25519-verify.swift (an update signature against a
+│                                    public key)
 ├── docs/                            DESIGN.md (the contract), HISTORY.md (why and when),
-│                                    index.html, changelog.html, CNAME, .nojekyll (the
+│                                    index.html, changelog.html, appcast.xml (the update
+│                                    feed), CNAME, .nojekyll (the
 │                                    website, served by GitHub Pages at armadale.dev; README;
 │                                    the changelog page is kept as AGENTS.md says),
 │                                    icon/AppIcon.svg (generated master vector)
@@ -3939,9 +4125,10 @@ armadale/
 ### Release pipeline
 
 Team **YJ8LXVCB3T** (an individual Developer Program enrolment; Gatekeeper
-names "Donny Kurniawan"); **no updater** and **no crash reporting** in v1
-(macOS keeps crash reports under `~/Library/Logs/DiagnosticReports`); the
-artifact is a **notarized, stapled DMG**. The bundle identifier is
+names "Donny Kurniawan"); **no crash reporting** (macOS keeps crash
+reports under `~/Library/Logs/DiagnosticReports`); the artifact is a
+**notarized, stapled DMG**, which is also what the updater downloads
+(section 8, "Updates"). The bundle identifier is
 `com.tinylittleapps.armadale`, a chosen prefix, not a registered
 organisation name.
 
@@ -3962,7 +4149,28 @@ organisation name.
   identity, `--options runtime` and `--timestamp`. The sign-on-copy of
   `ctty-exec` keeps its runtime flag and its empty entitlements.
   `armadale-notify` is a shell script in Resources and is not Mach-O; the
-  Linux `zmx` binaries are data. Nothing else in the bundle needs signing.
+  Linux `zmx` binaries are data.
+- **Sparkle in the bundle.** The package (exact 2.10.1, pinned in the
+  committed `Package.resolved`; the binary target's checksum
+  `4c2e48a3…023a` in Sparkle's `Package.swift` is what SwiftPM checks the
+  downloaded XCFramework against) is a dependency with `link: false`:
+  `import Sparkle` links the framework Xcode extracts into
+  `BUILT_PRODUCTS_DIR`, and Xcode does not embed it. The app target's last
+  phase, "Embed Sparkle" (`scripts/embed-sparkle.sh`), copies it into
+  `Contents/Frameworks` without `Headers`, `PrivateHeaders`, `Modules`
+  and `XPCServices` (Installer.xpc and Downloader.xpc are for sandboxed
+  apps), and re-signs `Versions/B/Autoupdate`, `Versions/B/Updater.app`
+  and then the framework with the build's identity, keeping Sparkle's
+  identifiers, with `--options runtime` whenever the build has the
+  hardened runtime and `--timestamp` for a real identity (ad hoc
+  otherwise), never `--deep` and never with entitlements. Xcode signs the
+  app after it. Xcode's own embed of a package framework was not used: it
+  is not a build phase, so a script phase was seen running at the same
+  time as its copy and its sign-on-copy (declared inputs did not order
+  them), and its sign-on-copy re-signs the framework but not the code in
+  it. The Debug bundle therefore has the Release bundle's shape (checked
+  with `codesign --verify --deep --strict`). Nothing else in the bundle
+  needs signing.
 - **Architectures.** The app and `ctty-exec` are arm64 only: macOS 27 has
   no Intel support, and with a macOS 27 deployment target Xcode 27's
   `ARCHS_STANDARD` is `arm64`. `Contents/Helpers/zmx` stays universal, and
@@ -3973,9 +4181,10 @@ organisation name.
   needs the Developer ID certificate and carries no `get-task-allow`, so
   Instruments cannot attach to it; profile a Debug build instead, or
   change the action's configuration locally.
-- **Third-party notices.** SwiftTerm (linked) and `zmx` (bundled) are
-  MIT-licensed, which requires their copyright and license notices in
-  every copy; the DMG is one. They ship in the bundle as
+- **Third-party notices.** SwiftTerm (linked), `zmx` (bundled) and
+  Sparkle (bundled; MIT, with the licenses of the code it carries: bsdiff,
+  sais-lite, Ed25519, SUSignatureVerifier, verbatim from its `LICENSE` at
+  the tag) require their copyright and license notices in every copy; the DMG is one. They ship in the bundle as
   `Contents/Resources/Acknowledgements.txt`, shown by Help ›
   Acknowledgements (section 8), with the colour-scheme credits; it is a
   plain resource and needs no signing of its own. When a bundled
@@ -3998,7 +4207,27 @@ organisation name.
   `status.showUntrackedFiles` setting cannot hide untracked files);
   resolves the signing identity; and (unless `--skip-notarize`) checks
   that `xcrun notarytool history --keychain-profile armadale-notary`
-  works; a missing profile prints the `store-credentials` command. The
+  works; a missing profile prints the `store-credentials` command. It
+  then checks the update feed and its key: `project.yml` must carry
+  `SUFeedURL: https://armadale.dev/appcast.xml`,
+  `SUAllowsAutomaticUpdates: false` and an `SUPublicEDKey` (32 bytes of
+  base64), and none of `SUSendProfileInfo`, `SUEnableSystemProfiling` and
+  `SUEnableJavaScript`; and Sparkle's `sign_update
+  --account armadale -p` (through `scripts/sparkle-tool.sh`, so it needs
+  the package fetched by a build) signs 4 KiB of random bytes in
+  `build/release-preflight/` with the key in the login keychain, and that
+  signature must verify against the public key
+  (`scripts/ed25519-verify.swift`, CryptoKit's
+  `Curve25519.Signing.PublicKey`), so a missing or wrong key fails before
+  anything is built or submitted to Apple; `--skip-notarize` does not
+  skip this. When `sign_update` cannot sign, its own output (both
+  streams; it prints its errors on standard output) is shown; on success
+  nothing of it is printed. It prints a reminder (again at the end) when
+  `PersistedState.currentSchemaVersion` is higher than at the last `v*`
+  tag: the release notes must say that older versions refuse what this
+  one saves. It stops if it cannot read the current version from the
+  source, and prints a warning (again at the end) when it cannot read the
+  tag's or finds no tag. No option reads the private key from a file. The
   identity is the SHA-1 of the single valid
   `Developer ID Application: … (YJ8LXVCB3T)` identity; with none the
   script fails, and with several (a renewed certificate next to the old one) it fails asking
@@ -4021,7 +4250,15 @@ organisation name.
      hardened runtime (`codesign -d -vv` shows `runtime`) and a secure
      timestamp, and all three name the same signer; the helpers carry no
      entitlements and the app carries only the sandbox-off entitlement;
-     `Contents/Helpers/zmx` is universal. Xcode picks the app's identity
+     `Contents/Helpers/zmx` is universal. Sparkle's code gets the same
+     signature checks (`Contents/Frameworks/Sparkle.framework`,
+     `Versions/B/Autoupdate`, `Versions/B/Updater.app` and its executable)
+     and must carry no entitlements, and no `XPCServices` (directory or
+     link) may be left in the framework. The built Info.plist must carry
+     the same `SUFeedURL` and `SUPublicEDKey` as `project.yml`,
+     `SUAllowsAutomaticUpdates` false, `SUVerifyUpdateBeforeExtraction`
+     true, and none of `SUSendProfileInfo`, `SUEnableSystemProfiling`
+     and `SUEnableJavaScript`. Xcode picks the app's identity
      by name; the script requires the app's leaf certificate
      (`codesign --extract-certificates`) to be the resolved identity, and
      signs the DMG with its SHA-1.
@@ -4050,6 +4287,17 @@ organisation name.
      on the commit that was built, rather than tagging; after an
      `--allow-dirty` build it says to commit and rebuild instead of
      suggesting a tag (based on the tree's state at the start of the run).
+  6. Before that rename, the update signature: `sign_update --account
+     armadale` on the stapled DMG (the bytes GitHub will serve), its
+     length checked against the file, the signature verified against the
+     `SUPublicEDKey` **read from the built app** (what installed copies
+     verify with), not the keychain's; then `scripts/appcast.py item`
+     writes `build/release/appcast-item.xml`: title, `pubDate`,
+     `sparkle:version` (the build number), `sparkle:shortVersionString`,
+     `sparkle:minimumSystemVersion` (the app's `LSMinimumSystemVersion`),
+     `sparkle:fullReleaseNotesLink` (`https://armadale.dev/changelog.html`)
+     and the enclosure: `https://github.com/donny/armadale/releases/download/v<version>/Armadale-<version>.dmg`,
+     its length and `sparkle:edSignature`. No release notes yet.
 
   Every check (signatures, stapling, `hdiutil`) fails with a message
   rather than ending the script silently under `set -e`.
@@ -4057,7 +4305,55 @@ organisation name.
   checking the pipeline without credentials: it still signs the DMG and
   runs the Gatekeeper checks (which reject it with "source=Unnotarized
   Developer ID"), and names it `Armadale-<version>-unnotarized.dmg`, so
-  it cannot be mistaken for a release.
+  it cannot be mistaken for a release; it signs nothing for the updater.
+- **The update feed** (`docs/appcast.xml`, served at
+  `https://armadale.dev/appcast.xml`; section 8, "Updates"). An RSS 2.0
+  file with Sparkle's namespace, a short neutral comment (the file is
+  served: it names no script or test) and the marker
+  `<!-- Items, newest first. -->` under which items go, newest first.
+  Items are generated, never edited by hand. `scripts/appcast.sh`, for step 4 of the release
+  checklist (after the GitHub Release exists and "Next release" on the
+  changelog page has become the version's section), reads
+  `build/release/appcast-item.xml`, downloads the release asset, checks
+  that it has the signed length and that the item's signature verifies
+  against `SUPublicEDKey` from `project.yml`, makes the embedded release
+  notes from that version's section of `docs/changelog.html`
+  (`scripts/appcast.py notes`: each day's date, then its `<h3>` and `<p>`
+  items; an allowlist of what a day of the page holds, `time` with only
+  its `datetime`, `div`, `h3`, `p` and `code`, and any other tag or any
+  other attribute is refused with the tag named), and inserts the item
+  with its `<description>` at the top (`scripts/appcast.py insert`, which
+  refuses a build number not higher than the newest in the feed and
+  writes a temporary file beside the feed, then renames it over the
+  feed). It
+  commits and pushes nothing; a push of the feed to `main` publishes the
+  update. Options `--item`, `--dmg` (check a local file instead of
+  downloading), `--feed`, `--changelog` and `--public-key` exist for
+  checking the script on scratch files. `AppcastTests` holds the file's
+  form: well-formed RSS 2.0, the namespace, one channel, items newest
+  first by build number, each with an X.Y.Z version, a numeric build, a
+  minimum system version, the title, a parseable `pubDate`, the
+  changelog link, embedded notes with an `<h3>` and no script, style,
+  image, frame or `src=`, and one enclosure whose URL is exactly the
+  release asset's, with a positive length and a 64-byte signature; no
+  "zmx" anywhere, and no script, test or design-document name in the
+  served file. The feed with no item passes; it holds none until a
+  release is published. A second test runs `scripts/appcast.py` (`item`
+  twice and `insert` into a copy of the feed in a temporary directory,
+  and an older build refused) and checks the result with the same rule,
+  so the script and the rule cannot drift.
+- **`scripts/sparkle-tool.sh <tool> [args…]`** runs `generate_keys`,
+  `sign_update` or `generate_appcast` from the pinned package's artifact
+  (`SourcePackages/artifacts/sparkle/Sparkle/bin/` under
+  `build/release/DerivedData` or the project's default DerivedData),
+  passing the arguments on, and says how to fetch the package when it is
+  not there. It never runs a tool by itself (`generate_keys` with no key
+  creates one: the owner's to run).
+- **The update key.** One EdDSA key for Armadale under the login
+  keychain's account `armadale` (service `https://sparkle-project.org`),
+  made and kept by the owner with `generate_keys --account armadale`,
+  exported with `-x` and imported on another Mac with `-f`; its public
+  half is `SUPublicEDKey` in `project.yml` (README, "Releasing").
 - **`hdiutil` on macOS 27** prints a deprecation warning for `create`,
   pointing at `diskutil image create from` (whose folder images are
   APFS). `hdiutil` still works and is kept; the switch is a later chore.
@@ -4274,7 +4570,51 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
   because 0.1.x takes no lock: the newer build's running exit recorders
   keep their open copy, but a session it starts after that cannot run the
   missing copy until its next launch reinstalls it (inferred from the
-  installer and launch code, not seen).
+  installer and launch code, not seen). The updater does not make this
+  worse: Sparkle refuses to go down a version, and an update replaces
+  only the bundle, never `bin/`. It does make a helper bump reach every
+  install within a day, so the bump must keep the previous `zmx-<ver>`
+  copy for sessions started by it (section 4, "Bundling").
+- **The updater and Background App Activity** (not known). Sparkle's
+  installer runs as two launchd jobs the app submits with `SMJobSubmit`
+  (`<bundle id>-sparkle-updater` and `-sparkle-progress`;
+  `InstallerLauncher/SUInstallerLauncher.m`), which must outlive the
+  app's quit to replace the bundle and relaunch it. With Armadale
+  switched off under Background App Activity, macOS ends what the app
+  leaves behind about one second after a regular quit; whether that
+  reaches these jobs, so that an update fails in that state (and the
+  local sessions are lost anyway), is not known. Sparkle's issue tracker
+  has nothing on it. The live test of a real update (HANDOFF) must
+  answer it, with the owner at the switch.
+- **The update's quit, two limits** (section 8, "Updates"): End
+  Sessions and Quit chosen between Armadale's yes and Sparkle's quit
+  ends the sessions and the installer still relaunches Armadale; and a
+  retry of Install and Relaunch after a quit that did not happen gets
+  the ordinary quit question, because Sparkle tells the delegate only
+  once (`SPUInstallerDriver.m` 551–554).
+- **After Cancel** the install at the next quit is not guaranteed: the
+  installer's jobs end with a logout or restart, and Skip This Version
+  cancels them.
+- **The feed URL is compiled into every build** that ships
+  (`SUFeedURL`, `https://armadale.dev/appcast.xml`): the domain and the
+  file must stay served for as long as any install exists, and a push of
+  `docs/appcast.xml` to `main` publishes an update to all of them at
+  once, so an item goes in only after its GitHub Release exists
+  (`scripts/appcast.sh` checks the asset).
+- **The update key.** Losing the private key (keychain account
+  `armadale`) means no update can carry a signature that installed
+  copies accept. Sparkle's key rotation still lets one update change
+  the EdDSA key, but not the Developer ID certificate at the same time;
+  with `SUVerifyUpdateBeforeExtraction` only when the archive is a
+  Developer ID signed disk image, which Armadale's is (Sparkle's
+  documentation, "Rotating signing keys"). A renewed certificate of
+  the same team still satisfies Armadale's designated requirement
+  (bundle identifier and team), so it is not such a change; to be safe,
+  a release that replaces a lost key keeps the certificate of the
+  release before it (the current one expires on February 1, 2027). A leaked key alone does not let anyone install code:
+  the update must also pass the code-signing check against Armadale's
+  designated requirement (team `YJ8LXVCB3T`). The owner keeps the key
+  backed up (README, "Releasing"); nothing in the repository holds it.
 - **Replay fidelity.** Reattach replays a libghostty‑vt snapshot (verified
   for scrollback, colours and the alternate screen). SwiftTerm renders it as
   ordinary VT output. Anything odd in it is the earliest signal that a

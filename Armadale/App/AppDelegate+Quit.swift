@@ -42,6 +42,11 @@ extension AppDelegate {
         // bar, or end them first. Neither waits here: staying cancels the
         // quit, and ending them cancels it and quits again when done.
         let isSystemQuit = Self.isSystemQuit(NSAppleEventManager.shared().currentAppleEvent)
+        // The quit Sparkle sends to install an update Armadale agreed to
+        // (DESIGN §8, "Updates"): straight through, sessions kept. The gate
+        // is consulted once per quit and closes here, whatever this quit's
+        // outcome (one call per quit: `terminate` asks this method once).
+        let isUpdateQuit = updates.takeQuitThrough()
         let localSessions = registry.localSessionsThatMayOutliveQuit()
         let decision = QuitDecision.decide(
             running: registry.runningSessionCount(),
@@ -50,7 +55,8 @@ extension AppDelegate {
                 isForced: isForcedQuit || isSystemQuit,
                 isInMenuBar: menuBarItem != nil,
                 isEndingSessions: isEndingSessions, sessionsEnded: sessionsEnded,
-                lossSeen: lossSeenAt != nil, localAtRisk: localSessions.count))
+                lossSeen: lossSeenAt != nil, localAtRisk: localSessions.count,
+                isUpdateQuit: isUpdateQuit))
         switch decision {
         case .quitNow:
             break
@@ -87,6 +93,9 @@ extension AppDelegate {
             return .terminateCancel
         case .cancel:
             return .terminateCancel
+        }
+        if isUpdateQuit, !sessionsEnded {
+            stateLog.notice("Armadale: quitting to install an update; sessions are kept")
         }
         // Windows closing because the app quits must stay "open" for next launch.
         isTerminating = true

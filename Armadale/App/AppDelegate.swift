@@ -83,6 +83,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// lets it go through and written by ``applicationWillTerminate(_:)``.
     var quitToRecord: LastQuitRecord.Quit?
 
+    /// Whether this run starts the updater (docs/DESIGN.md section 8,
+    /// "Updates"; ``UpdaterPolicy``).
+    let updaterVerdict: UpdaterPolicy.Verdict
+    /// Makes the real updater (main.swift passes `SparkleUpdater`'s; the
+    /// test bundle, which does not link Sparkle, never does).
+    let makeUpdater: (@MainActor (UpdateCoordinator) -> any AppUpdater)?
+    /// The updater once started after the launch alerts; `nil` while it is
+    /// off in this run.
+    var updater: (any AppUpdater)?
+    /// The decisions around Sparkle's callbacks: the update's quit, the
+    /// menu bar reminder.
+    let updates = UpdateCoordinator()
+    /// Settings › General › Updates.
+    let updateSettings = UpdateSettings()
+
     /// What to tell the user about the state file at launch.
     struct LoadReport {
         var message: String
@@ -94,7 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         var bringForward: pid_t? = nil
     }
 
-    override init() {
+    /// `makeUpdater` makes the updater, started at the end of launching
+    /// when ``UpdaterPolicy`` allows it.
+    init(makeUpdater: (@MainActor (UpdateCoordinator) -> any AppUpdater)? = nil) {
         // The lock first: loading deletes stale temporary files and may
         // quarantine an unreadable file, so it must never run against a
         // state directory another process owns (docs/DESIGN.md section 8).
@@ -137,7 +154,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         self.attention = AttentionCenter(
             model: model, preferences: settings.preferences, notifications: notifications)
         self.saver = StateSaver(url: url)
+        self.makeUpdater = makeUpdater
+        self.updaterVerdict = UpdaterPolicy.verdict(
+            launchIsFatal: !plan.usesStateDirectory, isDebugBuild: UpdaterPolicy.isDebugBuild,
+            info: Bundle.main.infoDictionary ?? [:],
+            environment: ProcessInfo.processInfo.environment, arguments: ProcessInfo.processInfo.arguments)
         super.init()
+        updates.host = self
         wireRegistry()
         wireAttention()
     }
@@ -229,6 +252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let ended = endedAfterLastQuit {
             showSessionsEndedAfterQuit(ended, late: false)
         }
+        // After the launch alerts (DESIGN §8, "Updates"): Sparkle's own
+        // question about automatic checks never comes before them.
+        startUpdaterIfAllowed()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
