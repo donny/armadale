@@ -2850,6 +2850,79 @@ been made with the key.
   open; what is left of item (1) of "The updater: what is left" is the
   first signature and the first Release build.
 
+## November 17, 2026: Armadale 0.1.2 (30), built and notarized, not published (dc03cc5)
+
+November 17, 2026, 08:52 to 08:55, on the owner's word: **the first
+release run with the updater in it and the first signatures with the
+update key; 0.1.2 (30) is notarized, stapled and installed on the
+owner's Mac.** The version stays 0.1.2; only the build number rises.
+The installed 0.1.2 (29) had no updater.
+
+- `scripts/bump-build.sh`: 0.1.2 (29) to 0.1.2 (30), `project.yml`
+  only, committed as dc03cc5 after the gate had passed on it (945
+  tests, no warnings; the SSH integration tests did not run, as in
+  every gate run).
+- `scripts/check-state-compat.sh`: the working tree writes schema 2,
+  and v0.1.0 and v0.1.1 both answer `newerVersion`.
+- `scripts/install-release.sh` on the clean tree at dc03cc5, 3 min 6 s
+  in all:
+  - **Preflight.** `sign_update --account armadale` signed a scratch
+    file, the first signature with the key. The keychain asked whether
+    `sign_update` may use the key and the run waited about half a
+    minute until the owner had answered; then "the keychain's update
+    key matches SUPublicEDKey". The keychain did not ask again at the
+    second signature, of the DMG (made at 08:55:20, three seconds
+    before the run ended).
+  - **Archive**, with the release's own DerivedData: the packages
+    resolved (Sparkle "cached") without the hang SwiftPM's download
+    had shown on that Mac.
+  - **Signatures**: the app, both helpers and Sparkle's code (the
+    framework, `Autoupdate`, `Updater.app` and its executable) carry
+    the Developer ID of YJ8LXVCB3T, the hardened runtime and a secure
+    timestamp; no entitlements on the helpers or on Sparkle's code.
+    The built Info.plist has the feed, the public key of
+    `project.yml`, no automatic installs, verification before
+    extraction, no system profile and no JavaScript.
+  - **Notarization**: the app with the framework in it and the DMG,
+    both "Accepted" with notary logs without issues, both stapled;
+    Gatekeeper "Notarized Developer ID" for both.
+  - **The DMG signed for the updater**: the EdDSA signature of its
+    17,162,822 bytes verifies against the built app's
+    `SUPublicEDKey`, and `build/release/appcast-item.xml` holds the
+    item (version 30, 0.1.2, minimum system 27.0, the notes link, the
+    URL of the GitHub Release asset that does not exist yet).
+  - The app installed over build 29 in `~/Applications`. The run
+    deleted the DMG of build 29 with `build/release/`.
+- Checked again by hand: the installed app is 0.1.2 (30); every file,
+  link and directory in it is identical to the archived app (60 files
+  and 5 links, compared by hashes and link targets) and both have the
+  same CDHash; its signature verifies (`--deep --strict`); `spctl`
+  accepts it as "Notarized Developer ID" and its stapled ticket
+  validates; its `SUPublicEDKey` is `project.yml`'s. The DMG's
+  signature in `appcast-item.xml` verifies against the key in
+  `project.yml` with `scripts/ed25519-verify.swift`, which needs no
+  private key.
+- **Found**: `diff -r` on an app with Sparkle's framework in it writes
+  "Directory loop detected" for the directories it had already reached
+  through the framework's links and exits 0. `release.sh`'s comparison
+  of the DMG's app with the archived one therefore passed with six
+  such lines in `build/release/verify/dmg-app.diff`: every file was
+  compared once, but not that the links are links; the signature check
+  that follows covers those. Not changed (HANDOFF, open items,
+  Shipping).
+
+Not done, on purpose: no tag, no GitHub Release, no item in the feed
+(`scripts/appcast.sh` needs the release asset), no state fixture, no
+change to the website, and no agent ran the installed app. So the
+updater was still not seen starting in a Release build, and an update
+between two Developer ID signed builds was not seen either (HANDOFF,
+"From finished changes"). HANDOFF's list for the updater lost the
+release run: the Developer ID signing of Sparkle's code, the preflight
+against the keychain, notarization with the framework, `sign_update`
+and `appcast-item.xml` are checked by this run. The DMG's size and
+hash are in the local file of the Mac it was built on. How to publish
+this very build is under "Next" in `HANDOFF.md`.
+
 ---
 
 # Part 2: the history of each design section

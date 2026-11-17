@@ -42,14 +42,13 @@ live on test builds with a bundle identifier of their own: sessions
 lived through every update, also with Armadale switched off under
 Background App Activity ("From finished changes" below has what is
 left). On November 17, 2026 the owner made the update signing key and
-its public half went into `project.yml`: the next Release build starts
-the updater, and no such build exists yet ("Waiting for owner
-decisions" below). The last gate run: 945 tests, no warning from
-Armadale's code.
-**Armadale 0.1.2 (29) is built, notarized and stapled from 77a02cf
-(November 16, 2026) and installed on the owner's Mac, with everything
-above except the updater in it, but not released: no tag, no GitHub Release, no fixture
-("Next" below).**
+its public half went into `project.yml`, so a Release build starts the
+updater ("Waiting for owner decisions" below). The last gate run: 945
+tests, no warning from Armadale's code.
+**Armadale 0.1.2 (30) is built, notarized and stapled from dc03cc5
+(November 17, 2026) and installed on the owner's Mac, with everything
+above in it, the updater included, but not released: no tag, no GitHub
+Release, no feed item, no fixture ("Next" below).**
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -144,15 +143,19 @@ in the heading or the text under it, their commits:
   is `SUPublicEDKey` in `project.yml`, so a Release build starts the
   updater (`docs/HISTORY.md`, "the update key exists"); no app code
   changed.
+- November 17, 2026: 0.1.2 (30) built, notarized and installed, not
+  published: the first release run with the updater in it and the
+  first signatures with the update key (`docs/HISTORY.md`, "Armadale
+  0.1.2 (30), built and notarized, not published") (dc03cc5).
 
 ## Next
 
 Nothing is being built. The updater (the owner's go-ahead of November
 16, 2026, "Build as recommended") is built, reviewed and committed
 (`docs/HISTORY.md`, "an updater, with Sparkle"); "Waiting for owner
-decisions" has what is left of it: the first signature with the
-owner's key (made November 17, 2026), the first update between
-Developer ID signed builds, publishing. Everything the owner gave the go-ahead for on
+decisions" has what is left of it: the updater seen running in the
+installed build 30, the first update between Developer ID signed
+builds, publishing. Everything the owner gave the go-ahead for on
 November 14, 2026 is built, and checked live where the Mac was free
 (`docs/HISTORY.md`, the entries of that day). The step of November 16,
 2026 (favorites in the chooser, New Host…, Settings without Favorites)
@@ -164,23 +167,19 @@ would notice adds its item there in the same commit (AGENTS.md, "The
 changelog page"). What comes next waits for the owner.
 
 Waiting for owner decisions:
-- **Publishing 0.1.2.** The notarized DMG of 77a02cf, build 29,
-  exists only on the Mac it was built on (`HANDOFF.local.md` there;
-  `docs/HISTORY.md`, "Armadale 0.1.2 (29), built and notarized, not
-  published"), in `build/release/`, which the next run of
-  `scripts/release.sh` deletes. The owner does not plan to publish for
-  now (November 14, 2026). To publish that very build: tag 77a02cf as
-  `v0.1.2`, create the GitHub Release with the DMG under both names,
-  turn the "Next release" section of `docs/changelog.html` into
-  0.1.2's, and add the tag's state fixture (README, "Releasing", steps
-  4 and 5). If anything is committed to the app before then, bump the
-  build number and build again instead. **That is now the case:** the
-  updater was committed on November 16, 2026, and the owner decided
-  that day that 0.1.2 ships with it, as build 30. So a release is now
-  README's "Releasing" from step 1 on `main` (bump to 30), once the
-  owner's key is in `project.yml` ("The updater: what is left" below;
-  `scripts/release.sh` refuses to build without it), and build 29's
-  DMG is superseded. The release notes should say that 0.1.2 writes
+- **Publishing 0.1.2.** The notarized DMG of dc03cc5, build 30, the
+  first with the updater, exists only on the Mac it was built on
+  (`HANDOFF.local.md` there; `docs/HISTORY.md`, "Armadale 0.1.2 (30),
+  built and notarized, not published"), in `build/release/` together
+  with its `appcast-item.xml`; the next run of `scripts/release.sh`
+  deletes both. The owner does not plan to publish for now (November
+  14, 2026). To publish that very build: tag dc03cc5 as `v0.1.2`,
+  create the GitHub Release with the DMG under both names, turn the
+  "Next release" section of `docs/changelog.html` into 0.1.2's, add
+  the release to the feed with `scripts/appcast.sh` and push it, and
+  add the tag's state fixture (README, "Releasing", steps 4 and 5). If
+  anything is committed to the app before then, bump the build number
+  and build again instead. The release notes should say that 0.1.2 writes
   state file schema 2, which 0.1.0 and 0.1.1 refuse (the changelog
   page says so under November 14, 2026), and that 0.1.1 and earlier
   cannot update themselves: 0.1.2 is downloaded once by hand.
@@ -207,13 +206,12 @@ Waiting for owner decisions:
   workarounds").
 - **The Ghostty second renderer** ("Decisions pending" below).
 - **The updater: what is left** (built November 16, 2026;
-  `docs/DESIGN.md` section 8, "Updates"). (1) The update signing
-  key exists (November 17, 2026) and its public half is
-  `SUPublicEDKey` in `project.yml`, but it has signed nothing yet:
-  `scripts/release.sh` checks it against `project.yml` before it
-  builds, and no Release build with the key has been made, so the
-  updater has not been seen starting in one. The key's backup and its
-  import on a second Mac are the owner's (README, "Releasing"). (2) The
+  `docs/DESIGN.md` section 8, "Updates"). (1) Build 30, the first
+  Release build with the updater and the key, is installed on the
+  owner's Mac (November 17, 2026), but no agent has run it, so the
+  updater has not been seen starting in a Release build. The key's
+  backup and its import on a second Mac are the owner's (README,
+  "Releasing"). (2) The
   live test of a real update is done, on ad hoc signed test builds
   (`docs/HISTORY.md`, "the updater, checked live"); an update between
   Developer ID signed builds can only be seen with the first real
@@ -461,9 +459,16 @@ Shipping (step 9)
   colour (Dock badge, status glyphs); today those use their own colours.
 - No crash reporting (decided for v1, October 19, 2026). The updater
   is built (November 16, 2026) and has its key (November 17, 2026);
-  the first build that runs it is the next Release build. 0.1.1 and
+  0.1.2 (30), not published, is the first build that runs it. 0.1.1 and
   earlier cannot update themselves, so 0.1.2 must
   be downloaded once by hand (the release notes say so).
+- `scripts/release.sh` compares the DMG's app with the archived one by
+  `diff -r`, which follows the links in Sparkle's framework: it writes
+  "Directory loop detected" into `build/release/verify/dmg-app.diff`
+  and still exits 0, having compared every file once but not that the
+  links are links (the signature check that follows covers those).
+  Seen November 17, 2026; a comparison that does not follow links
+  would be exact.
 - Older builds on a newer state directory (November 14, 2026). Once a
   build with schema 2 has saved a state directory, 0.1.0 and 0.1.1
   refuse it by version, so going back to them means moving the state
@@ -493,13 +498,16 @@ From finished changes: not checked live, and found and not fixed
   and the install at the next quit, menu bar mode's Update Available…,
   and an update with Armadale switched off under Background App
   Activity. Not checked live:
-  - A Release build: `scripts/release.sh` was not run, so the Developer
-    ID signing of Sparkle's helpers, the preflight against the keychain,
-    notarization with the framework, `sign_update --account armadale`
-    and `appcast-item.xml` from a real run are unchecked, and so is an
-    update between Developer ID signed builds. `scripts/appcast.sh`
-    against a real GitHub Release asset, and the real feed at
-    armadale.dev.
+  - A Release build running: `scripts/release.sh` ran for 0.1.2 (30)
+    on November 17, 2026 (the Developer ID signing of Sparkle's code,
+    the preflight against the keychain, notarization with the
+    framework, `sign_update --account armadale` and
+    `appcast-item.xml`; `docs/HISTORY.md`, "Armadale 0.1.2 (30), built
+    and notarized, not published"), but no agent ran that build, so
+    the updater was not seen starting in it. An update between
+    Developer ID signed builds, `scripts/appcast.sh` against a real
+    GitHub Release asset, and the real feed at armadale.dev with an
+    item in it are unchecked.
   - The "N sessions will end" alert (the plain PTY fallback, a host
     without the persistence helper); the answers Open System Settings
     and Skip This Version; the daily check by its own timer (the test
