@@ -3279,7 +3279,7 @@ GitHub and not in the update feed.** The version went from 0.1.2 to
   Release, the feed's item, the tag and its state fixture (README,
   "Releasing").
 
-## November 25, 2026: fewer red marks while recording
+## November 25, 2026: fewer red marks while recording (be0b10d)
 
 The owner, on seeing a recording in the installed 0.1.3 (31): "This
 feels a bit too busy with too many red icons." One recording showed

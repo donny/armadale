@@ -97,7 +97,7 @@ under it, their commits:
   installed; not tagged, not on GitHub, not in the update feed
   (`docs/HISTORY.md`, "Armadale 0.1.3 (31), built and notarized, not
   published").
-- November 25, 2026: fewer red marks while recording, by the owner's
+- November 25, 2026: fewer red marks while recording, be0b10d, by the owner's
   decision on seeing it: no stop button in the header (Stop Recording
   in the pane menu), no dot in the tab bar unless the sidebar is hidden,
   the sidebar's dot pulsing, every dot on one clock (`docs/HISTORY.md`,
