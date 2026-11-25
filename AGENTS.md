@@ -320,8 +320,13 @@ same section.
   `scripts/fetch-dmgbuild.sh` run once: it installs
   dmgbuild, which lays out the DMG's Finder window, into `Vendor/dmgbuild`
   (git-ignored), pinned with hashes in `scripts/dmgbuild-requirements.txt`.
+  A release also needs the update signing key in the login keychain
+  (README, "Releasing"); on a Mac that does not hold it,
+  `scripts/install-release.sh --skip-update-signature` installs a build
+  that is signed and notarized but is no update anyone could be offered.
   Never store or print credentials; never create keychain profiles
-  on the owner's behalf. A release run deletes `build/release/`, takes
+  on the owner's behalf, and never run Sparkle's `generate_keys` on a Mac
+  that lacks the update key: it would make a different one. A release run deletes `build/release/`, takes
   several minutes and submits to Apple, so do not run it casually; the
   Debug gate never touches the keychain. Running the Release app for a
   check (`check-quit.sh` against it) is live UI testing.

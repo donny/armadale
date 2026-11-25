@@ -5557,6 +5557,25 @@ inserted its sample into a copy of the real feed, which holds a real
 0.1.2 (30) since then; it now starts from the feed as it was before
 its first item (Part 1, "Armadale 0.1.2, released").
 
+**November 25, 2026. `--skip-update-signature`.** The owner asked for
+the current main to be built and installed on a Mac that has the
+Developer ID certificate, the notary profile and dmgbuild, but not the
+update signing key: `sign_update` answered "Signing key not found for
+account armadale", and the release script refuses to build without the
+key, on purpose, before anything goes to Apple. The key stays on the
+Mac that releases (README, "Releasing": a second Mac gets it only by
+import, and `generate_keys` there would make a different key). The
+owner chose, over importing the key and over installing an ad hoc
+signed Debug build, a flag that leaves out only what needs the key: the
+preflight's probe signature, the DMG's signature for the updater and
+the feed's item. Everything that makes the installed app what a user
+would run stays: Developer ID, notarization, stapling, the Gatekeeper
+and `stapler validate` checks. The DMG is named `-local`, never the
+name of a release, since an installed copy would refuse it as an
+update. An ad hoc build was rejected because macOS keys notification,
+background and privacy decisions to the signature, so the installed
+copy would have been asked for them again.
+
 ---
 
 ## 12. Build order

@@ -4587,7 +4587,8 @@ organisation name.
   (`scripts/ed25519-verify.swift`, CryptoKit's
   `Curve25519.Signing.PublicKey`), so a missing or wrong key fails before
   anything is built or submitted to Apple; `--skip-notarize` does not
-  skip this. When `sign_update` cannot sign, its own output (both
+  skip this, and `--skip-update-signature` (below) does. When
+  `sign_update` cannot sign, its own output (both
   streams; it prints its errors on standard output) is shown; on success
   nothing of it is printed. It prints a reminder (again at the end) when
   `PersistedState.currentSchemaVersion` is higher than at the last `v*`
@@ -4673,6 +4674,15 @@ organisation name.
   runs the Gatekeeper checks (which reject it with "source=Unnotarized
   Developer ID"), and names it `Armadale-<version>-unnotarized.dmg`, so
   it cannot be mistaken for a release; it signs nothing for the updater.
+  `--skip-update-signature` is for a Mac that does not hold the update
+  signing key (it stays on the Mac that releases): the key is not asked
+  for, every other step runs (Developer ID, notarization, stapling,
+  Gatekeeper, `stapler validate`), and the run ends before step 6 with
+  `Armadale-<version>-local.dmg`, no update signature and no feed item.
+  The app inside is what a release holds, with the feed and the public
+  key, so the installed copy updates itself like any other; the DMG is
+  for `scripts/install-release.sh` on that Mac and never for publishing,
+  since installed copies would refuse it as an update.
 - **The update feed** (`docs/appcast.xml`, served at
   `https://armadale.dev/appcast.xml`; section 8, "Updates"). An RSS 2.0
   file with Sparkle's namespace, a short neutral comment (the file is

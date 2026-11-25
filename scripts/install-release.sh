@@ -7,7 +7,10 @@
 #
 # --from-dmg installs the DMG already in build/release/ (from an earlier
 # run) without building again. Every other option is passed to release.sh
-# (--skip-notarize, --allow-dirty, --allow-existing-tag).
+# (--skip-notarize, --skip-update-signature, --allow-dirty,
+# --allow-existing-tag). On a Mac that does not hold the update signing
+# key, --skip-update-signature is the way to install: release.sh otherwise
+# refuses to build there.
 #
 # Refuses while Armadale is running: quit it first (persistent sessions
 # keep running). Replaces ~/Applications/Armadale.app.

@@ -2,12 +2,22 @@
 # Builds the release artifact: a Developer ID signed, notarized and stapled
 # DMG (docs/DESIGN.md section 11, "Release pipeline").
 #
-#   scripts/release.sh [--skip-notarize] [--allow-dirty] [--allow-existing-tag]
+#   scripts/release.sh [--skip-notarize] [--skip-update-signature]
+#                      [--allow-dirty] [--allow-existing-tag]
 #
 #   --skip-notarize       stop after the signature checks and build an
 #                         unnotarized DMG (Armadale-<version>-unnotarized.dmg),
 #                         for checking the pipeline without notary
 #                         credentials. That DMG is not for distribution.
+#   --skip-update-signature
+#                         for a Mac that does not hold the update signing
+#                         key: everything else as usual (Developer ID,
+#                         notarized, stapled), but the DMG is not signed for
+#                         the updater and no feed item is written. It is
+#                         named Armadale-<version>-local.dmg and is for
+#                         installing on this Mac (scripts/install-release.sh),
+#                         never for publishing: installed copies would refuse
+#                         it as an update.
 #   --allow-dirty         build from a working tree with uncommitted or
 #                         untracked changes.
 #   --allow-existing-tag  build although the tag v<version> already exists
@@ -52,14 +62,16 @@ TEAM_ID="YJ8LXVCB3T"
 NOTARY_PROFILE="armadale-notary"
 
 skip_notarize=0
+skip_update_signature=0
 allow_dirty=0
 allow_existing_tag=0
 for arg in "$@"; do
     case "$arg" in
         --skip-notarize) skip_notarize=1 ;;
+        --skip-update-signature) skip_update_signature=1 ;;
         --allow-dirty) allow_dirty=1 ;;
         --allow-existing-tag) allow_existing_tag=1 ;;
-        -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "release: unknown option: $arg (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -162,20 +174,27 @@ done
 public_key="$(project_value SUPublicEDKey)"
 [[ "$public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
     || fail "project.yml has no SUPublicEDKey (the public half of the update signing key; README, \"Releasing\")"
-rm -rf build/release-preflight
-mkdir -p build/release-preflight
-head -c 4096 /dev/urandom >build/release-preflight/probe
-# sign_update prints its errors on standard output: both streams are kept
-# and shown when it fails (they hold no secret; on success the output is
-# only the signature, which is not printed).
-if ! probe_signature="$(scripts/sparkle-tool.sh sign_update --account armadale -p build/release-preflight/probe 2>&1)"; then
-    printf '%s\n' "$probe_signature" >&2
-    fail "Sparkle's sign_update could not sign with the key under the keychain account \"armadale\" (README, \"Releasing\")"
+if [ "$skip_update_signature" = 0 ]; then
+    rm -rf build/release-preflight
+    mkdir -p build/release-preflight
+    head -c 4096 /dev/urandom >build/release-preflight/probe
+    # sign_update prints its errors on standard output: both streams are kept
+    # and shown when it fails (they hold no secret; on success the output is
+    # only the signature, which is not printed).
+    if ! probe_signature="$(scripts/sparkle-tool.sh sign_update --account armadale -p build/release-preflight/probe 2>&1)"; then
+        printf '%s\n' "$probe_signature" >&2
+        fail "Sparkle's sign_update could not sign with the key under the keychain account \"armadale\" (README, \"Releasing\"). On a Mac that does not hold the key, --skip-update-signature builds a DMG for installing there"
+    fi
+    /usr/bin/swift scripts/ed25519-verify.swift "$public_key" "$probe_signature" build/release-preflight/probe >/dev/null \
+        || fail "the key under the keychain account \"armadale\" does not match SUPublicEDKey in project.yml"
+    rm -rf build/release-preflight
+    info "update feed $FEED_URL; the keychain's update key matches SUPublicEDKey"
+else
+    # The app still carries the feed and the public key (checked above), so
+    # the installed copy updates itself like any other; only this DMG is
+    # no update anyone could be offered.
+    info "--skip-update-signature: the update key is not asked for; the DMG gets no update signature and no feed item"
 fi
-/usr/bin/swift scripts/ed25519-verify.swift "$public_key" "$probe_signature" build/release-preflight/probe >/dev/null \
-    || fail "the key under the keychain account \"armadale\" does not match SUPublicEDKey in project.yml"
-rm -rf build/release-preflight
-info "update feed $FEED_URL; the keychain's update key matches SUPublicEDKey"
 
 # The state file's version against the last release tag: a higher one means
 # older versions refuse what this one saves, which the release notes say.
@@ -397,7 +416,12 @@ fi
 # looks like a release.
 if [ "$skip_notarize" = 0 ]; then
     DMG="build/release/Armadale-$version-pending.dmg"
-    FINAL_DMG="build/release/Armadale-$version.dmg"
+    if [ "$skip_update_signature" = 0 ]; then
+        FINAL_DMG="build/release/Armadale-$version.dmg"
+    else
+        # Never the name of a release: this one is not signed for the updater.
+        FINAL_DMG="build/release/Armadale-$version-local.dmg"
+    fi
 else
     DMG="build/release/Armadale-$version-unnotarized.dmg"
     FINAL_DMG="$DMG"
@@ -527,6 +551,19 @@ for file in "$APP" "$DMG"; do
     fi
     echo "$out" | sed 's/^/    /'
 done
+
+if [ "$skip_update_signature" = 1 ]; then
+    mv "$DMG" "$FINAL_DMG"
+    step "Done (no update signature)"
+    info "$FINAL_DMG ($(du -h "$FINAL_DMG" | cut -f1 | tr -d ' '))"
+    info "Armadale $version ($build) from commit $commit, notarized and stapled,"
+    info "but NOT signed for the updater and with no feed item: for installing on"
+    info "this Mac (scripts/install-release.sh --from-dmg). Not for publishing."
+    if [ -n "$schema_reminder" ]; then
+        info "REMINDER: $schema_reminder"
+    fi
+    exit 0
+fi
 
 # --- 6. Sign the update ---------------------------------------------------------
 # The stapled DMG is what GitHub will serve and Sparkle will download: its

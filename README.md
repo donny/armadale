@@ -677,7 +677,13 @@ To run the release build on this Mac, `scripts/install-release.sh` runs
 mounts the DMG and installs the app from it into `~/Applications`,
 replacing the copy there. It refuses while Armadale is running (quit it
 first; persistent sessions keep running). `--from-dmg` installs the DMG
-already in `build/release/` without building again.
+already in `build/release/` without building again. On a Mac that does
+not hold the update signing key, `scripts/install-release.sh
+--skip-update-signature` does the same without it: the app is signed,
+notarized and stapled as in a release, and only the DMG's signature for
+the updater and the feed's item are left out
+(`build/release/Armadale-<version>-local.dmg`, for that Mac, never for
+publishing).
 
 ### The website
 
