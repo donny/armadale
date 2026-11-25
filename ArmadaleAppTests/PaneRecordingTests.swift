@@ -2,6 +2,7 @@ import AppKit
 import ArmadaleCore
 import ArmadaleSessions
 import Foundation
+import SwiftUI
 @testable import SwiftTermSurface
 import TerminalSurface
 import Testing
@@ -189,7 +190,10 @@ struct PaneRecordingTests {
 
     // MARK: Header and tabs
 
-    @Test func theHeaderShowsTheRecordingAndItsStopButtonStopsIt() async throws {
+    /// The header shows the recording (a dot; no stop button: the pane
+    /// menu's Stop Recording stops it, the owner's decision of November 25,
+    /// 2026) and follows it through a title change.
+    @Test func theHeaderShowsTheRecordingAndTheMenuStopsIt() async throws {
         let settings = AppSettings.forTesting()
         defer { settings.removeTestDefaults() }
         let (model, registry, workspace, _) = makeRegistry(settings: settings)
@@ -208,53 +212,52 @@ struct PaneRecordingTests {
         // The title changes (the header's root view is replaced): still recording.
         model.setTitle("vim notes.txt", for: session)
         #expect(await eventually { pane.header.model.title == "vim notes.txt" && pane.header.model.isRecording })
-        pane.header.stopRecording()
+        let stop = try #require(pane.paneMenu().items.first { $0.identifier == PaneMenu.recordItemIdentifier } as? ActionMenuItem)
+        #expect(stop.title == "Stop Recording")
+        stop.handler()
         #expect(!pane.controller.isRecording)
         #expect(await eventually { !pane.header.model.isRecording })
         await pane.controller.close()
     }
 
-    /// The text gives way to the recording controls, which sit left of "…".
-    @Test func theRecordingControlsTakeTheirPlaceFromTheText() {
-        #expect(PaneCardStyle.recordingControlsWidth == 34)
-        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: true, isRecording: true) == 292)
+    /// The text gives way to the recording dot, which sits left of "…".
+    @Test func theRecordingDotTakesItsPlaceFromTheText() {
+        #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: true, isRecording: true) == 316)
         #expect(PaneCardStyle.headerTextSpace(headerWidth: 400, hasGlyph: true) == 332)
-        #expect(PaneCardStyle.headerTextSpace(headerWidth: 100, hasGlyph: true, isRecording: true) == 0, "never negative")
+        #expect(PaneCardStyle.headerTextSpace(headerWidth: 80, hasGlyph: true, isRecording: true) == 0, "never negative")
         let size = NSSize(width: 300, height: PaneCardStyle.headerHeight)
-        let stop = PaneCardStyle.stopButtonFrame(inHeaderOf: size)
+        let dot = PaneCardStyle.recordingDotFrame(inHeaderOf: size)
         let menu = PaneCardStyle.menuButtonFrame(inHeaderOf: size)
-        #expect(stop.maxX + PaneCardStyle.textSpacing == menu.minX)
-        #expect(stop.midY == menu.midY)
-        // The dot, the stop button and "…" all fit right of the text space.
-        let fixedRight = size.width - PaneCardStyle.headerTrailing - menu.width - PaneCardStyle.textSpacing
-            - PaneCardStyle.recordingControlsWidth
-        #expect(fixedRight >= PaneCardStyle.headerLeading + PaneCardStyle.glyphWidth + PaneCardStyle.textSpacing
-            + PaneCardStyle.headerTextSpace(headerWidth: size.width, hasGlyph: true, isRecording: true))
+        #expect(dot.maxX + PaneCardStyle.textSpacing == menu.minX)
+        #expect(dot.midY == menu.midY)
+        let all = PaneCardStyle.HeaderParts(glyph: true, title: true, dot: true)
+        #expect(PaneCardStyle.headerWidth(all, textWidth: 0) == CGFloat(400 - 316), "the same arithmetic as the text space")
     }
 
-    /// The give-way rule (``PaneCardStyle/headerParts(width:hasGlyph:isRecording:)``).
+    /// The give-way rule (``PaneCardStyle/headerParts(width:hasGlyph:isRecording:)``):
+    /// the directory, the title, the dot, the glyph; "…" always stays.
     @Test func thingsGiveWayInOrder() {
         func parts(_ width: CGFloat) -> PaneCardStyle.HeaderParts {
             PaneCardStyle.headerParts(width: width, hasGlyph: true, isRecording: true)
         }
         typealias Parts = PaneCardStyle.HeaderParts
-        #expect(parts(400) == Parts(glyph: true, title: true, dot: true, stop: true))
-        #expect(parts(140) == Parts(glyph: true, title: true, dot: true, stop: true))
-        #expect(parts(100) == Parts(glyph: true, title: false, dot: false, stop: true), "the title, then the dot")
-        #expect(parts(80) == Parts(glyph: false, title: false, dot: false, stop: true), "then the glyph")
-        #expect(parts(60) == Parts(), "\u{2026} alone")
+        #expect(parts(400) == Parts(glyph: true, title: true, dot: true))
+        #expect(parts(140) == Parts(glyph: true, title: true, dot: true))
+        #expect(parts(100) == Parts(glyph: true, title: false, dot: true), "the title first")
+        #expect(parts(70) == Parts(glyph: true, title: false, dot: false), "then the dot")
+        #expect(parts(50) == Parts(), "then the glyph: \u{2026} alone")
         #expect(parts(40) == Parts())
         // Never more than fits.
         for width in stride(from: CGFloat(38), through: 400, by: 1) {
             #expect(PaneCardStyle.headerWidth(parts(width)) <= width)
         }
-        #expect(PaneCardStyle.headerWidth(parts(400), textWidth: 400 - 108) == 400, "the text gets what the rule says")
+        #expect(PaneCardStyle.headerWidth(parts(400), textWidth: 400 - 84) == 400, "the text gets what the rule says")
     }
 
-    /// Drawn at 140, 100, 80, 60 and 40 pt: red only where the dot and the
-    /// stop button belong, nothing else drawn there, "…" always drawn, and
-    /// no red at all when only "…" fits.
-    @Test(arguments: [140, 100, 80, 60, 40] as [CGFloat])
+    /// Drawn at 140, 100, 70, 50 and 40 pt: red only where the dot belongs
+    /// and nothing else drawn there, "…" always drawn, no red where the dot
+    /// has given way.
+    @Test(arguments: [140, 100, 70, 50, 40] as [CGFloat])
     func aNarrowRecordingHeaderNeverOverlaps(width: CGFloat) throws {
         _ = NSApplication.shared
         var model = PaneHeaderModel(
@@ -272,10 +275,9 @@ struct PaneRecordingTests {
         header.layoutSubtreeIfNeeded()
         let size = header.bounds.size
         let parts = PaneCardStyle.headerParts(width: width, hasGlyph: true, isRecording: true)
-        let stop = PaneCardStyle.stopButtonFrame(inHeaderOf: size)
+        let dotFrame = PaneCardStyle.recordingDotFrame(inHeaderOf: size)
         let menu = PaneCardStyle.menuButtonFrame(inHeaderOf: size)
-        let dotStart = stop.minX - PaneCardStyle.recordingControlsSpacing - PaneCardStyle.recordingDotFrameWidth
-        let controls = (parts.dot ? dotStart : stop.minX)...stop.maxX
+        let dot = dotFrame.minX...dotFrame.maxX
         let rep = try #require(header.bitmapImageRepForCachingDisplay(in: header.bounds))
         header.cacheDisplay(in: header.bounds, to: rep)
         let scale = CGFloat(rep.pixelsWide) / size.width
@@ -293,17 +295,15 @@ struct PaneRecordingTests {
         }
         #expect(other.contains { $0 > menu.minX && $0 < menu.maxX }, "\u{2026} is drawn at \(width) pt")
         #expect(!other.contains { $0 > menu.maxX + 0.5 }, "nothing past \u{2026}")
-        if parts.stop {
-            #expect(red.allSatisfy { controls.contains($0) }, "red only at the controls: \(red.min() ?? 0)–\(red.max() ?? 0) in \(controls)")
-            #expect(red.contains { $0 > stop.minX }, "the stop button")
-            #expect(red.contains { $0 < stop.minX } == parts.dot, "the dot only when it fits")
-            #expect(!other.contains { controls.contains($0) }, "nothing else over the controls at \(width) pt")
+        if parts.dot {
+            #expect(!red.isEmpty && red.allSatisfy { dot.contains($0) }, "red only at the dot: \(red.min() ?? 0)–\(red.max() ?? 0) in \(dot)")
+            #expect(!other.contains { dot.contains($0) }, "nothing else over the dot at \(width) pt")
         } else {
-            #expect(red.isEmpty, "\u{2026} alone at \(width) pt")
+            #expect(red.isEmpty, "no dot at \(width) pt")
         }
         if parts.title {
             let textStart = PaneCardStyle.headerLeading + PaneCardStyle.glyphWidth + PaneCardStyle.textSpacing
-            #expect(other.contains { $0 > textStart && $0 < controls.lowerBound }, "the title, truncated")
+            #expect(other.contains { $0 > textStart && $0 < dot.lowerBound }, "the title, truncated")
         }
     }
 
@@ -390,6 +390,126 @@ struct PaneRecordingTests {
         #expect(dot.restingOpacity == 1, "and full")
         NotificationCenter.default.post(name: NSApplication.didUnhideNotification, object: NSApp)
         #expect(!dot.isPulsing, "still steady after an unhide")
+    }
+
+    // MARK: The dots' clock, the sidebar's dot, the tab bar's rule
+
+    /// One clock for every pulse: whenever a dot is started, its pulse is
+    /// said to have begun at the last multiple of the period, so any two
+    /// dots are in phase.
+    @Test func everyPulseIsOnOneClock() {
+        let period = RecordingPulse.period
+        for now in [0, 0.3, 1.6, 7.25, 12345.678, 98765.4321] as [CFTimeInterval] {
+            let begin = RecordingPulse.alignedBeginTime(now: now)
+            #expect(begin <= now && now - begin < period)
+            #expect(abs(RecordingPulse.phase(at: begin)) < 1e-6 || abs(RecordingPulse.phase(at: begin) - period) < 1e-6)
+        }
+        // Two pulses started at different times are at the same point of
+        // their cycle at any later time.
+        let first = RecordingPulse.alignedBeginTime(now: 100.37), second = RecordingPulse.alignedBeginTime(now: 203.91)
+        for time in [210.0, 211.1, 333.333] as [CFTimeInterval] {
+            let a = (time - first).truncatingRemainder(dividingBy: period)
+            let b = (time - second).truncatingRemainder(dividingBy: period)
+            #expect(abs(a - b) < 1e-6)
+        }
+        #expect(abs(RecordingPulse.phase(at: -0.4) - 1.2) < 1e-9, "never negative")
+    }
+
+    private func window(showing view: NSView, width: CGFloat = 120, height: CGFloat = 40) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        view.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        view.layoutSubtreeIfNeeded()
+        return window
+    }
+
+    private func dots(_ view: NSView) -> [PulsingDotView] {
+        (view as? PulsingDotView).map { [$0] } ?? view.subviews.flatMap(dots)
+    }
+
+    /// Two dots made at different times, in different windows, a restart
+    /// of one: their pulses begin on the same clock.
+    @Test func twoDotsPulseInStep() async throws {
+        _ = NSApplication.shared
+        let original = PulsingDotView.reducesMotion
+        defer { PulsingDotView.reducesMotion = original }
+        PulsingDotView.reducesMotion = { false }
+        let first = PulsingDotView(diameter: 8)
+        let firstWindow = window(showing: first)
+        defer { firstWindow.close() }
+        try await Task.sleep(for: .milliseconds(370))
+        let second = PulsingDotView(diameter: 6)
+        let secondWindow = window(showing: second)
+        defer { secondWindow.close() }
+        let period = RecordingPulse.period
+        func offset(_ a: PulsingDotView, _ b: PulsingDotView) throws -> CFTimeInterval {
+            let difference = try #require(a.pulseBeginTime) - (try #require(b.pulseBeginTime))
+            let phase = RecordingPulse.phase(at: difference)
+            return min(phase, period - phase)
+        }
+        #expect(try offset(first, second) < 1e-6, "in step")
+        try await Task.sleep(for: .milliseconds(530))
+        first.restartPulse()
+        #expect(try offset(first, second) < 1e-6, "a restart keeps the phase")
+    }
+
+    /// The sidebar's dot pulses (6 pt), comes back when a SwiftUI update
+    /// finds it without its animation (a reused List row), and is steady
+    /// with Reduce Motion.
+    @Test func theSidebarsDotPulses() throws {
+        _ = NSApplication.shared
+        let original = PulsingDotView.reducesMotion
+        defer { PulsingDotView.reducesMotion = original }
+        PulsingDotView.reducesMotion = { false }
+        let host = NSHostingView(rootView: RecordingDot(pulses: true))
+        let window = window(showing: host)
+        defer { window.close() }
+        let dot = try #require(dots(host).first)
+        #expect(dot.diameter == RecordingDot.size)
+        #expect(dot.isPulsing && dot.restingOpacity == 1)
+        // A SwiftUI update of the same view (as a reused row gets) finds it
+        // without its animation and adds it again.
+        let reused = NSHostingView(rootView: PulsingDot(diameter: 6))
+        let reusedWindow = self.window(showing: reused)
+        defer { reusedWindow.close() }
+        let reusedDot = try #require(dots(reused).first)
+        reusedDot.layer?.removeAnimation(forKey: PulsingDotView.animationKey)
+        reused.rootView = PulsingDot(diameter: 7)
+        reused.layoutSubtreeIfNeeded()
+        #expect(reusedDot.isPulsing, "an update brings the pulse back")
+        #expect(reusedDot.diameter == 7)
+        PulsingDotView.reducesMotion = { true }
+        NSWorkspace.shared.notificationCenter.post(
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: NSWorkspace.shared)
+        #expect(!dot.isPulsing && dot.restingOpacity == 1, "steady and full with Reduce Motion")
+        // The tab bar's dot is steady: no animated view at all.
+        let steady = NSHostingView(rootView: RecordingDot())
+        let steadyWindow = self.window(showing: steady)
+        defer { steadyWindow.close() }
+        #expect(dots(steady).isEmpty)
+    }
+
+    /// The tab bar shows its dot only while the window's sidebar is hidden,
+    /// and follows the sidebar when it is toggled.
+    @Test func theTabBarsDotFollowsTheSidebar() async throws {
+        #expect(!TabBarStyle.showsRecordingDot(isRecording: true, isSidebarShowing: true))
+        #expect(TabBarStyle.showsRecordingDot(isRecording: true, isSidebarShowing: false))
+        #expect(!TabBarStyle.showsRecordingDot(isRecording: false, isSidebarShowing: false))
+        let settings = AppSettings.forTesting()
+        defer { settings.removeTestDefaults() }
+        let (model, registry, workspace, _) = makeRegistry(settings: settings)
+        let controller = WorkspaceWindowController(model: model, workspaceID: workspace, registry: registry)
+        defer { controller.close() }
+        let split = try #require(controller.window?.contentViewController as? NSSplitViewController)
+        let sidebar = try #require(split.splitViewItems.first)
+        #expect(controller.actions.chrome.isSidebarShowing == !sidebar.isCollapsed)
+        sidebar.isCollapsed = true
+        #expect(await eventually { !controller.actions.chrome.isSidebarShowing }, "hidden")
+        sidebar.isCollapsed = false
+        #expect(await eventually { controller.actions.chrome.isSidebarShowing }, "shown again")
     }
 
     /// The tab's dot: shown while any of the tab's panes records.

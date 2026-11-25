@@ -372,6 +372,15 @@ struct TabBarView: View {
 /// appearances; the native bar's own tints are not exposed as named
 /// system colours.
 enum TabBarStyle {
+    /// Whether a tab shows its steady recording dot (DESIGN §8, "Recording
+    /// a pane"): only while the window's sidebar is hidden. With the
+    /// sidebar showing, its tab row's pulsing dot says it, and one red mark
+    /// per recording is enough (the owner, November 25, 2026); hidden, the
+    /// tab bar's dot is all that shows a recording in a background tab.
+    static func showsRecordingDot(isRecording: Bool, isSidebarShowing: Bool) -> Bool {
+        isRecording && !isSidebarShowing
+    }
+
     /// The native tab bar's height (a window grows by 36 pt when it shows one).
     static let height: CGFloat = 36
     static let trackHeight: CGFloat = 28
@@ -620,6 +629,8 @@ private struct TabItemView: View {
         let status = registry.glyphStatus(of: sessions)
         let needsAttention = Self.needsAttention(tab, registry: registry)
         let isRecording = registry.isRecording(tab)
+        let showsRecordingDot = TabBarStyle.showsRecordingDot(
+            isRecording: isRecording, isSidebarShowing: actions.chrome.isSidebarShowing)
         HStack(spacing: 6) {
             StatusGlyph(status: sessions.isEmpty ? nil : status)
             HostBadge(hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions))
@@ -633,7 +644,7 @@ private struct TabItemView: View {
                     .truncationMode(.middle)
                     .foregroundStyle(titleStyle)
             }
-            if isRecording { RecordingDot() }
+            if showsRecordingDot { RecordingDot() }
             if tab.layout.isSplit {
                 Image(systemName: tab.zoomedPaneID == nil ? "rectangle.split.2x1" : "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 9))
@@ -728,6 +739,8 @@ private struct TabItemView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { actions.select(tab: tab.id) }
         .accessibilityAction(named: "Rename") { actions.beginRename(.tab(tab.id), on: .tabBar) }
+        // "Recording" is said with the sidebar showing too, where no dot is.
+        .accessibilityValue(isRecording && !showsRecordingDot ? "Recording" : "")
     }
 
     /// Primary on the selected tab, dimmer on the others, and tertiary on

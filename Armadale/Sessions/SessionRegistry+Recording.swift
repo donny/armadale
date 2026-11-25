@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 private let recordingLog = Logger(subsystem: "com.tinylittleapps.armadale", category: "recording")
 
 /// Recording a pane (docs/DESIGN.md section 8, "Recording a pane"): the
-/// pane menu's Record Pane… and Stop Recording, the header's stop button,
+/// pane menu's Record Pane… and Stop Recording, the header's dot,
 /// the tab's dot, and a recording that stopped because its file could not
 /// be written. The recording itself is the controller's
 /// (``SessionController/startRecording(to:title:)``, section 7).
@@ -37,11 +37,6 @@ extension SessionRegistry {
         try controller.startRecording(to: url, title: displayName(of: controller.session))
         recordingWriters.removeAll { $0.isClosed }
         if let writer = controller.recordingWriter { recordingWriters.append(writer) }
-    }
-
-    /// Stop Recording (the pane menu, the header's stop button).
-    func stopRecording(session: SessionID) {
-        controllers[session]?.stopRecording()
     }
 
     /// Whether any of `sessions` is being recorded: the tab bar's and the

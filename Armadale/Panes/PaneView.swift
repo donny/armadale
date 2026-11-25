@@ -111,7 +111,6 @@ final class PaneView: NSView {
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusTerminal() }
         header.makeMenu = { [weak self] in self?.paneMenu() }
-        header.stopRecording = { [weak controller] in controller?.stopRecording() }
         addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]

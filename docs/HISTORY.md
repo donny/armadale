@@ -3279,6 +3279,44 @@ GitHub and not in the update feed.** The version went from 0.1.2 to
   Release, the feed's item, the tag and its state fixture (README,
   "Releasing").
 
+## November 25, 2026: fewer red marks while recording
+
+The owner, on seeing a recording in the installed 0.1.3 (31): "This
+feels a bit too busy with too many red icons." One recording showed
+four red marks: a dot on its tab in the tab bar, one on its row in the
+sidebar, and a dot and a stop button in the pane's header.
+
+- **Decided.** The owner's three changes: the header loses its stop
+  button (Stop Recording in the pane menu ends a recording); the tab
+  bar loses its dot; the sidebar's dot stays and pulses. Asked by the
+  coordinator what should show a recording in a background tab while
+  the sidebar is hidden, he kept the tab bar's steady dot for that case
+  alone. The coordinator added that every pulsing dot runs on one
+  clock, so the header's and the sidebar's rise and fall together. One
+  recording now shows two red marks (Part 2, section 8).
+- **Built** by the implementer, with no separate reviewer: the
+  coordinator read the change and looked at the screenshots.
+  `PulsingDot.swift` (the pulse and its one clock), `WindowChrome`
+  (whether a window's sidebar is showing, key-value observed from the
+  split view item), the header and its narrow order without the button.
+- **Checked.** Gate: 1023 tests, no warning from Armadale's code. Live,
+  on a test copy with a bundle identifier of its own, by accessibility
+  presses and window screenshots. With the sidebar showing: a dot in
+  the header and on the sidebar's row, none in the tab bar. In eight
+  shots 0.2 s apart the two dots rose and fell together (their opacity
+  0.32 and 0.38, 0.78 and 0.82, 0.84 and 0.87, 0.40 and 0.45, 0.21 and
+  0.28, and so on). The sidebar hidden from the View menu: a steady dot
+  on the tab bar's tab, gone again when the sidebar came back. A second
+  recording in a background tab: its row pulsing in step with the
+  first. Stop Recording from the pane menu ended each, and the dots
+  went. A pane about 98 pt wide showed the glyph, the dot and "…"; one
+  about 46 pt wide "…" alone. CPU 0 % with two recordings. Not seen:
+  Reduce Motion, the restarts after an unhide or an occlusion change,
+  VoiceOver itself.
+- **Found.** The toolbar's sidebar button answered an accessibility
+  press with "unsupported action"; the View menu's item hides and shows
+  the sidebar.
+
 ---
 
 # Part 2: the history of each design section
@@ -4163,6 +4201,29 @@ notifications from `SessionController` to the app's `AttentionCenter`.
 
 
 ## 8. Windows and views
+
+**November 25, 2026. Fewer red marks (the owner's decision).** After
+seeing a recording in the installed build (0.1.3) the owner found the
+indicators "too busy with too many red icons": one recording showed four
+red marks, a dot in the tab bar, a dot in the sidebar, and a dot and a
+stop button in the header. Decided by the owner: the header has no stop
+button (a recording is stopped with the pane menu's Stop Recording, from
+"…" or a right-click on the header; removed with it: the header's stop
+wiring through `PaneHeaderView`, its hosting view and `PaneView`,
+`PaneCardStyle.stopButtonFrame`, `recordingControlsWidth` and the stop
+button's place in `headerParts`); the tab bar shows no dot while the
+sidebar is showing, but keeps its steady dot while the sidebar is hidden,
+because otherwise a recording in a background tab would show nowhere
+(the owner's answer to the coordinator's question); the sidebar's dot
+pulses like the header's. Added by the coordinator: every pulsing dot
+pulses in step, on one clock (`RecordingPulse.alignedBeginTime`), since
+the sidebar's dot and the header's dot of one recording are on screen
+together and two dots drifting against each other would look careless.
+Whether the sidebar shows is followed by key-value observing the sidebar
+split view item's `isCollapsed` into an observable `WindowChrome` the tab
+bar reads: no polling, and the persisted `WindowState.sidebarCollapsed`
+is only written with a delay. The narrow order is now: directory, title,
+dot, glyph, with "…" always there.
 
 **November 24, 2026, live pass. The dot at rest.** Seen in the
 reviewer's live pass: the pulse ran after a title change, a tab switch

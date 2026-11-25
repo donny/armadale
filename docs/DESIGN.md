@@ -84,8 +84,9 @@ Each tab row carries a status glyph:
 | ⚠ unavailable | the persistent runtime could not be set up, or the session's host was removed |
 | starting (dotted circle) | not attached yet: starting or connecting, a new session whose pane has not been shown, or a restored one that is not attached while its location's first listing has not answered (or did not list it) |
 
-A tab row (in the sidebar and in the tab bar) also shows a small steady
-red dot while any of its panes is recorded (section 8, "Recording a
+A tab row in the sidebar also shows a small pulsing red dot while any of
+its panes is recorded, and a tab in the tab bar a small steady one, but
+only while the window's sidebar is hidden (section 8, "Recording a
 pane"); it is not a state and takes no part in the precedence below.
 
 The glyph is shared by the sidebar's tab rows and the tab bar
@@ -2188,7 +2189,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   to move it. Tabs share the track's whole width equally (at least 110 pt)
   and scroll when they do not fit; each shows its status glyph, title
   (custom, else session title, else profile name), a small steady red dot
-  while any of its panes is recorded ("Recording a pane" below), a split/zoom hint, and
+  while any of its panes is recorded and the window's sidebar is hidden
+  ("Recording a pane" below), a split/zoom hint, and
   ⌘1…⌘8 badges on the first eight tabs and ⌘9 on the last tab when it is
   the ninth or later, which turn into a close button on
   hover. Click selects; dropping a tab on another takes its position (from
@@ -2493,8 +2495,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   semibold at 70 % opacity, then the **working directory** (`~`-abbreviated,
   from the directory the registry records; nothing while unknown) in
   12 pt regular at 55 %, both truncated in the middle; right, while the
-  pane is recorded, a **red dot that pulses** and a **stop button**
-  ("Recording a pane" below), and a **"…" button** (`ellipsis` symbol,
+  pane is recorded, a **red dot that pulses** ("Recording a pane" below;
+  the "…" menu's Stop Recording stops it), and a **"…" button** (`ellipsis` symbol,
   shown at 55 %, full opacity on hover) that opens `paneMenu()` as a
   pull-down below itself. A **right-click anywhere
   on the header** (or a Control-click, `menu(for:)`, standard AppKit; the
@@ -2598,8 +2600,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   row leaves them (`PaneCardStyle.headerTextSpace`: the header less 68 pt
   with a glyph, 10 leading, 12 glyph and 6, 6 on each side of the flexible
   space, 24 for "…" and 4 trailing; less 50 pt without a glyph; a
-  recording pane's controls take 40 pt more, `recordingControlsWidth` 34
-  and 6 after them) by the rule above. That is the arithmetic of the
+  recording pane's dot takes 16 pt more, 10 for it and 6 after it) by the
+  rule above. That is the arithmetic of the
   header's row with everything shown: the view lays out its parts in an
   `HStack` with those fixed widths and gaps and a flexible space (at
   least 12 pt after the text), and the text gets what is left; which
@@ -2682,14 +2684,16 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   `WorkspaceActions.recordPanelPresenter` (sheets on the window), which
   the tests replace so they put nothing on screen.
   *The header.* While the pane records, its header shows, right of the
-  text and left of "…", a red dot (8 pt, in a 10 pt frame) that pulses
-  (its opacity swings between full and 25 % and back every 1.6 s,
-  `RecordingPulse`) and a stop button (20 × 20 pt, `stop.fill`,
-  `PaneCardStyle.stopButtonFrame`), both in the system red, not the
-  theme's foreground. The stop button's tooltip and accessibility label
-  are "Stop Recording", the dot's "Recording". The pulse is a Core
-  Animation opacity animation on the dot's layer (`PulsingDotView`, an
-  `NSViewRepresentable`), which the render server runs with no SwiftUI
+  text and left of "…", a red dot (8 pt, in a 10 pt frame,
+  `PaneCardStyle.recordingDotFrame`) that pulses (its opacity swings
+  between full and 25 % and back every 1.6 s, `RecordingPulse`), in the
+  system red, not the theme's foreground; its tooltip and accessibility
+  label are "Recording". There is no stop button: a recording is stopped
+  with the pane menu's Stop Recording ("…" or a right-click on the
+  header). The pulse is a Core
+  Animation opacity animation on the dot's layer (`PulsingDotView` in
+  `Panes/PulsingDot.swift`, through the `NSViewRepresentable` `PulsingDot`),
+  which the render server runs with no SwiftUI
   update per frame; the view is kept when the header's root view is
   replaced (a title or directory change), so the pulse goes on. The
   layer's own opacity is full and the animation runs from full down to
@@ -2701,35 +2705,54 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   (`NSApplication.didUnhideNotification`). The dot pulses in a window
   that is visible but not key. It is steady with Reduce Motion, following a change of
   that setting (`NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`).
+  *One clock.* Every pulsing dot (the header's, every sidebar row's, in
+  any window) pulses in step: each pulse is begun at the last multiple
+  of the period in media time (`RecordingPulse.alignedBeginTime`, from
+  `CACurrentMediaTime()`, converted to the layer's time), so any two
+  dots are in phase however and whenever each was started or restarted,
+  and a restart does not show.
   *A narrow header.* As the header narrows, things give way in this
   order: the directory, the title (below 24 pt), the dot, the status
-  glyph; the stop button stays with "…" until even the two do not fit,
-  and then "…" alone shows (its menu has Stop Recording). Nothing ever
+  glyph; "…" always stays. Nothing ever
   overlaps (`PaneCardStyle.headerParts(width:hasGlyph:isRecording:)`,
   `headerWidth`, which the header reads from its width through a
   `GeometryReader`; at 140 pt everything shows with the title
-  truncated, at 100 pt the glyph, the stop button and "…", at 80 pt the
-  stop button and "…", at 60 and 40 pt "…" alone). So at 60 pt and below
-  the header shows nothing of a recording (measured in review): the
-  tab's red dot is what says it then, and the "…" menu's Stop Recording
-  stops it.
+  truncated, at 100 pt the glyph, the dot and "…", at 70 pt the glyph
+  and "…", at 50 and 40 pt "…" alone). So below 78 pt the header shows
+  nothing of a recording: the tab's dot is what says it then (the
+  sidebar's, or the tab bar's with the sidebar hidden), and the "…"
+  menu's Stop Recording stops it.
   `SessionRegistry.headerModel(for:)` reads the controller's `recording`,
   so the header follows it.
-  *The tab.* A tab row in the tab bar and in the sidebar shows a small
-  steady red dot (`RecordingDot`, 6 pt, after the title) while any of the
-  tab's panes is recorded (`SessionRegistry.isRecording(_ tab:)`), also
-  with the tab in the background; "Recording" joins the row's
-  accessibility text. Tab group and workspace rows show nothing. It is
-  not a `SessionStatus` and takes no part in the glyph's precedence.
-  The words of the menu item and the controls are Record Pane…, Stop
+  *The tab.* While any of a tab's panes is recorded
+  (`SessionRegistry.isRecording(_ tab:)`), also with the tab in the
+  background, its row in the sidebar shows a small red dot that pulses
+  (`RecordingDot(pulses: true)`, 6 pt, after the title, a `PulsingDot`
+  with the header's pulse, restarts and clock; each SwiftUI update makes
+  sure it pulses, so a row the List reuses pulses too; steady with Reduce
+  Motion). The tab bar's tab shows a small steady red dot (6 pt, after the
+  title) only while the window's sidebar is hidden
+  (`TabBarStyle.showsRecordingDot`): with the sidebar showing, one mark
+  per recording in the window's chrome is enough; hidden, the tab bar's
+  dot is all that shows a recording in a background tab. It follows the
+  sidebar live: the window controller observes its sidebar split view
+  item's `isCollapsed` (key-value observing) into the window's
+  `WindowChrome.isSidebarShowing`, which the tab bar reads. "Recording"
+  is in the row's accessibility text either way (the dot's label, or the
+  tab's accessibility value when the dot is not shown). Tab group and
+  workspace rows show nothing. It is not a `SessionStatus` and takes no
+  part in the glyph's precedence.
+  The words of the menu item and the dots are Record Pane…, Stop
   Recording and Recording; the runtime is never named.
   Tested in `PaneRecordingTests` (the item's title and state per case and
   its absence in an empty pane and in the application's menus, the save
   sheet opened from a terminal pane's menu and ended by a quit and by its
   pane closing, the header following the recording through a title change
-  and its stop button, the give-way rule and the header drawn at 140, 100,
-  80, 60 and 40 pt, the dot's animation kept through a title change, the
-  tab's dot, problems told one at a time, a file in use refused, the
+  and the menu's Stop Recording, the give-way rule and the header drawn at
+  140, 100, 70, 50 and 40 pt, the dot's animation kept through a title
+  change, the common clock (two dots started apart and a restart in
+  step), the sidebar's pulsing dot, the tab bar's rule following a
+  sidebar toggle, the tab's dot, problems told one at a time, a file in use refused, the
   suggested name with an emoji title, five recordings asked for inside a
   sequence or a character (the pane undisturbed, playback equal to it),
   and two scripted sessions through a real controller and SwiftTerm
@@ -4359,7 +4382,8 @@ armadale/
 │   │                                chooser), NewSessionSheet + NewSessionForm (the dialog),
 │   │                                PaneMenu (the pane context menu builder, PaneThemeBinding,
 │   │                                ActionMenuItem), PaneCardStyle + PaneHeaderView (pane cards:
-│   │                                geometry and borders, the header and its hosting view)
+│   │                                geometry and borders, the header and its hosting view),
+│   │                                PulsingDot (a recording's pulsing dot and its common clock)
 │   ├── Sessions/                    SessionRegistry (a controller per session, starting;
 │   │                                RemoteSessionSupport), SessionRegistry+Ending (closing and
 │   │                                ending), SessionRegistry+Status (status and close risk),

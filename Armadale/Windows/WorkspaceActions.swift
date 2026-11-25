@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import ArmadaleCore
 import SwiftUI
 
@@ -8,6 +9,15 @@ import SwiftUI
 /// confirmation everywhere), and drag and drop. Model
 /// changes go through ``AppModel`` intents; sessions closed here are ended
 /// by the ``SessionRegistry``.
+/// What the window's own chrome shows, for the views in it to follow.
+@MainActor
+@Observable
+final class WindowChrome {
+    /// Whether the sidebar is showing (not collapsed); the window
+    /// controller keeps it current from its split view item.
+    var isSidebarShowing = true
+}
+
 @MainActor
 final class WorkspaceActions {
     let model: AppModel
@@ -15,6 +25,8 @@ final class WorkspaceActions {
     let workspaceID: WorkspaceID
     /// The window's inline rename, observed by its sidebar and tab bar.
     let rename: InlineRename
+    /// The window's chrome (whether its sidebar shows), observed by its tab bar.
+    let chrome = WindowChrome()
     /// Where sheets go.
     weak var window: NSWindow?
     /// Brings a workspace's window to front, opening it if it is closed.

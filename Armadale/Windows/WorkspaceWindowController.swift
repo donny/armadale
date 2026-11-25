@@ -79,6 +79,8 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
     private let registry: SessionRegistry
     private let splitViewController = NSSplitViewController()
     private let sidebarItem: NSSplitViewItem
+    /// Follows the sidebar's collapse for ``WindowChrome``.
+    private var sidebarObservation: NSKeyValueObservation?
     private let content: ContentViewController
     private var titleTask: Task<Void, Never>?
     /// Debounced report of geometry changes that end without a live resize
@@ -164,6 +166,19 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         restoreWindowState()
         observeTitles()
         observeGeometry()
+        observeSidebar()
+    }
+
+    /// Keeps ``WindowChrome/isSidebarShowing`` current: the sidebar's split
+    /// view item is key-value observable for `isCollapsed` (the toolbar's
+    /// toggle, ⌃⌘S, a restored state, a drag to collapse).
+    private func observeSidebar() {
+        let chrome = actions.chrome
+        chrome.isSidebarShowing = !sidebarItem.isCollapsed
+        sidebarObservation = sidebarItem.observe(\.isCollapsed, options: [.new]) { item, _ in
+            let collapsed = item.isCollapsed
+            MainActor.assumeIsolated { chrome.isSidebarShowing = !collapsed }
+        }
     }
 
     /// Whether a sheet (the New Session or Edit Favorite dialog) may be put

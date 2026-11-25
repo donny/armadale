@@ -70,19 +70,29 @@ struct StatusGlyph: View {
     static let attentionColor = Color.purple
 }
 
-/// A small steady red dot on a tab row (tab bar and sidebar) while any of
-/// the tab's panes is being recorded (DESIGN §8, "Recording a pane"). Not
-/// a status: it stands beside the glyph and takes no part in its
+/// A tab's recording dot (DESIGN §8, "Recording a pane"), 6 pt, while any
+/// of the tab's panes is being recorded: in the sidebar's tab row it
+/// pulses, in step with every other recording dot (``PulsingDot``); in the
+/// tab bar it is steady and shows only while the window's sidebar is
+/// hidden (``TabBarStyle/showsRecordingDot(isRecording:isSidebarShowing:)``).
+/// Not a status: it stands beside the glyph and takes no part in its
 /// precedence. Its accessibility label, "Recording", joins the row's.
 struct RecordingDot: View {
     nonisolated static let size: CGFloat = 6
+    var pulses = false
 
     var body: some View {
-        Circle()
-            .fill(Color(nsColor: .systemRed))
-            .frame(width: Self.size, height: Self.size)
-            .help("Recording")
-            .accessibilityLabel("Recording")
+        Group {
+            if pulses {
+                PulsingDot(diameter: Self.size)
+            } else {
+                Circle().fill(Color(nsColor: .systemRed))
+            }
+        }
+        .frame(width: Self.size, height: Self.size)
+        .help("Recording")
+        .accessibilityElement()
+        .accessibilityLabel("Recording")
     }
 }
 

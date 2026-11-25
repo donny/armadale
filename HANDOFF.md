@@ -53,8 +53,10 @@ On November 24, 2026 recording a pane was built at the owner's request
 test build ("From finished changes" below has what is left), not
 released. On November 25, 2026 main was built as 0.1.3 (31), notarized
 and installed on the owner's word; it is not tagged or published (the
-status list below).
-The last gate run: 1019 tests, no warning from Armadale's code.
+status list below). The same day, after the owner had seen a recording
+in that build, its red marks were cut from four to two (the status
+list below); that change is in no build yet.
+The last gate run: 1023 tests, no warning from Armadale's code.
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -95,6 +97,12 @@ under it, their commits:
   installed; not tagged, not on GitHub, not in the update feed
   (`docs/HISTORY.md`, "Armadale 0.1.3 (31), built and notarized, not
   published").
+- November 25, 2026: fewer red marks while recording, by the owner's
+  decision on seeing it: no stop button in the header (Stop Recording
+  in the pane menu), no dot in the tab bar unless the sidebar is hidden,
+  the sidebar's dot pulsing, every dot on one clock (`docs/HISTORY.md`,
+  "fewer red marks while recording"). Checked live on a test build; not
+  in the installed 0.1.3 (31).
 
 ## Next
 

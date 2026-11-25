@@ -81,12 +81,11 @@ enum PaneCardStyle {
     /// everything but the padding, the glyph if any, the "…" button and the
     /// spacing (``textSpacing`` on each side of the flexible space before
     /// the button): the header less 68 pt with a glyph, 50 pt without; a
-    /// recording pane's controls (``recordingControlsWidth``) and the
-    /// spacing after them take 40 pt more.
+    /// recording pane's dot and the spacing after it take 16 pt more.
     /// ``headerTextWidths(available:title:directory:)`` divides it.
     static func headerTextSpace(headerWidth: CGFloat, hasGlyph: Bool, isRecording: Bool = false) -> CGFloat {
         let glyph = hasGlyph ? glyphWidth + textSpacing : 0
-        let recording = isRecording ? recordingControlsWidth + textSpacing : 0
+        let recording = isRecording ? recordingDotFrameWidth + textSpacing : 0
         let fixed = headerLeading + glyph + 2 * textSpacing + recording + headerButtonSize.width + headerTrailing
         return max(headerWidth - fixed, 0)
     }
@@ -94,14 +93,12 @@ enum PaneCardStyle {
     /// What a header shows besides "…", which is always there (DESIGN §8,
     /// "Pane cards"): as the header narrows, things give way in this order:
     /// the directory (``headerTextWidths(available:title:directory:)``),
-    /// the title, the recording dot, the status glyph; the stop button
-    /// stays with "…" until even the two do not fit, and then "…" alone
-    /// (its menu has Stop Recording). Nothing overlaps.
+    /// the title, the recording dot, the status glyph. Nothing overlaps.
+    /// A recording is stopped from the "…" menu's Stop Recording.
     struct HeaderParts: Equatable {
         var glyph = false
         var title = false
         var dot = false
-        var stop = false
     }
 
     /// The least width the title is shown in; below it, it goes.
@@ -118,21 +115,15 @@ enum PaneCardStyle {
         var width = headerLeading + headerButtonSize.width + headerTrailing + headerGap(parts)
         if parts.glyph { width += glyphWidth + textSpacing }
         if parts.title { width += textWidth }
-        if parts.dot { width += recordingDotFrameWidth + recordingControlsSpacing }
-        if parts.stop { width += stopButtonSize.width + textSpacing }
+        if parts.dot { width += recordingDotFrameWidth + textSpacing }
         return width
     }
 
-    /// What a header `width` wide shows (``HeaderParts``).
+    /// What a header `width` wide shows (``HeaderParts``): the glyph first,
+    /// then the dot, then the title, each only while all before it fit.
     static func headerParts(width: CGFloat, hasGlyph: Bool, isRecording: Bool) -> HeaderParts {
         var parts = HeaderParts()
         func fits(_ candidate: HeaderParts) -> Bool { headerWidth(candidate) <= width }
-        if isRecording {
-            var next = parts
-            next.stop = true
-            guard fits(next) else { return parts }
-            parts = next
-        }
         if hasGlyph {
             var next = parts
             next.glyph = true
@@ -153,25 +144,19 @@ enum PaneCardStyle {
 
     // MARK: Recording
 
-    /// The recording dot's diameter, and the width it is laid out in.
+    /// The header's recording dot's diameter, and the width it is laid out in.
     static let recordingDotSize: CGFloat = 8
     static let recordingDotFrameWidth: CGFloat = 10
-    /// The stop button's clickable size.
-    static let stopButtonSize = NSSize(width: 20, height: 20)
-    /// Between the dot and the stop button.
-    static let recordingControlsSpacing: CGFloat = 4
-    /// The dot, the spacing and the stop button: 34 pt.
-    static let recordingControlsWidth: CGFloat = recordingDotFrameWidth + recordingControlsSpacing + stopButtonSize.width
 
-    /// The stop button's frame in the header of a recording pane, `size`
+    /// The recording dot's frame in the header of a recording pane, `size`
     /// big, in flipped coordinates (as ``menuButtonFrame(inHeaderOf:)``):
     /// ``textSpacing`` left of the "…" button, vertically centred.
-    static func stopButtonFrame(inHeaderOf size: NSSize) -> NSRect {
+    static func recordingDotFrame(inHeaderOf size: NSSize) -> NSRect {
         let menu = menuButtonFrame(inHeaderOf: size)
-        let top = (min(size.height, headerHeight) - stopButtonSize.height) / 2
+        let top = (min(size.height, headerHeight) - recordingDotFrameWidth) / 2
         return NSRect(
-            x: menu.minX - textSpacing - stopButtonSize.width, y: top,
-            width: stopButtonSize.width, height: stopButtonSize.height)
+            x: menu.minX - textSpacing - recordingDotFrameWidth, y: top,
+            width: recordingDotFrameWidth, height: recordingDotFrameWidth)
     }
 
     /// Where the "…" button's pull-down menu opens, in a header of `size`

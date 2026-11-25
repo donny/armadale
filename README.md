@@ -105,8 +105,9 @@ What works today:
   where to save, and from then on everything the pane shows (its output
   only, never what you type) goes into an asciicast `.cast` file, the
   format `asciinema play` reads, starting from what is on screen. While it
-  records, the pane's header shows a pulsing red dot and a stop button, and
-  its tab a red dot; **Stop Recording** is in the same menu. The recording
+  records, the pane's header and its tab's row in the sidebar show a red
+  dot pulsing in step (with the sidebar hidden, the tab in the tab bar shows
+  a steady one); **Stop Recording** is in the same menu. The recording
   also ends with the session, when the pane closes, and when Armadale quits;
   the file holds whole lines only, and a quit waits up to a second for it to
   be written (a disk that stalls longer keeps what was written by then). See
