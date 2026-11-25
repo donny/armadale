@@ -84,7 +84,7 @@ under it, their commits:
   live and fixed after each; the gate passes with 1019 tests ("From
   finished changes" below has what was not seen live).
 - November 24, 2026: a tab in the tab bar answers an accessibility
-  press by selecting its tab, and has a Rename action (`docs/HISTORY.md`,
+  press by selecting its tab, and has a Rename action, 72e38d8 (`docs/HISTORY.md`,
   "the tab bar's tabs answer an accessibility press"). Checked live by
   accessibility presses on a test build; VoiceOver itself was not used.
 

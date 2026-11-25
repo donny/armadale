@@ -3204,7 +3204,7 @@ the review; not committed when this was written.
   disconnected pane becoming unavailable ends a recording that was
   waiting there. Gate: 1019 tests, no warning from Armadale's code.
 
-## November 24, 2026: the tab bar's tabs answer an accessibility press
+## November 24, 2026: the tab bar's tabs answer an accessibility press (72e38d8)
 
 Found in the live pass of recording a pane, and so before that change: a
 tab in the tab bar answered an accessibility press with success and did
