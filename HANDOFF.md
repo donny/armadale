@@ -54,8 +54,9 @@ test build ("From finished changes" below has what is left), not
 released. On November 25, 2026 main was built as 0.1.3 (31), notarized
 and installed on the owner's word; it is not tagged or published (the
 status list below). The same day, after the owner had seen a recording
-in that build, its red marks were cut from four to two (the status
-list below); that change is in no build yet.
+in that build, its red marks were cut from four to two, and 0.1.3 (32)
+with that change was built, notarized and installed the same way (the
+status list below); it is not tagged or published either.
 The last gate run: 1023 tests, no warning from Armadale's code.
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
@@ -101,14 +102,18 @@ under it, their commits:
   decision on seeing it: no stop button in the header (Stop Recording
   in the pane menu), no dot in the tab bar unless the sidebar is hidden,
   the sidebar's dot pulsing, every dot on one clock (`docs/HISTORY.md`,
-  "fewer red marks while recording"). Checked live on a test build; not
-  in the installed 0.1.3 (31).
+  "fewer red marks while recording"). Checked live on a test build.
+- November 25, 2026: Armadale 0.1.3 (32), built from 1f15dfe with
+  `--skip-update-signature`, notarized, stapled and installed, with the
+  fewer red marks in it; not tagged, not on GitHub, not in the update
+  feed (`docs/HISTORY.md`, "Armadale 0.1.3 (32), built and notarized,
+  not published").
 
 ## Next
 
 Recording a pane (the owner's request of November 24, 2026) is built,
 reviewed, checked live on a test build and committed; it is in the
-installed 0.1.3 (31) and in no release yet. A release of 0.1.3 has to be
+installed 0.1.3 (32) and in no release yet. A release of 0.1.3 has to be
 built on the Mac that holds the update key: a build made with
 `--skip-update-signature` is no update. 0.1.2 is released with everything the owner
 gave the go-ahead for up to November 17, 2026 (`docs/HISTORY.md`,

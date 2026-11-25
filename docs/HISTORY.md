@@ -3317,6 +3317,30 @@ sidebar, and a dot and a stop button in the pane's header.
   press with "unsupported action"; the View menu's item hides and shows
   the sidebar.
 
+## November 25, 2026: Armadale 0.1.3 (32), built and notarized, not published (1f15dfe)
+
+November 25, 2026, at about 08:43, on the owner's word: **0.1.3 (32),
+with the fewer red marks in it, is notarized, stapled and installed on
+the Mac at hand in place of 0.1.3 (31). It is not tagged, not on GitHub
+and not in the update feed.** Only the build number rose.
+
+- `scripts/bump-build.sh`: 0.1.3 (31) to 0.1.3 (32), `project.yml`
+  only, committed as 1f15dfe after the gate had passed on it (1023
+  tests, no warning from Armadale's code; the SSH integration tests did
+  not run). That run also covered what had changed after the gate of
+  the fewer red marks: two corrected comments and an unused method
+  removed.
+- `scripts/check-state-compat.sh`: the working tree writes schema 2;
+  v0.1.0 and v0.1.1 answer `newerVersion`, v0.1.2 loads it.
+- `scripts/install-release.sh --skip-update-signature` on the clean
+  tree at 1f15dfe, 136 s in all, every step as for build 31, ending in
+  `build/release/Armadale-0.1.3-local.dmg` and the install from it.
+- **The installed copy, checked afterwards:** 0.1.3 (32); `codesign
+  --verify --deep --strict`; the hardened runtime, a secure timestamp
+  (08:44:36) and team YJ8LXVCB3T; `spctl` accepts it as "Notarized
+  Developer ID"; `stapler validate` worked. It was not launched:
+  Armadale was not running and had no sessions.
+
 ---
 
 # Part 2: the history of each design section
