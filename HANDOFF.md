@@ -76,7 +76,7 @@ under it, their commits:
   released on GitHub, on the changelog page and in the update feed
   (f1e0fca); its state fixture (`docs/HISTORY.md`, "Armadale 0.1.2,
   released"). No app code changed since the build.
-- November 24, 2026: recording a pane (Record Pane… / Stop Recording in
+- November 24, 2026: recording a pane, f127458 (Record Pane… / Stop Recording in
   the pane menu, an asciicast v2 `.cast` file of the pane's output, a
   pulsing red dot and a stop button in the header, a red dot on the tab;
   `docs/HISTORY.md`, "recording a pane"). Built, reviewed twice and

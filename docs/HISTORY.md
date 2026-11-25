@@ -2992,7 +2992,7 @@ with its item, Sparkle's question at the second launch in a Release
 build, and an update between two Developer ID signed builds, which
 only the next release can show.
 
-## November 24, 2026: recording a pane
+## November 24, 2026: recording a pane (f127458)
 
 The owner asked for a way to record a pane from its context menu, with
 a pulsing red light while it records and a stop button; he took SwiftTerm
