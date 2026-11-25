@@ -718,8 +718,16 @@ private struct TabItemView: View {
             Button("Close Other Tabs") { actions.closeOtherTabs(than: tab.id) }
                 .disabled(isOnly)
         }
-        .accessibilityElement(children: .combine)
+        // One button for accessibility, as a sidebar row is
+        // (``SidebarRowActions``): its default action selects the tab, as a
+        // click does, and Rename is its other action. Without a default
+        // action of its own the combined element answered a press with
+        // success and did nothing. While the rename field is up the
+        // children stay separate, so the field can be reached.
+        .accessibilityElement(children: edit != nil ? .contain : .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { actions.select(tab: tab.id) }
+        .accessibilityAction(named: "Rename") { actions.beginRename(.tab(tab.id), on: .tabBar) }
     }
 
     /// Primary on the selected tab, dimmer on the others, and tertiary on

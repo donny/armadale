@@ -2196,6 +2196,12 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   has no gesture for it) and the close button close it with the ⌘W
   confirmation; double-click or the context menu's Rename Tab edits the
   title in place; the context menu also has Close Tab, Close Other Tabs.
+  For accessibility a tab is one button, as a sidebar row is (section 1,
+  "Sidebar semantics"): its text is the status, the title, "Recording"
+  while a pane records and the shortcut; its default action selects the
+  tab, as a click does, and Rename is its other action
+  (`TabItemView`'s `accessibilityAction`s). While its rename field is up
+  its children stay separate, so the field can be reached.
 - **Tab bar look.** The bar is drawn like the native macOS 27 window tab
   bar (Terminal's Window › Show Tab Bar), in light and dark, and takes its
   height: **36 pt** (a native window grows by 36 pt when it shows its tab

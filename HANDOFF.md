@@ -83,6 +83,10 @@ under it, their commits:
   `docs/HISTORY.md`, "recording a pane"). Built, reviewed twice, checked
   live and fixed after each; the gate passes with 1019 tests ("From
   finished changes" below has what was not seen live).
+- November 24, 2026: a tab in the tab bar answers an accessibility
+  press by selecting its tab, and has a Rename action (`docs/HISTORY.md`,
+  "the tab bar's tabs answer an accessibility press"). Checked live by
+  accessibility presses on a test build; VoiceOver itself was not used.
 
 ## Next
 
@@ -252,12 +256,13 @@ Session layer
   save attempt at all, not looked into).
 
 Hierarchy and UI
-- A tab in the tab bar answers an accessibility press with success and
-  does not select its tab (`TabItemView`: an element with the button
-  trait and no action of its own; the sidebar's rows do select). Found
-  in the live pass of recording a pane on November 24, 2026; it was so
-  before that change. It probably keeps VoiceOver from choosing a tab in
-  the tab bar. Not started.
+- A main menu item pressed through accessibility answers success and
+  does nothing while Armadale is in the background with no key window
+  (seen November 24, 2026 with File › New Tab on a test build opened
+  with `open -g`): its action is sent up a responder chain that starts
+  nowhere. Buttons in the window work there. It matters to scripts and
+  assistive tools that act on an app that is not in front; whether
+  VoiceOver ever does is not known. Not started.
 - Some unit tests put windows on screen. `ArmadaleAppTests` is unhosted,
   but tests that present a sheet or an alert on a test window (found in
   review on November 24, 2026: `NewSessionChooserTests`,

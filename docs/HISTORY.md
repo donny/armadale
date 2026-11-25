@@ -3204,6 +3204,37 @@ the review; not committed when this was written.
   disconnected pane becoming unavailable ends a recording that was
   waiting there. Gate: 1019 tests, no warning from Armadale's code.
 
+## November 24, 2026: the tab bar's tabs answer an accessibility press
+
+Found in the live pass of recording a pane, and so before that change: a
+tab in the tab bar answered an accessibility press with success and did
+not select its tab, while a sidebar row did. The owner had it fixed the
+same evening, by the coordinator, without the implementer and reviewer
+loop (three lines in `TabItemView`).
+
+- **Built.** A tab is one accessibility button whose default action
+  selects it, as a click does, with Rename as its other action, and its
+  children stay separate while its rename field is up, as a sidebar row
+  does (Part 2, section 8). On the changelog page.
+- **Checked.** Gate: 1019 tests, no warning from Armadale's code. No
+  unit test reaches a SwiftUI accessibility action in an unhosted test,
+  so none was added. Live, on a copy of the Debug build with a bundle
+  identifier, state directory and defaults suite of its own, opened in
+  the background (`open -g`) and driven by accessibility presses on its
+  pid alone, with no synthetic event (the Claude app stayed in front
+  throughout): with two tabs, a press on the tab reading "New Session,
+  ⌘1" made it the selected one (its `AXSelected`, and `selectedTabID` in
+  the copy's state file), and a press on "⌘2" selected that one again;
+  the tab's actions were `AXShowMenu`, `AXPress` and Rename; Rename
+  brought a text field named "Name" into the accessibility tree, and a
+  quit by SIGTERM left both titles as they were. The copy, its state
+  directory and its defaults were removed.
+- **Found on the way.** A main menu item pressed through accessibility
+  (File › New Tab) answers success and does nothing while the app is in
+  the background with no key window: its action goes up a responder
+  chain that starts nowhere. The tab bar's New Tab button, a SwiftUI
+  button, works there. Not seen: VoiceOver itself.
+
 ---
 
 # Part 2: the history of each design section
@@ -4124,6 +4155,19 @@ showing about 25 windows the same way; that is an open item in
 HANDOFF); two recordings into one file are refused; the suggested name is
 cut by bytes, since 100 characters of emoji could pass the 255-byte
 limit; the pulse is a Core Animation animation (above, section 7).
+
+**November 24, 2026. A tab's accessibility action.** `TabItemView` was
+an accessibility element with its children combined and the button
+trait, and no action of its own, so a press on it (what VoiceOver's
+activation sends) reported success and selected nothing; the reviewer
+of recording a pane met it when its accessibility presses on tab bar
+tabs did nothing while the same press on a sidebar row selected. The
+sidebar's rows had both actions since the List lost its selection
+(`SidebarRowActions`); the tab bar now does the same: a default action
+that selects, a Rename action, and separate children while the rename
+field is up, without which the field that Rename brings up could not be
+reached. Close Tab stays with the context menu and the close button.
+Checked live by accessibility presses on a test build (Part 1).
 
 **November 24, 2026, live pass. The suggested name.** For a zsh titled
 with its directory, /tmp/armrec/w, the save sheet offered "-tmp-armrec-w
