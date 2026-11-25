@@ -557,6 +557,44 @@ final class SessionControllerZmxTests {
         #expect(output[reset.upperBound...].contains("after-5"))
     }
 
+    /// Record asked for while the controller is attaching again after its
+    /// client was killed: the recording waits and starts at the reset of
+    /// that attach, so the file holds the snapshot and then the helper's
+    /// replay of the session.
+    @Test func aRecordingStartedDuringTheReattachHoldsTheReplay() async throws {
+        let surface = RecordingSurface()
+        let session = sandbox.session()
+        let controller = makeController(session, surface: surface)
+        await controller.start(.create)
+        #expect(await eventually { surface.text.contains(ZmxSandbox.prompt) })
+        surface.delegate?.surface(surface, didInput: Array("echo before-$((6*7))\r".utf8))
+        #expect(await eventually { surface.text.contains("before-42") })
+        let url = FileManager.default.temporaryDirectory.appending(path: "armadale-zmx-\(UUID().uuidString).cast")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let pids = try clientPIDs(of: session)
+        for pid in pids { kill(pid, SIGKILL) }
+        // The attach takes a while (a client, the helper's answer): catch it.
+        var caught = false
+        for _ in 0..<2000 {
+            if controller.state == .attaching { caught = true; break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        try #require(caught, "the controller was seen attaching again")
+        try controller.startRecording(to: url, title: "zmx")
+        #expect(controller.isRecordingPending)
+        #expect(await eventually { controller.state == .attached && !controller.isRecordingPending })
+        #expect(await eventually { surface.textSinceReset.contains("before-42") })
+        surface.delegate?.surface(surface, didInput: Array("echo after-$((2+3))\r".utf8))
+        #expect(await eventually { surface.text.contains("after-5\r\n") })
+        await controller.close()
+        let writer = try #require(controller.recordingWriter)
+        await writer.drained()
+        let output = try CastFile(url).output
+        #expect(!output.contains("\u{1b}c"), "the reset is not in it: the recording starts after it")
+        #expect(output.contains("before-42"), "the helper's replay")
+        #expect(output.contains("after-5"))
+    }
+
     /// One second of `yes` against a renderer that cannot keep up. zmx's
     /// client buffers without limit, so without help the pane would work
     /// through the backlog for a minute or more while the client grows; the

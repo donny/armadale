@@ -26,7 +26,7 @@ extension SessionRegistry {
     /// another recording is writing (`fileInUse`): one running, or one that
     /// has ended and whose writer has not closed the file yet.
     func startRecording(session: SessionID, to url: URL) throws(RecordingError) {
-        guard let controller = controllers[session] else { throw .nothingToRecord }
+        guard let controller = controllers[session] else { throw .sessionEnded }
         func path(_ url: URL) -> String { url.standardizedFileURL.resolvingSymlinksInPath().path }
         let wanted = path(url)
         let running = controllers.values.compactMap { $0.recording?.url }

@@ -244,8 +244,12 @@ public final class RecordingFileWriter: Sendable {
 public enum RecordingError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The pane is recorded already.
     case alreadyRecording
-    /// There is no live terminal to record (the session is not attached).
-    case nothingToRecord
+    /// The session has ended (or its pane was closed).
+    case sessionEnded
+    /// The session is disconnected or unavailable, with no attach under way.
+    case notConnected
+    /// The session's first attach has not finished.
+    case stillStarting
     /// The file could not be created.
     case cannotCreateFile(name: String, reason: String)
     /// Another pane is being recorded into that file.
@@ -254,7 +258,9 @@ public enum RecordingError: Error, Equatable, Sendable, CustomStringConvertible 
     public var description: String {
         switch self {
         case .alreadyRecording: "This pane is being recorded already."
-        case .nothingToRecord: "There is nothing to record: the session is not running in this pane."
+        case .sessionEnded: "There is nothing to record: the session has ended."
+        case .notConnected: "There is nothing to record: the session is not connected right now."
+        case .stillStarting: "There is nothing to record yet: the session is still starting."
         case .cannotCreateFile(let name, let reason): "The file “\(name)” could not be created. \(reason)."
         case .fileInUse(let name): "Another pane is being recorded into “\(name)”. Choose another file."
         }

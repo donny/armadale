@@ -181,16 +181,29 @@ private struct PulsingDot: NSViewRepresentable {
 /// The view behind ``PulsingDot``.
 final class PulsingDotView: NSView {
     static let animationKey = "armadale.recording-pulse"
-    private var observer: (any NSObjectProtocol)?
+    /// Whether Reduce Motion is on; replaced in tests.
+    static var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    private var observers: [(center: NotificationCenter, token: any NSObjectProtocol)] = []
+    /// The window whose occlusion is followed.
+    private var observedWindow: NSWindow?
+    private var occlusionObserver: (any NSObjectProtocol)?
+    /// How many times the pulse was (re)started (for tests).
+    private(set) var pulseStarts = 0
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: PaneCardStyle.recordingDotFrameWidth, height: PaneCardStyle.recordingDotFrameWidth))
         wantsLayer = true
-        observer = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updatePulse() }
+        // Reduce Motion switched; the app unhidden (its windows' animations
+        // may be gone until something adds them again).
+        observe(NSWorkspace.shared.notificationCenter, NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
+        observe(NotificationCenter.default, NSApplication.didUnhideNotification)
+    }
+
+    private func observe(_ center: NotificationCenter, _ name: Notification.Name) {
+        let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restartPulse() }
         }
+        observers.append((center, token))
     }
 
     @available(*, unavailable)
@@ -199,7 +212,8 @@ final class PulsingDotView: NSView {
     }
 
     isolated deinit {
-        if let observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        for (center, token) in observers { center.removeObserver(token) }
+        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -211,29 +225,50 @@ final class PulsingDotView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        updatePulse()
+        followOcclusion(of: window)
+        restartPulse()
+    }
+
+    /// The window's occlusion changing (shown again after being covered,
+    /// minimized, on another Space) restarts the pulse.
+    private func followOcclusion(of window: NSWindow?) {
+        guard window !== observedWindow else { return }
+        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+        occlusionObserver = nil
+        observedWindow = window
+        guard let window else { return }
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restartPulse() }
+        }
     }
 
     /// Whether the dot pulses now.
     var isPulsing: Bool { layer?.animation(forKey: Self.animationKey) != nil }
 
-    /// Adds the pulse, or takes it away (out of a window, Reduce Motion).
-    func updatePulse() {
+    /// The layer's own opacity: full, so a dot whose animation is not
+    /// running is a steady full red, never the dim end of the pulse.
+    var restingOpacity: Float { layer?.opacity ?? 0 }
+
+    /// Adds the pulse afresh, or takes it away (out of a window, Reduce
+    /// Motion). Called whenever the dot can be seen again: back in a
+    /// window, its window's occlusion changing, the app unhidden.
+    func restartPulse() {
         guard let layer else { return }
-        let steady = window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if steady {
-            layer.removeAnimation(forKey: Self.animationKey)
-        } else if layer.animation(forKey: Self.animationKey) == nil {
-            let pulse = CABasicAnimation(keyPath: "opacity")
-            pulse.fromValue = 1
-            pulse.toValue = RecordingPulse.minimum
-            pulse.duration = RecordingPulse.period / 2
-            pulse.autoreverses = true
-            pulse.repeatCount = .infinity
-            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            pulse.isRemovedOnCompletion = false
-            layer.add(pulse, forKey: Self.animationKey)
-        }
+        layer.opacity = 1
+        layer.removeAnimation(forKey: Self.animationKey)
+        guard window != nil, !Self.reducesMotion() else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1
+        pulse.toValue = RecordingPulse.minimum
+        pulse.duration = RecordingPulse.period / 2
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulse.isRemovedOnCompletion = false
+        layer.add(pulse, forKey: Self.animationKey)
+        pulseStarts += 1
     }
 }
 

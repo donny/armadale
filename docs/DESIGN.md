@@ -1440,8 +1440,11 @@ without touching sessions or layout.
   the alternate screen (`?1049h`) when it is active, set reverse video
   (DECSCNM, `?5h`) when it is on, turn wraparound off, draw every row (a
   cursor position at the row's first non-blank cell, the full SGR of each
-  run, then its text; blank cells in the default pen are skipped with a
-  cursor move), and then set wraparound, the saved cursor (DECSC with the
+  run, then its text; a run of blank cells in the default pen is stepped
+  over with one cursor move, `CSI n C`, or written as spaces when it is
+  at most three cells and the pen is the default one; spaces with a
+  background or an attribute, a status bar or a selection bar, are
+  cells like any other and are written), and then set wraparound, the saved cursor (DECSC with the
   saved position and pen, when they are not the defaults), the scroll
   region (DECSTBM, when it is not the whole screen), origin mode, the
   cursor position (relative to the region under origin mode), the pen and,
@@ -1933,8 +1936,16 @@ v2, the asciinema `.cast` format that `asciinema play` and SwiftTerm's
   sequences*: in the ground state with no UTF-8 character half written.
   It costs about 2 µs per kilobyte of colourful output in an optimized
   build (31 µs in a Debug build; `TerminalStreamTrackerTests` prints it).
-- **The start.** When Record is confirmed with the stream between
-  sequences, the recording starts at once. Otherwise it is *pending*:
+- **The start.** When Record is confirmed with the session attached and
+  the stream between sequences, the recording starts at once. It may also
+  be confirmed while a session attached in this run is being attached
+  again (a flood reattach, the automatic reattach after a lost client, a
+  reconnect's attach or an automatic retry under way); it is then pending
+  and starts at the reset that attach feeds, so the file holds the
+  snapshot and then the helper's replay. If that attach finds the session
+  gone, the recording ends with its header alone; if it ends
+  disconnected, the recording stays pending, as through any disconnect.
+  Otherwise, inside a sequence, it is *pending* too:
   the file is created (so a file that cannot be made is told at once),
   the pane shows as recorded (`recording` is set,
   `isRecordingPending` true), nothing is written, and it starts at the
@@ -1980,14 +1991,25 @@ v2, the asciinema `.cast` format that `asciinema play` and SwiftTerm's
   `stopRecording()`, `stopRecordingNow(until:)`, `recording`, observed;
   `recordingWriter`, the writer of the running or last recording). One
   recording per pane at a time: a start while one runs throws
-  `alreadyRecording`, and a start without a live terminal (the session
-  is not attached: `canStartRecording`) throws `nothingToRecord`. A
+  `alreadyRecording`, and a start with no live terminal throws a reason
+  that is true (`recordingRefusal`, which `canStartRecording` follows):
+  `sessionEnded` ("There is nothing to record: the session has ended.")
+  for an ended or closed session, `notConnected` ("…: the session is not
+  connected right now.") for one disconnected or unavailable with no
+  attach under way, or detached after having been attached, and
+  `stillStarting` ("There is nothing to record yet: the session is still
+  starting.") while its first attach has not finished (a respawn's new
+  session counts as new). A
   recording ends when the user stops it, when its session ends (the state
   becomes ended, after the filter's tail is fed), when its pane is closed
   (`close()`), when the session is respawned (`respawn()`, before the
   reset: the fresh session is not recorded), when the session can no
-  longer be reached (its host removed: `detachAsUnavailable`), and when
-  Armadale quits. It goes on while its tab is in the background, while
+  longer be reached (its host removed: `detachAsUnavailable`; a
+  disconnected pane becoming unavailable: `markUnavailable`), and when
+  Armadale quits. None starts while a respawn is under way (the old
+  session's state can still read attached while it is killed, and the
+  recording would run on into the fresh session): it is refused as
+  still starting. It goes on while its tab is in the background, while
   its window is closed, in menu bar mode, and through disconnected,
   reconnecting and reattaching. Ending a recording closes the file on the
   writer's queue once what was handed over is written.
@@ -2025,6 +2047,8 @@ v2, the asciinema `.cast` format that `asciinema play` and SwiftTerm's
   asked for inside a sequence starting after it, a pending recording
   ended by a stop, the session's end, a close and a quit with its header
   alone, the end with the session, a close, a respawn, a host's removal,
+  a disconnected pane becoming unavailable, no start while a respawn is
+  under way,
   `detachNow()` and `stopRecordingNow()` with the file closed before they
   return, refusals, a write failure).
 
@@ -2594,11 +2618,16 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
 - **Recording a pane.** A pane that has a session can be recorded to an
   asciicast v2 file (`.cast`; the format, what is recorded and when a
   recording ends are section 7, "Recording a pane").
-  *The menu item.* The pane menu's **Record Pane…** is enabled when there
-  is a live terminal to record: the session is attached, a client feeding
-  the surface (`SessionController.canStartRecording`). In every other
-  state (starting, attaching, disconnected or reconnecting, ended,
-  unavailable) it is shown disabled. While the pane records, the item
+  *The menu item.* The pane menu's **Record Pane…** is enabled when a
+  recording can start (`SessionController.canStartRecording`, section 7,
+  "Lifetime"): the session is attached, or a session attached in this run
+  is being attached again, so the item does not flicker while a flood
+  makes the session reattach again and again. It is shown disabled for a
+  session that has ended, one disconnected or unavailable with no attach
+  under way, and one still starting or being respawned; a confirm that
+  lands in such a state
+  is told with the controller's reason under "The recording could not
+  start." While the pane records, the item
   reads **Stop Recording**, always enabled. An empty pane's menu has
   neither. One recording per pane; several panes may record at once.
   *The save sheet.* Record Pane… opens an `NSSavePanel` as a sheet on the
@@ -2656,10 +2685,16 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   Animation opacity animation on the dot's layer (`PulsingDotView`, an
   `NSViewRepresentable`), which the render server runs with no SwiftUI
   update per frame; the view is kept when the header's root view is
-  replaced (a title or directory change), so the pulse goes on; it is
-  added again when the view comes back into a window, and the dot is
-  steady with Reduce Motion, following a change of that setting
-  (`NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`).
+  replaced (a title or directory change), so the pulse goes on. The
+  layer's own opacity is full and the animation runs from full down to
+  25 % and back, so a dot whose animation is not running is a steady full
+  red, never the dim end: a recording never looks like no recording. The
+  pulse is added afresh whenever the dot can be seen again: the view back
+  in a window, its window's occlusion changing
+  (`NSWindow.didChangeOcclusionStateNotification`), the app unhidden
+  (`NSApplication.didUnhideNotification`). The dot pulses in a window
+  that is visible but not key. It is steady with Reduce Motion, following a change of
+  that setting (`NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`).
   *A narrow header.* As the header narrows, things give way in this
   order: the directory, the title (below 24 pt), the dot, the status
   glyph; the stop button stays with "…" until even the two do not fit,

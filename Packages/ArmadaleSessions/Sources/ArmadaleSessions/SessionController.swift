@@ -302,6 +302,9 @@ public final class SessionController {
     /// provides a working one. Does nothing unless detached or unavailable.
     public func markUnavailable(reason: String) {
         guard state == .detached || state.isUnavailable || state.isDisconnected, binding == nil, !isClosed else { return }
+        // Nothing more will come from it: a recording that was waiting
+        // through the disconnect ends, as in ``detachAsUnavailable(reason:backend:)``.
+        endRecording()
         cancelAutomaticReconnect()
         setState(.unavailable(reason: reason))
     }
@@ -430,6 +433,7 @@ public final class SessionController {
         await stopBinding(killing: true)
         // Closed while the old session was being killed: nothing to replace.
         guard !isClosed, session.id == old.id else { return }
+        hasBeenAttached = false
         let fresh = Session(
             location: old.location,
             profileID: old.profileID,
@@ -475,12 +479,32 @@ public final class SessionController {
 
     /// Whether Record Pane… can start a recording now: none is running and
     /// there is a live terminal to record, that is, a client is attached and
-    /// feeding the surface. Starting, attaching, disconnected or
-    /// reconnecting, ended and unavailable sessions have none
-    /// (docs/DESIGN.md section 8, "Recording a pane").
-    public var canStartRecording: Bool {
-        activeRecording == nil && state.isAttached && !isClosed
+    /// feeding the surface, or one is being attached again to a session that
+    /// was attached in this run (a flood reattach, the automatic reattach
+    /// after a lost client, a reconnect's attach under way; the recording
+    /// then waits and starts at the reset that attach feeds). An ended,
+    /// disconnected or unavailable session with no attach under way, and
+    /// one whose first attach has not finished, have none
+    /// (``recordingRefusal``; docs/DESIGN.md section 8, "Recording a pane").
+    public var canStartRecording: Bool { recordingRefusal == nil }
+
+    /// Why a recording cannot start now, or `nil` when it can.
+    public var recordingRefusal: RecordingError? {
+        if activeRecording != nil { return .alreadyRecording }
+        if isClosed || state.isEnded { return .sessionEnded }
+        // A respawn is ending the old session (its state may still read
+        // attached while it is killed): a recording started now would run
+        // on into the fresh session, which is never recorded.
+        if isRespawning { return .stillStarting }
+        if state.isAttached { return nil }
+        if hasBeenAttached, state == .attaching || isConnecting { return nil }
+        if hasBeenAttached || state.isDisconnected || state.isUnavailable { return .notConnected }
+        return .stillStarting
     }
+
+    /// Whether this session has been attached in this run (since its
+    /// controller was made, or since the respawn that made it).
+    @ObservationIgnored private var hasBeenAttached = false
 
     /// Whether a recording is running.
     public var isRecording: Bool { recording != nil }
@@ -496,9 +520,10 @@ public final class SessionController {
     /// created.
     ///
     /// When the output stream is inside a sequence (or a character) at
-    /// this moment (``streamTracker``), the recording is pending: the file
-    /// exists and ``recording`` is set, and it starts, snapshot first, at
-    /// the first point between sequences in the output that follows.
+    /// this moment (``streamTracker``), or an attach is under way, the
+    /// recording is pending: the file exists and ``recording`` is set, and
+    /// it starts, snapshot first, at the first point between sequences in
+    /// the output that follows (for an attach, right after its reset).
     public func startRecording(to url: URL, title: String) throws(RecordingError) {
         try checkCanRecord()
         let writer = try RecordingFileWriter(url: url)
@@ -512,8 +537,7 @@ public final class SessionController {
     }
 
     private func checkCanRecord() throws(RecordingError) {
-        guard activeRecording == nil else { throw .alreadyRecording }
-        guard state.isAttached, !isClosed else { throw .nothingToRecord }
+        if let refusal = recordingRefusal { throw refusal }
     }
 
     private func beginRecording(writer: RecordingFileWriter, url: URL, title: String) {
@@ -522,7 +546,9 @@ public final class SessionController {
         activeRecording = recording
         recordingWriter = writer
         self.recording = RecordingInfo(url: url, startedAt: started)
-        if streamTracker.isBetweenSequences { startPendingRecording() }
+        // Attached and between sequences: at once. Otherwise it waits: for
+        // the end of the sequence, or for the reset an attach under way feeds.
+        if state.isAttached, streamTracker.isBetweenSequences { startPendingRecording() }
         recordingWatch = Task { [weak self, weak recording] in
             for await reason in writer.failures {
                 guard let self, let recording else { return }
@@ -746,6 +772,7 @@ public final class SessionController {
             }
         }
         self.binding = binding
+        hasBeenAttached = true
         setState(.attached)
         if let appliedSize { delegate?.sessionController(self, didApplySize: appliedSize) }
     }

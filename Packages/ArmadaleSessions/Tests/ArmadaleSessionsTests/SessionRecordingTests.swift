@@ -204,6 +204,27 @@ struct SessionRecordingTests {
         #expect(file.output == "SNAPSHOT", "neither the reset nor the fresh session's output")
     }
 
+    /// While a respawn is ending the old session its state can still read
+    /// attached: a recording must not start then, or it would run on into
+    /// the fresh session.
+    @Test func noRecordingStartsWhileARespawnIsUnderWay() async throws {
+        let url = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        await backend.setKillDelay(.milliseconds(300))
+        let controller = makeController()
+        await controller.start(.create)
+        #expect(controller.canStartRecording)
+        let respawn = Task { await controller.respawn() }
+        // The respawn has begun (it is waiting for the kill).
+        for _ in 0..<200 where controller.recordingRefusal == nil { try await Task.sleep(for: .milliseconds(2)) }
+        #expect(controller.recordingRefusal == .stillStarting)
+        #expect(throws: RecordingError.stillStarting) { try controller.startRecording(to: url, title: "t") }
+        #expect(!controller.isRecording)
+        await respawn.value
+        #expect(controller.state == .attached)
+        #expect(controller.canStartRecording, "the fresh session can be recorded")
+    }
+
     /// Quitting: the file is complete when ``SessionController/detachNow()``
     /// returns, with no waiting.
     @Test func detachNowClosesTheFileAtOnce() async throws {
@@ -240,8 +261,8 @@ struct SessionRecordingTests {
             try? FileManager.default.removeItem(at: other)
         }
         let controller = makeController()
-        #expect(!controller.canStartRecording, "detached: nothing to record")
-        #expect(throws: RecordingError.nothingToRecord) { try controller.startRecording(to: url, title: "t") }
+        #expect(!controller.canStartRecording, "never attached: nothing to record")
+        #expect(throws: RecordingError.stillStarting) { try controller.startRecording(to: url, title: "t") }
         #expect(!FileManager.default.fileExists(atPath: url.path), "refused before the file is made")
         await controller.start(.create)
         try controller.startRecording(to: url, title: "t")
@@ -255,7 +276,150 @@ struct SessionRecordingTests {
         client.exit(0)
         await eventually { controller.state.isEnded }
         #expect(!controller.canStartRecording)
-        #expect(throws: RecordingError.nothingToRecord) { try controller.startRecording(to: other, title: "t") }
+        #expect(controller.recordingRefusal == .sessionEnded)
+        #expect(throws: RecordingError.sessionEnded) { try controller.startRecording(to: other, title: "t") }
+    }
+
+    // MARK: During an attach
+
+    /// Each refusal says what is true, and fits the alert's second line.
+    @Test func refusalsSayWhatIsTrue() {
+        #expect(RecordingError.sessionEnded.description == "There is nothing to record: the session has ended.")
+        #expect(RecordingError.notConnected.description
+            == "There is nothing to record: the session is not connected right now.")
+        #expect(RecordingError.stillStarting.description
+            == "There is nothing to record yet: the session is still starting.")
+    }
+
+    /// A first attach under way: still starting. Disconnected with no
+    /// attach under way, and unavailable: not connected.
+    @Test func whenThereIsNoLiveTerminal() async throws {
+        await backend.setCreateDelay(.milliseconds(300))
+        let starting = makeController()
+        let task = Task { await starting.start(.create) }
+        await eventually { starting.state == .attaching }
+        #expect(starting.recordingRefusal == .stillStarting)
+        await task.value
+        #expect(starting.canStartRecording)
+
+        await backend.setCreateDelay(nil)
+        await backend.setCanAttach(true)
+        await backend.setResolutions([.detached, .detached])
+        await backend.setAlive([session.id])
+        let controller = makeController()
+        await controller.start(.create)
+        // Two lost clients within the allowance: disconnected.
+        for index in 1...2 {
+            let client = try await handle(index)
+            client.finishOutput()
+            client.exit(0)
+            if index == 1 {
+                for _ in 0..<300 where await backend.handles.count < 3 { try await Task.sleep(for: .milliseconds(5)) }
+                await eventually { controller.state == .attached }
+            }
+        }
+        await eventually { controller.state.isDisconnected }
+        #expect(controller.recordingRefusal == .notConnected)
+        controller.markUnavailable(reason: "Host removed")
+        #expect(controller.recordingRefusal == .notConnected)
+    }
+
+    /// A recording that was running when the connection was lost waits
+    /// through the disconnect, and ends when the pane becomes unavailable:
+    /// nothing more will come from it.
+    @Test func becomingUnavailableEndsARecordingThatWaitedThroughADisconnect() async throws {
+        let url = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        await backend.setCanAttach(true)
+        await backend.setResolutions([.detached, .detached])
+        await backend.setAlive([session.id])
+        let controller = makeController()
+        await controller.start(.create)
+        try controller.startRecording(to: url, title: "t")
+        // Two lost clients within the allowance (the create's, then the
+        // automatic reattach's): disconnected.
+        for index in 0...1 {
+            let client = try await handle(index)
+            client.finishOutput()
+            client.exit(0)
+            if index == 0 {
+                for _ in 0..<300 where await backend.handles.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+                await eventually { controller.state == .attached }
+            }
+        }
+        await eventually { controller.state.isDisconnected }
+        #expect(controller.isRecording, "a recording waits through a disconnect")
+        controller.markUnavailable(reason: "Host removed")
+        #expect(!controller.isRecording)
+        #expect(controller.state.isUnavailable)
+    }
+
+    /// Asked for while a session attached in this run is being attached
+    /// again (here the reattach after a lost client): pending, then started
+    /// at the reset that attach feeds; the file holds the snapshot, then the
+    /// replay.
+    @Test func aRecordingAskedForDuringAReattachStartsAtItsReset() async throws {
+        let url = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        await backend.setCanAttach(true)
+        await backend.setResolutions([.detached])
+        let controller = makeController()
+        await controller.start(.create)
+        try await handle().emit("old screen")
+        await fed("old screen")
+        await backend.setAttachDelay(.milliseconds(300))
+        let first = try await handle()
+        first.finishOutput()
+        first.exit(0)
+        await eventually { controller.state == .attaching }
+        #expect(controller.canStartRecording, "a session attached in this run, being attached again")
+        try controller.startRecording(to: url, title: "t")
+        #expect(controller.isRecording && controller.isRecordingPending)
+        await eventually { controller.state == .attached }
+        #expect(!controller.isRecordingPending, "started at the reset")
+        try await handle(1).emit("replayed")
+        await fed("replayed")
+        controller.stopRecording()
+        let file = try await closedFile(controller, url)
+        #expect(file.output == "SNAPSHOTreplayed", "the snapshot, then the replay; not the old screen, not the reset")
+    }
+
+    /// The reattach finds the session gone: the pending recording ends with
+    /// its header alone. It ends disconnected: the recording stays pending,
+    /// and starts when an attach succeeds.
+    @Test(arguments: [true, false])
+    func aRecordingPendingThroughAFailedReattach(sessionGone: Bool) async throws {
+        let url = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+        await backend.setCanAttach(true)
+        await backend.setResolutions([.detached])
+        let controller = makeController()
+        await controller.start(.create)
+        await backend.setAttachDelay(.milliseconds(300))
+        await backend.setAttachError(sessionGone ? BackendError.noSuchSession(session.id) : BackendError.runtimeFailure("lost"))
+        await backend.setAlive(sessionGone ? [] : [session.id])
+        let first = try await handle()
+        first.finishOutput()
+        first.exit(0)
+        await eventually { controller.state == .attaching }
+        try controller.startRecording(to: url, title: "t")
+        #expect(controller.isRecordingPending)
+        if sessionGone {
+            await eventually { controller.state.isEnded }
+            #expect(!controller.isRecording)
+            let file = try await closedFile(controller, url)
+            #expect(file.events.isEmpty && file.header["version"] as? Int == 2, "the header alone")
+        } else {
+            await eventually { controller.state.isDisconnected }
+            #expect(controller.isRecording && controller.isRecordingPending, "pending through the disconnect")
+            await backend.setAttachError(nil)
+            await backend.setAttachDelay(nil)
+            await controller.reconnect()
+            #expect(controller.state == .attached)
+            #expect(!controller.isRecordingPending)
+            controller.stopRecording()
+            #expect(try await closedFile(controller, url).output == "SNAPSHOT")
+        }
     }
 
     @Test func aFileThatCannotBeCreatedChangesNothing() async throws {

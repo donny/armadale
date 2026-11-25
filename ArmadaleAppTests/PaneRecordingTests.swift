@@ -137,6 +137,33 @@ struct PaneRecordingTests {
         await view.controller.close()
     }
 
+    /// The menu item follows the controller's rule: on while a session
+    /// attached in this run is being attached again (a flood or a lost
+    /// client), so it does not flicker; off once the session has ended, with
+    /// a reason that says so.
+    @Test func theMenuItemStaysOnThroughAReattach() async throws {
+        let backend = LaunchTestBackend(alive: [])
+        let surface = SwiftTermSurface(appearance: TerminalAppearance(fontName: "Menlo", fontSize: 12))
+        let session = Session(profileID: Profile.shell.id, launch: LaunchSpec(program: nil, arguments: []), workingDirectory: "/")
+        let controller = SessionController(session: session, backend: backend, makeSurface: { surface })
+        #expect(PaneMenu.RecordingItem.of(controller) == .record(isEnabled: false), "never attached")
+        #expect(RecordingProblem.couldNotStart(try #require(controller.recordingRefusal)).informative
+            == "There is nothing to record yet: the session is still starting.")
+        await controller.start(.create)
+        #expect(PaneMenu.RecordingItem.of(controller) == .record(isEnabled: true))
+        await backend.setAttachDelay(.milliseconds(300))
+        try #require(await backend.handle(session.id)).end()
+        #expect(await eventually { controller.state == .attaching })
+        #expect(PaneMenu.RecordingItem.of(controller) == .record(isEnabled: true), "a reattach under way")
+        #expect(await eventually { controller.state == .attached })
+        await backend.setAlive([])
+        try #require(await backend.handle(session.id)).end()
+        #expect(await eventually { controller.state.isEnded })
+        #expect(PaneMenu.RecordingItem.of(controller) == .record(isEnabled: false))
+        #expect(RecordingProblem.couldNotStart(try #require(controller.recordingRefusal)).informative
+            == "There is nothing to record: the session has ended.")
+    }
+
     /// The save sheet goes when its pane leaves the window (closed here).
     @Test func theSaveSheetEndsWhenItsPaneCloses() async throws {
         let settings = AppSettings.forTesting()
@@ -309,6 +336,60 @@ struct PaneRecordingTests {
         #expect(dot.isPulsing == !reduceMotion)
         dot.removeFromSuperview()
         #expect(!dot.isPulsing, "out of a window: no animation")
+    }
+
+    /// A dot whose animation is not running is a steady full red (the
+    /// layer's own opacity is full), and the pulse is added again whenever
+    /// the dot can be seen again: the app unhidden, its window's occlusion
+    /// changing, back in a window. Not with Reduce Motion.
+    @Test func theDotRestsFullAndRestartsWhenItCanBeSeenAgain() throws {
+        _ = NSApplication.shared
+        var model = PaneHeaderModel(status: .running, title: "zsh", directory: nil)
+        model.isRecording = true
+        let header = PaneHeaderHostingView.make(model: model)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: PaneCardStyle.headerHeight), styleMask: [.borderless],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = header
+        header.frame = NSRect(x: 0, y: 0, width: 400, height: PaneCardStyle.headerHeight)
+        header.layoutSubtreeIfNeeded()
+        func dots(_ view: NSView) -> [PulsingDotView] {
+            (view as? PulsingDotView).map { [$0] } ?? view.subviews.flatMap(dots)
+        }
+        let dot = try #require(dots(header).first)
+        let original = PulsingDotView.reducesMotion
+        defer { PulsingDotView.reducesMotion = original }
+        PulsingDotView.reducesMotion = { false }
+        dot.restartPulse()
+        #expect(dot.restingOpacity == 1, "full at rest")
+        #expect(dot.isPulsing)
+
+        func lose() {
+            dot.layer?.removeAnimation(forKey: PulsingDotView.animationKey)
+            #expect(!dot.isPulsing)
+        }
+        lose()
+        NotificationCenter.default.post(name: NSApplication.didUnhideNotification, object: NSApp)
+        #expect(dot.isPulsing, "the app unhidden")
+        lose()
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        #expect(dot.isPulsing, "its window's occlusion changed")
+        lose()
+        let parent = try #require(dot.superview)
+        dot.removeFromSuperview()
+        parent.addSubview(dot)
+        #expect(dot.isPulsing, "back in a window")
+        #expect(dot.restingOpacity == 1)
+
+        PulsingDotView.reducesMotion = { true }
+        NSWorkspace.shared.notificationCenter.post(
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: NSWorkspace.shared)
+        #expect(!dot.isPulsing, "Reduce Motion: steady")
+        #expect(dot.restingOpacity == 1, "and full")
+        NotificationCenter.default.post(name: NSApplication.didUnhideNotification, object: NSApp)
+        #expect(!dot.isPulsing, "still steady after an unhide")
     }
 
     /// The tab's dot: shown while any of the tab's panes records.

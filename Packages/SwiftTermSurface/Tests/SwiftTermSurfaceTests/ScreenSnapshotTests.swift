@@ -113,6 +113,26 @@ struct ScreenSnapshotTests {
         try await roundTrip(original, then: "\u{1b}[0mnext line")
     }
 
+    /// Blank cells: a run is stepped over with one cursor move, a short one
+    /// in the default pen written as spaces; spaces carrying a background
+    /// or reverse video (a status bar, a selection bar) are written as
+    /// cells with their attributes, never stepped over.
+    @Test func blankRunsAndColouredSpaces() async throws {
+        let original = surface()
+        feed(original, "  PID USER      PR  NI    VIRT\r\n")
+        feed(original, "a\u{1b}[20Cb\r\n")
+        feed(original, "\u{1b}[44m status bar \u{1b}[K\u{1b}[0m\r\n")
+        feed(original, "x\u{1b}[7m      \u{1b}[0my\u{1b}[42m   \u{1b}[0m")
+        let snapshot = String(decoding: original.screenSnapshot(), as: UTF8.self)
+        #expect(!snapshot.contains("\u{1b}[1C") && !snapshot.contains("\u{1b}[2C") && !snapshot.contains("\u{1b}[3C"),
+                "short gaps are spaces: \(snapshot.debugDescription)")
+        #expect(snapshot.contains("a\u{1b}[20Cb"), "a long run is one move")
+        #expect(snapshot.contains("\u{1b}[0;48;5;4m status bar "), "a background's spaces are cells")
+        #expect(snapshot.contains("\u{1b}[0;7m      "), "reverse video's spaces are cells")
+        #expect(snapshot.contains("\u{1b}[0;48;5;2m   "))
+        try await roundTrip(original)
+    }
+
     /// Reverse video and a saved cursor (DECSC) come through.
     @Test func reverseVideoAndTheSavedCursor() async throws {
         let original = surface()

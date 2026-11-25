@@ -105,7 +105,14 @@ struct ScreenReading: Sendable {
                 if cursor < 0 {
                     out += "\u{1b}[\(row + 1);\(column + 1)H"
                 } else if column > cursor {
-                    out += "\u{1b}[\(column - cursor)C"
+                    // A run of blank cells: one cursor move, or plain spaces
+                    // when that is shorter and the pen is the default one.
+                    let gap = column - cursor
+                    if gap <= 3, current.map(Self.isPlain) ?? true {
+                        out += String(repeating: " ", count: gap)
+                    } else {
+                        out += "\u{1b}[\(gap)C"
+                    }
                 }
                 if current != cell.attribute {
                     out += sgr(cell.attribute)

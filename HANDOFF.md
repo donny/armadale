@@ -49,9 +49,10 @@ it: build 30 from dc03cc5, tagged `v0.1.2`, on GitHub with the
 notarized DMG, on the changelog page as the latest release and in the
 update feed. It is the build installed on the owner's Mac.**
 On November 24, 2026 recording a pane was built at the owner's request
-(the status list and "From finished changes" below): committed, not
-released, and not checked live yet.
-The last gate run: 1009 tests, no warning from Armadale's code.
+(the status list below): committed, checked live the same evening on a
+test build ("From finished changes" below has what is left), not
+released.
+The last gate run: 1019 tests, no warning from Armadale's code.
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -79,17 +80,15 @@ under it, their commits:
 - November 24, 2026: recording a pane, f127458 (Record Pane… / Stop Recording in
   the pane menu, an asciicast v2 `.cast` file of the pane's output, a
   pulsing red dot and a stop button in the header, a red dot on the tab;
-  `docs/HISTORY.md`, "recording a pane"). Built, reviewed twice and
-  fixed; the gate passed with 1009 tests; not checked live ("From
-  finished changes" below).
+  `docs/HISTORY.md`, "recording a pane"). Built, reviewed twice, checked
+  live and fixed after each; the gate passes with 1019 tests ("From
+  finished changes" below has what was not seen live).
 
 ## Next
 
 Recording a pane (the owner's request of November 24, 2026) is built,
-reviewed, fixed and committed, and waits for its live check (the first
-one stopped at a macOS screen-capture alert for the Claude app, left
-for the owner; the reviewer's own was not started while that alert was
-up). 0.1.2 is released with everything the owner
+reviewed, checked live on a test build and committed; it is in no
+release yet. 0.1.2 is released with everything the owner
 gave the go-ahead for up to November 17, 2026 (`docs/HISTORY.md`,
 "Armadale 0.1.2, released"); "From finished changes" below has what
 was not checked live. From now on a change a user would notice adds
@@ -253,6 +252,12 @@ Session layer
   save attempt at all, not looked into).
 
 Hierarchy and UI
+- A tab in the tab bar answers an accessibility press with success and
+  does not select its tab (`TabItemView`: an element with the button
+  trait and no action of its own; the sidebar's rows do select). Found
+  in the live pass of recording a pane on November 24, 2026; it was so
+  before that change. It probably keeps VoiceOver from choosing a tab in
+  the tab bar. Not started.
 - Some unit tests put windows on screen. `ArmadaleAppTests` is unhosted,
   but tests that present a sheet or an alert on a test window (found in
   review on November 24, 2026: `NewSessionChooserTests`,
@@ -414,41 +419,21 @@ Shipping (step 9)
 
 From finished changes: not checked live, and found and not fixed
 - Recording a pane (November 24, 2026; `docs/DESIGN.md` sections 5, 7
-  and 8, "Recording a pane"). **Checked live only in part**
-  (`docs/HISTORY.md`, "recording a pane"). The first live check stopped
-  at a macOS screen-capture alert for the Claude app, which the owner
-  has since answered with Allow (`HANDOFF.local.md`); the reviewer's
-  own, by accessibility presses on a test build, stopped early when the
-  Claude app came to the front. Seen live before that: no recording
-  item in an empty pane's menu; Record Pane…, enabled, in the menu of a
-  pane with a session; the save sheet with its suggested name and its
-  Cancel and Record buttons; the tab row's and the header's
-  accessibility labels while recording; a sound file from a real pane.
-  `scripts/check-quit.sh` passed on the build before the suggested
-  name's fix. Two things that pass left open, to look at first next
-  time: the recording was found ended before the reviewer pressed stop,
-  and nothing says why (someone at the Mac, or a defect); and whether a
-  "/" typed by hand into the save sheet confirms it, as a posted one
-  did. Not seen: Record Pane… disabled before attach; `.cast` kept with
-  no extension typed and with `.txt`, replacing a file, a read-only
-  folder; ⌘Q, the Quit item and SIGTERM with the sheet
-  up (unit-tested through `endSheetsForQuit` and a presentation seam; the
-  hook from `terminate` is not); the dot pulsing (Core Animation), still
-  pulsing after a title change, a tab switch, minimize and ⌘H, steady
-  with Reduce Motion; the app's CPU
-  with a recording pane visible, minimized, hidden; the stop button and
-  the menu's Stop Recording; the tab's dot in the tab bar and the
-  sidebar, in the background; a recording of
-  streaming coloured output, one inside a full-screen program and one
-  at a shell prompt with commands, parsed and played
-  back (no `asciinema` or `termcast` here); a narrow pane's header; a
-  quit and End Sessions and
-  Quit with a recording running; a host's removal; a full small volume;
-  the same file chosen in two panes;
-  the problem alert on a real window; VoiceOver. Covered by tests
-  instead: recording through the real persistence helper across a
-  reattach, five recordings started inside a sequence with the pane
-  undisturbed and playback equal to it, the quit's bounded wait.
+  and 8, "Recording a pane"). Checked live the same evening on a test
+  build with a bundle identifier of its own, by accessibility presses
+  and window screenshots (`docs/HISTORY.md`, "recording a pane", has
+  everything that was seen). Not seen live: the dot steady with Reduce
+  Motion (the owner's setting was left alone); VoiceOver itself (the
+  accessibility labels were read); a recording of a real agent session
+  (none was signed in to: a flood of coloured output and `top` stood
+  in); a host's removal ending a recording, and a recording through a
+  reconnect; the updater's relaunch with a recording running; a problem
+  alert waiting for the next window; ⌘Q itself with the save sheet up
+  (SIGTERM and the Quit item were); playback in `asciinema` or
+  `termcast` themselves (neither is on that Mac: the files were read by
+  termcast's own types and replayed on a SwiftTerm surface); and whether
+  a "/" typed by hand into the save sheet confirms it, as one posted to
+  a test build did (which is why AGENTS.md forbids typing into a panel).
 - The updater (November 16, 2026; `docs/DESIGN.md` section 8,
   "Updates"). Checked live the same night on ad hoc signed test builds
   with their own bundle identifier, a throwaway key and a feed on

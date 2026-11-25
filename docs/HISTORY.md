@@ -3111,8 +3111,98 @@ the review; not committed when this was written.
   owner's home folder (removed afterwards) and the "/" reached the shell:
   now a rule for live checks in AGENTS.md; whether a "/" typed by hand
   does the same is not known. And the recording was found ended before
-  the reviewer's stop press, with nothing to say why: open in HANDOFF,
-  with everything that pass did not reach.
+  the reviewer's stop press, with nothing to say why; the full pass
+  below looked for it first.
+- **Live pass, in full** (the same evening, on f717917, with the owner
+  away from the Mac; the reviewer, on a copy of the Debug build with a
+  bundle identifier of its own, so that the save panel's folder could be
+  set in the copy's own defaults, `NSNavLastRootDirectory`, to a scratch
+  folder; the folder was read through accessibility before every
+  Record, and nothing was typed while a panel was up). The recording
+  that had ended by itself did not come back: one left alone for 90
+  seconds still read Recording at each of nine reads, and its file grew
+  when the shell printed. Nothing in the code ties a recording to the
+  app losing the front, so the first pass's stop was most likely someone
+  at the Mac. Seen:
+  - the menu: no item in an empty pane; Record Pane… enabled for an
+    attached shell, disabled in an ended session's pane;
+  - the save sheet: "tmp-armrec-w 2026-11-24 at 17.12.37.cast" as the
+    suggested name; "q1" became `q1.cast` and "named.txt" became
+    `named.txt.cast`; an existing file brought the panel's own question
+    about replacing it; a folder of mode 555 gave "The recording could
+    not start." / "The file “ro.cast” could not be created. Permission
+    denied.", and nothing was created;
+  - quitting with the sheet up: SIGTERM quit the build, no file was
+    made and the session lived; the Quit item took the sheet down and
+    Armadale's own question about the running session came;
+  - the header: the dot pulsing in window screenshots 0.8 s apart (208
+    strongly red pixels at the dot, then none), and still pulsing after
+    an OSC 0 title change, a switch to another tab and back, minimize
+    and restore, and hide and back once the app was active again; the
+    stop button and the menu's Stop Recording each ended a recording;
+  - the app's CPU (the median of ten `ps` samples a second apart, the
+    terminal idle): 0 % with a recording pane visible, minimized and
+    hidden, as without a recording;
+  - the tab's dot in the tab bar and in the sidebar, also with the tab
+    in the background and with a second pane of the tab not recording
+    (the rows read "Running, /tmp/armrec/w, Recording");
+  - a recording during a flood of 256-colour, bold, underlined and
+    italic lines with CJK text: no escape fragment in the pane
+    afterwards; the file (76.5 MB, 879 output events over 33 seconds, no
+    input event) was read by termcast's own types and, replayed on a
+    SwiftTerm surface, ended where the pane had;
+  - a recording started inside `top`: the first frame held top's screen
+    on the alternate screen, and after top quit the file ended with the
+    prompt; one at a prompt with three commands replayed to the pane's
+    last screen;
+  - narrow panes: at about 99 pt the stop button and "…", at about 46 pt
+    "…" alone; nothing overlapped, and the tab's dot still showed the
+    recording;
+  - quits: after Keep Running in Menu Bar the recording went on with the
+    window closed, and after Quit, Keep Sessions Running from the status
+    menu the file was whole (556 lines, a newline at the end, read by
+    termcast's types); the same after End Sessions and Quit;
+  - a full 4 MB volume: one alert, "The recording stopped." / "“full.cast”
+    could not be written. No space left on device. What was recorded
+    until then is in the file.", the dot gone, the file's last line
+    whole;
+  - the file of a recording chosen again in a second pane: refused with
+    "Another pane is being recorded into “same.cast”. Choose another
+    file.", the first file untouched.
+
+  `scripts/check-quit.sh` passed on that build. Found: Record Pane…
+  failed during the flood (the next item); the dot seemed dim right
+  after an unhide until the app was active, which turned out to be a
+  measuring mistake (the item after that); and a tab bar item answers an
+  accessibility press without selecting its tab, which was so before
+  this change (HANDOFF, open items).
+- **Third round of fixes** (after the live pass). A recording can be
+  started while a session attached in this run is being attached again,
+  as a pending one that starts at the reset: during the flood the pane
+  reattached again and again, Record Pane… was disabled in about one of
+  three opens of the menu, and a confirm that landed in between was
+  refused as "the session is not running in this pane", which was not
+  true; the refusals that remain each say what is (Part 2, section 7).
+  The dot's layer rests at full red, and the pulse is started again
+  whenever its window can be seen again (Part 2, section 8). Short gaps
+  in a snapshot are written as spaces (Part 2, section 5).
+- **The fixes, checked live** (the same evening, the reviewer, on a test
+  copy of the fixed build, the Mac still untouched). During the flood
+  the pane menu was opened ten times a few seconds apart and Record
+  Pane… was enabled every time, twice while the tab read Starting; five
+  recordings were started during the flood and none was refused, two of
+  them during a reattach; each file was whole (21 to 45 MB, a version 2
+  header, every event read by termcast's own types), and one, replayed
+  on a SwiftTerm surface, ended where the pane had. The dot: after an
+  unhide without activation, in a window visible but not key, it pulsed
+  from the first screenshot. The reviewer corrected its earlier
+  observation there: it had measured the wrong pixels (Part 2, section
+  8). Reading the new rule, it found two edges, both closed by the
+  coordinator: no recording starts while a respawn is under way (its
+  state can still read attached while the old session is killed, and the
+  recording would have run on into the fresh session), and a
+  disconnected pane becoming unavailable ends a recording that was
+  waiting there. Gate: 1019 tests, no warning from Armadale's code.
 
 ---
 
@@ -3635,6 +3725,16 @@ answers `loaded` for it (Part 1, "Armadale 0.1.2, released").
 
 ## 5. Terminal rendering: `TerminalSurface`
 
+**November 24, 2026, live pass. Blank cells.** A first frame of `top`
+was 2931 characters: runs of blank cells were already stepped over with
+one cursor move each, but `top`'s columns are mostly one blank apart, so
+every such gap cost `ESC [ 1 C` (four bytes for one). A gap of at most
+three cells in the default pen is written as spaces now. Spaces with a
+background or reverse video (status and selection bars) were never
+stepped over: `ScreenReading.isPlain` excludes any colour and style, so
+they were written as cells with their attributes; no defect there, and a
+round-trip test now holds it.
+
 **November 24, 2026, review. The snapshot completed.** The reviewer
 found that a cursor waiting to wrap (past the last column after a
 character written there, as agent interfaces leave it after a row drawn
@@ -3802,6 +3902,23 @@ only (Part 1, "hosts, checked live"). Before this, section 4 said
 from reading that control commands past ten would be refused.
 
 ## 7. Process plumbing (`ArmadaleSessions`)
+
+**November 24, 2026, live pass. Recording during a reattach.** Seen in
+the reviewer's live pass on f717917: while a loop flooded a pane with
+coloured lines the session reattached again and again (the flood
+reattach), `canStartRecording` wanted the attached state, so Record
+Pane… was disabled in about one of three opens, and a confirm that
+landed during a reattach said "There is nothing to record: the session
+is not running in this pane" of a running session. Decided by the
+coordinator: a recording may start while a session attached in this run
+is being attached again; it waits and starts at the reset that attach
+feeds (the order the reviewer had seen in round 2 for a recording
+already pending when a reattach came: the snapshot, then the replay).
+The menu item follows the same rule; the refusals left say what is
+true (the session has ended; it is not connected right now; it is still
+starting). Tested with a fake backend and through the real persistence
+helper (a client killed, Record asked for while the controller was seen
+attaching again: the file holds the replay and not the reset).
 
 **November 24, 2026, second review. A differential test and a
 SwiftTerm quirk.** The reviewer ran a differential test against SwiftTerm
@@ -3971,6 +4088,26 @@ notifications from `SessionController` to the app's `AttentionCenter`.
 
 
 ## 8. Windows and views
+
+**November 24, 2026, live pass. The dot at rest.** Seen in the
+reviewer's live pass: the pulse ran after a title change, a tab switch
+and back, minimize and restore, but right after the app was unhidden
+without being activated three window screenshots 0.4 s apart showed no
+strong red at the dot, and it pulsed again once the app was activated:
+the animation was gone after the unhide and the layer showed the dim
+end. Decided by the coordinator: the layer's own opacity is full, the
+animation runs from full down and back, and it is added afresh when the
+dot can be seen again (back in a window, its window's occlusion
+changing, the app unhidden). Unit-tested by removing the animation and
+posting each notification by hand; with Reduce Motion (a replaceable
+check in the test) the dot stays steady and full. *Corrected the same
+evening:* the observation was wrong. The reviewer had measured a fixed
+box of pixels, and a screenshot of an inactive window has a smaller
+shadow (2292×1492 against 2424×1624), so the dot was elsewhere in the
+image; measured at the right place, a dot in a window that is visible
+but not key pulsed in every series of shots, before any activation. The
+change stays: a dot that rests at full red is the safer failure, and it
+costs nothing.
 
 **November 24, 2026, review. Recording a pane, the window's part.** Fixed
 after the review: a write failure is always told, one at a time and in
