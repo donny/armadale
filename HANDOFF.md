@@ -8,7 +8,7 @@ is `docs/DESIGN.md`; why and when (the change log, and the history of
 each design section) is `docs/HISTORY.md`; build and run instructions
 are in `README.md`.
 
-## Status (November 24, 2026)
+## Status (November 25, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
@@ -51,7 +51,9 @@ update feed. It is the build installed on the owner's Mac.**
 On November 24, 2026 recording a pane was built at the owner's request
 (the status list below): committed, checked live the same evening on a
 test build ("From finished changes" below has what is left), not
-released.
+released. On November 25, 2026 main was built as 0.1.3 (31), notarized
+and installed on the owner's word; it is not tagged or published (the
+status list below).
 The last gate run: 1019 tests, no warning from Armadale's code.
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
@@ -87,12 +89,20 @@ under it, their commits:
   press by selecting its tab, and has a Rename action, 72e38d8 (`docs/HISTORY.md`,
   "the tab bar's tabs answer an accessibility press"). Checked live by
   accessibility presses on a test build; VoiceOver itself was not used.
+- November 25, 2026: `scripts/release.sh --skip-update-signature`
+  (2d56a7b), for a Mac that does not hold the update signing key, and
+  with it Armadale 0.1.3 (31), built from be12c7e, notarized, stapled and
+  installed; not tagged, not on GitHub, not in the update feed
+  (`docs/HISTORY.md`, "Armadale 0.1.3 (31), built and notarized, not
+  published").
 
 ## Next
 
 Recording a pane (the owner's request of November 24, 2026) is built,
-reviewed, checked live on a test build and committed; it is in no
-release yet. 0.1.2 is released with everything the owner
+reviewed, checked live on a test build and committed; it is in the
+installed 0.1.3 (31) and in no release yet. A release of 0.1.3 has to be
+built on the Mac that holds the update key: a build made with
+`--skip-update-signature` is no update. 0.1.2 is released with everything the owner
 gave the go-ahead for up to November 17, 2026 (`docs/HISTORY.md`,
 "Armadale 0.1.2, released"); "From finished changes" below has what
 was not checked live. From now on a change a user would notice adds
@@ -389,6 +399,11 @@ Menu bar mode (step 8), from its review
   already frontmost; ⌘Q from Settings in accessory mode.
 
 Shipping (step 9)
+- `scripts/install-release.sh` mounts the DMG with `hdiutil attach
+  -nobrowse -readonly -mountpoint`, which macOS 27.2 calls deprecated
+  ("use `diskutil image attach --mountOptions nobrowse --readOnly
+  --mountPoint`"; seen November 25, 2026). It still works; the script,
+  and any other use of that form, should move before it stops.
 - The app icon's lit coral (`#F26B4A`) should become the in-app attention
   colour (Dock badge, status glyphs); today those use their own colours.
 - No crash reporting (decided for v1, October 19, 2026). The updater

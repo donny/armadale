@@ -3235,6 +3235,50 @@ loop (three lines in `TabItemView`).
   chain that starts nowhere. The tab bar's New Tab button, a SwiftUI
   button, works there. Not seen: VoiceOver itself.
 
+## November 25, 2026: Armadale 0.1.3 (31), built and notarized, not published (be12c7e)
+
+November 25, 2026, at about 07:45, on the owner's word ("build and
+install Armadale to ~/Applications"): **0.1.3 (31) is notarized, stapled
+and installed on the Mac at hand, the first build with recording a pane
+and the tab bar's accessibility press in it. It is not tagged, not on
+GitHub and not in the update feed.** The version went from 0.1.2 to
+0.1.3 with the first build after a release, as 0.1.2 did after 0.1.1.
+
+- **The Mac had no update key.** It holds the Developer ID certificate,
+  a working notary profile and dmgbuild, but `sign_update --account
+  armadale` answered "Signing key not found", and the release script
+  refuses to build without the key. Of three ways (a flag that leaves
+  the update signature out, importing the key, an ad hoc signed Debug
+  build) the owner chose the flag: `scripts/release.sh
+  --skip-update-signature`, 2d56a7b (Part 2, section 11).
+- `scripts/bump-build.sh --version 0.1.3`: 0.1.2 (30) to 0.1.3 (31),
+  `project.yml` only, committed as be12c7e after the gate had passed on
+  it together with the flag (1019 tests, no warning from Armadale's
+  code; the SSH integration tests did not run, as in every gate run).
+- `scripts/check-state-compat.sh`: the working tree writes schema 2;
+  v0.1.0 and v0.1.1 answer `newerVersion`, v0.1.2 loads it.
+- `scripts/install-release.sh --skip-update-signature` on the clean
+  tree at be12c7e, 138 s in all: the preflight without the key, the
+  archive, the signature checks, the app notarized and stapled, the DMG
+  built, notarized and stapled, Gatekeeper, then "Done (no update
+  signature)" with `build/release/Armadale-0.1.3-local.dmg` (17 MB) and
+  the install from it. The keychain asked nothing.
+- **The installed copy, checked afterwards:** 0.1.3 (31); `codesign
+  --verify --deep --strict`; the hardened runtime, a secure timestamp
+  (07:46:18) and team YJ8LXVCB3T; `spctl` accepts it as "Notarized
+  Developer ID"; `stapler validate` worked; the feed's address and the
+  public key are in its Info.plist, so it updates itself like any other
+  copy. It was not launched: Armadale was not running and had no
+  sessions, and the owner starts it.
+- **Found.** `hdiutil attach -nobrowse -readonly -mountpoint`, which
+  `install-release.sh` uses, prints a deprecation warning on macOS 27.2
+  (HANDOFF, open items).
+- **What a release of 0.1.3 still needs:** a build on the Mac that
+  holds the update key (this one is no update anyone could be offered),
+  the changelog's "Next release" made the version's section, the GitHub
+  Release, the feed's item, the tag and its state fixture (README,
+  "Releasing").
+
 ---
 
 # Part 2: the history of each design section
