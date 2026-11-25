@@ -183,7 +183,15 @@ items answer a press too, also in menu bar mode and while an alert is
 up, but find a menu item by its exact title, never by a part of it:
 the Apple menu is in every app's menu bar, and a press meant for
 Armadale's Settings… landed on System Settings… and opened System
-Settings (November 16, 2026).
+Settings (November 16, 2026). Never type into an open or save panel: a
+"/" posted to a test build with its save sheet up ended the panel as
+confirmed, and the file was written in the owner's home folder, where
+the panel had opened (November 24, 2026). Drive a panel by
+accessibility only (the name field's value, the buttons' presses), and
+before pressing its default button read through accessibility which
+folder it shows: if that is not the test's scratch folder, cancel. A
+test build with a bundle identifier of its own keeps the panel's last
+folder in its own defaults, where a test can set it beforehand.
 
 Which process macOS holds responsible decides what an agent may do. A
 session run from the Claude desktop app runs its commands under the

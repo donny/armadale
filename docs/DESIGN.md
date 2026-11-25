@@ -2608,8 +2608,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   <yyyy-MM-dd> at <HH.mm.ss>.cast" in the local time zone
   (`RecordingFileName.suggested`): the title is the header's (the
   session's title, else the profile's name), with `/` and `:` made `-`,
-  control characters and runs of whitespace made one space, leading dots
-  and surrounding spaces dropped, cut on a character boundary to 227
+  control characters and runs of whitespace made one space, leading
+  dots, dashes and tildes (what a title that is a path, as a shell's
+  often is, would start with), trailing dashes and surrounding spaces
+  dropped, cut on a character boundary to 227
   UTF-8 bytes (a file name holds 255; the date, time and extension take
   28), "Pane" when nothing is left. The panel is given the type of the `.cast` extension
   (`UTType(filenameExtension: "cast", conformingTo: .data)`, a dynamic

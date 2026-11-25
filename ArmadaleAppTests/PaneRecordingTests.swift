@@ -424,7 +424,13 @@ struct PaneRecordingTests {
         let utc = TimeZone(identifier: "UTC")!
         #expect(RecordingFileName.suggested(title: "zsh", date: date, timeZone: utc) == "zsh 2026-11-18 at 11.06.40.cast")
         #expect(RecordingFileName.suggested(title: "~/src: make", date: date, timeZone: utc)
-            == "~-src- make 2026-11-18 at 11.06.40.cast")
+            == "src- make 2026-11-18 at 11.06.40.cast")
+        // A title that is a path, as a shell's often is (seen live: zsh in
+        // /tmp/armrec/w gave "-tmp-armrec-w …"): no leading dash or tilde.
+        #expect(RecordingFileName.cleaned("/tmp/armrec/w") == "tmp-armrec-w")
+        #expect(RecordingFileName.cleaned("~/Developer/armadale/") == "Developer-armadale")
+        #expect(RecordingFileName.cleaned("-- ~.profile") == "profile")
+        #expect(RecordingFileName.suggested(title: "~", date: date, timeZone: utc) == "Pane 2026-11-18 at 11.06.40.cast")
         #expect(RecordingFileName.suggested(title: "  .hidden\ttab\n", date: date, timeZone: utc)
             == "hidden tab 2026-11-18 at 11.06.40.cast")
         #expect(RecordingFileName.suggested(title: "", date: date, timeZone: utc) == "Pane 2026-11-18 at 11.06.40.cast")

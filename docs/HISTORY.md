@@ -3088,6 +3088,31 @@ the review; not committed when this was written.
   is refused; a problem alert taken down unanswered is told again; the
   licence files say SwiftTerm's parser table is adapted. Gate: 1009 tests,
   no warning from Armadale's code.
+- **Live pass, in part** (the same day, after the commit and after the
+  owner had answered the alert with Allow; the reviewer, on a copy of
+  the Debug build under /tmp with a state directory of its own, driven
+  by accessibility presses by pid, with one window screenshot first: no
+  alert came back). It stopped early: before the first press of the stop
+  button the frontmost check found the Claude app in front, with 9.6 s
+  of idle time, so someone was at the Mac, and by the rule all live
+  testing ended there. Seen before that: an empty pane's menu is Split
+  Right, Split Down, Theme, with no recording item; a pane with a
+  session has Record Pane…, enabled, after Save as Favorite…; the save
+  sheet's field held "-tmp-armrec-w 2026-11-24 at 17.02.57.cast" for a
+  zsh titled /tmp/armrec/w, and its buttons were Cancel and Record;
+  while recording, the tab row read "Running, /tmp/armrec/w, Recording,
+  ⌘1" and the header had "Recording", a "Stop Recording" button and
+  "Pane Menu"; the file was sound (a version 2 header, 117×39, the
+  prompt with its colours as the first frame, output events only, times
+  increasing, read by termcast's own types). Three things came out of
+  it. The suggested name started with a dash: fixed (Part 2, section 8).
+  A "/" the reviewer posted to the test build, to reach /tmp in the save
+  panel, ended the panel as confirmed, so a recording landed in the
+  owner's home folder (removed afterwards) and the "/" reached the shell:
+  now a rule for live checks in AGENTS.md; whether a "/" typed by hand
+  does the same is not known. And the recording was found ended before
+  the reviewer's stop press, with nothing to say why: open in HANDOFF,
+  with everything that pass did not reach.
 
 ---
 
@@ -3962,6 +3987,15 @@ showing about 25 windows the same way; that is an open item in
 HANDOFF); two recordings into one file are refused; the suggested name is
 cut by bytes, since 100 characters of emoji could pass the 255-byte
 limit; the pulse is a Core Animation animation (above, section 7).
+
+**November 24, 2026, live pass. The suggested name.** For a zsh titled
+with its directory, /tmp/armrec/w, the save sheet offered "-tmp-armrec-w
+2026-11-24 at 17.02.57.cast": every `/` had become `-`, the first one
+too, and a title under the home directory would have started `~-`. A
+name that starts with a dash is taken for an option on a command line,
+and a shell expands `~-`. Leading dashes and tildes are now dropped with
+the leading dots, and trailing dashes with the trailing spaces
+(`RecordingFileName.cleaned`); a title that is only `~` gives "Pane".
 
 **November 24, 2026. Recording a pane (owner's and coordinator's
 decisions).** The owner asked for "a CTA to record the pane in the

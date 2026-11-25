@@ -167,10 +167,18 @@ enum RecordingFileName {
     /// holds 255, and the date, time and extension take 28.
     static let maximumTitleBytes = 255 - 28
 
+    /// What a name never starts with: a dot (a hidden file), a space, and
+    /// `-` or `~`, which a title that is a path leaves there (a shell
+    /// often titles its pane with its directory: `/tmp/work` would become
+    /// `-tmp-work` and `~/work` `~-work`, which a command line takes for
+    /// an option or expands).
+    private static let droppedAtStart: Set<Character> = [".", " ", "-", "~"]
+
     /// `title` made fit for a file name: `/` and `:` (which Finder shows as
     /// `/`) become `-`, control characters and runs of whitespace one
-    /// space, leading dots (a hidden file) and surrounding spaces go, and
-    /// it is cut to ``maximumTitleBytes`` bytes on a character boundary.
+    /// space, leading dots, dashes and tildes (``droppedAtStart``),
+    /// trailing dashes and surrounding spaces go, and it is cut to
+    /// ``maximumTitleBytes`` bytes on a character boundary.
     static func cleaned(_ title: String) -> String {
         var out = ""
         var lastWasSpace = false
@@ -185,7 +193,7 @@ enum RecordingFileName {
             out.unicodeScalars.append(scalar == "/" || scalar == ":" ? "-" : scalar)
         }
         var trimmed = Substring(out)
-        while trimmed.first == "." || trimmed.first == " " { trimmed = trimmed.dropFirst() }
+        while let first = trimmed.first, droppedAtStart.contains(first) { trimmed = trimmed.dropFirst() }
         var result = ""
         var bytes = 0
         for character in trimmed {
@@ -194,7 +202,7 @@ enum RecordingFileName {
             result.append(character)
             bytes += size
         }
-        while result.last == " " { result.removeLast() }
+        while result.last == " " || result.last == "-" { result.removeLast() }
         return result
     }
 }

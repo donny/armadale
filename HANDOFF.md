@@ -414,25 +414,37 @@ Shipping (step 9)
 
 From finished changes: not checked live, and found and not fixed
 - Recording a pane (November 24, 2026; `docs/DESIGN.md` sections 5, 7
-  and 8, "Recording a pane"). **Not checked live**: at the first
-  screenshot of the test build's window macOS put up an alert for the
-  Claude app ("requesting to bypass the system private window picker",
-  Allow / Open System Settings) that took the front; the live check
-  stopped there, with no input sent, and the alert was left for the owner
-  (`HANDOFF.local.md`). `scripts/check-quit.sh` passed on the final
-  build. Not seen: Record Pane… disabled before attach and enabled
-  after, and its absence on an empty pane; the save sheet's suggested
-  name, `.cast` kept with no extension typed and with `.txt`, replacing a
-  file, a read-only folder; ⌘Q, the Quit item and SIGTERM with the sheet
+  and 8, "Recording a pane"). **Checked live only in part**
+  (`docs/HISTORY.md`, "recording a pane"). The first live check stopped
+  at a macOS screen-capture alert for the Claude app, which the owner
+  has since answered with Allow (`HANDOFF.local.md`); the reviewer's
+  own, by accessibility presses on a test build, stopped early when the
+  Claude app came to the front. Seen live before that: no recording
+  item in an empty pane's menu; Record Pane…, enabled, in the menu of a
+  pane with a session; the save sheet with its suggested name and its
+  Cancel and Record buttons; the tab row's and the header's
+  accessibility labels while recording; a sound file from a real pane.
+  `scripts/check-quit.sh` passed on the build before the suggested
+  name's fix. Two things that pass left open, to look at first next
+  time: the recording was found ended before the reviewer pressed stop,
+  and nothing says why (someone at the Mac, or a defect); and whether a
+  "/" typed by hand into the save sheet confirms it, as a posted one
+  did. Not seen: Record Pane… disabled before attach; `.cast` kept with
+  no extension typed and with `.txt`, replacing a file, a read-only
+  folder; ⌘Q, the Quit item and SIGTERM with the sheet
   up (unit-tested through `endSheetsForQuit` and a presentation seam; the
   hook from `terminate` is not); the dot pulsing (Core Animation), still
-  pulsing after a title change, steady with Reduce Motion; the app's CPU
+  pulsing after a title change, a tab switch, minimize and ⌘H, steady
+  with Reduce Motion; the app's CPU
   with a recording pane visible, minimized, hidden; the stop button and
   the menu's Stop Recording; the tab's dot in the tab bar and the
-  sidebar, in the background, its accessibility text; a recording of
-  streaming coloured output and one at a shell prompt, parsed and played
-  back (no `asciinema` or `termcast` here); a quit and End Sessions and
+  sidebar, in the background; a recording of
+  streaming coloured output, one inside a full-screen program and one
+  at a shell prompt with commands, parsed and played
+  back (no `asciinema` or `termcast` here); a narrow pane's header; a
+  quit and End Sessions and
   Quit with a recording running; a host's removal; a full small volume;
+  the same file chosen in two panes;
   the problem alert on a real window; VoiceOver. Covered by tests
   instead: recording through the real persistence helper across a
   reattach, five recordings started inside a sequence with the pane
