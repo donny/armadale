@@ -798,8 +798,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, NST
         // AppKit sends the full-screen exit callbacks (and a resize) after
         // this when a full-screen window closes; none may report it open.
         isClosed = true
-        // A New Session or Edit Favorite sheet goes with its window.
+        // A New Session or Edit Favorite sheet goes with its window, and so
+        // does a Record Pane… save sheet.
         actions.endNewSessionSheet()
+        actions.endRecordSheet()
         content.stop()
         titleTask?.cancel()
         titleTask = nil

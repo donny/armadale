@@ -52,6 +52,9 @@ public protocol SessionControllerDelegate: AnyObject {
     /// rows (``SessionController/appliedSize``). The app records it as the
     /// session's last size (``Session/gridSize``).
     func sessionController(_ controller: SessionController, didApplySize size: PTYSize)
+    /// The pane's recording stopped because its file could not be written
+    /// (``SessionController/recording`` is `nil` again); tell the user.
+    func sessionController(_ controller: SessionController, recordingDidFail failure: RecordingFailure)
 }
 
 extension SessionControllerDelegate {
@@ -69,6 +72,7 @@ extension SessionControllerDelegate {
     }
     public func sessionController(_ controller: SessionController, didReplaceSurface old: any TerminalSurface) {}
     public func sessionController(_ controller: SessionController, didApplySize size: PTYSize) {}
+    public func sessionController(_ controller: SessionController, recordingDidFail failure: RecordingFailure) {}
 }
 
 /// The per-session glue between a backend's ``ProcessHandle`` and a
@@ -168,6 +172,21 @@ public final class SessionController {
     @ObservationIgnored private var isReconnectPaused = false
     /// Reattaches made because the client's backlog grew too large.
     @ObservationIgnored public private(set) var floodReattaches = 0
+
+    /// The pane's running recording (docs/DESIGN.md section 7, "Recording
+    /// a pane"), `nil` when there is none. Observed: the pane's header and
+    /// its tab show it.
+    public private(set) var recording: RecordingInfo?
+    @ObservationIgnored private var activeRecording: PaneRecording?
+    /// Ends the recording when its file cannot be written.
+    @ObservationIgnored private var recordingWatch: Task<Void, Never>?
+    /// The writer of the running recording, else of the last one, which
+    /// may still be writing what it was handed: a quit waits for it
+    /// (``RecordingFileWriter/waitForWriters(_:until:)``).
+    @ObservationIgnored public private(set) var recordingWriter: RecordingFileWriter?
+    /// Where the output stream stands: between sequences or inside one.
+    /// Fed every byte the surface is fed, recording or not.
+    @ObservationIgnored private(set) var streamTracker = TerminalStreamTracker()
 
     /// One attach of one process.
     private struct Binding {
@@ -308,6 +327,8 @@ public final class SessionController {
     /// a later close ends nothing. The session shows as unavailable.
     public func detachAsUnavailable(reason: String, backend: any PersistenceBackend) {
         guard !isClosed else { return }
+        // Nothing more will come from it: its recording ends.
+        endRecording()
         cancelAutomaticReconnect()
         if let handle = binding?.handle {
             abandonBinding()
@@ -378,6 +399,8 @@ public final class SessionController {
     /// ``detach()`` without waiting, for quitting: the client is hung up and
     /// its terminal closed before this returns; the session keeps running.
     public func detachNow() {
+        // Its file is closed before the app exits, within a second.
+        stopRecordingNow()
         cancelAutomaticReconnect()
         guard let handle = binding?.handle else { return }
         abandonBinding()
@@ -400,6 +423,7 @@ public final class SessionController {
         guard !isRespawning, !isClosed, !state.isUnavailable else { return }
         isRespawning = true
         defer { isRespawning = false }
+        endRecording()
         cancelAutomaticReconnect()
         let old = session
         automaticReattaches = 0
@@ -428,6 +452,7 @@ public final class SessionController {
     /// discarded afterwards.
     public func close() async {
         isClosed = true
+        endRecording()
         cancelAutomaticReconnect()
         await stopBinding(killing: !state.isUnavailable)
         setState(.ended(exitCode: nil))
@@ -442,8 +467,123 @@ public final class SessionController {
         if state.isAttached, let handle = binding?.handle {
             handle.write([0x0C])
         } else {
-            surface.feed(Array("\u{1b}[H\u{1b}[2J".utf8)[...])
+            feedSurface(Array("\u{1b}[H\u{1b}[2J".utf8)[...])
         }
+    }
+
+    // MARK: Recording
+
+    /// Whether Record Pane… can start a recording now: none is running and
+    /// there is a live terminal to record, that is, a client is attached and
+    /// feeding the surface. Starting, attaching, disconnected or
+    /// reconnecting, ended and unavailable sessions have none
+    /// (docs/DESIGN.md section 8, "Recording a pane").
+    public var canStartRecording: Bool {
+        activeRecording == nil && state.isAttached && !isClosed
+    }
+
+    /// Whether a recording is running.
+    public var isRecording: Bool { recording != nil }
+
+    /// Starts recording the pane into a new file at `url` (asciicast v2;
+    /// emptied if it exists), its header titled `title`. The first event is
+    /// the surface's screen (``TerminalSurface/screenSnapshot()``), then
+    /// everything the surface is fed and every grid size given to the
+    /// program, until ``stopRecording()``, the session's end, a respawn, a
+    /// close, the session becoming unreachable or ``detachNow()``. Throws
+    /// before anything changes: when a recording is running, when there is
+    /// no live terminal (``canStartRecording``), or when the file cannot be
+    /// created.
+    ///
+    /// When the output stream is inside a sequence (or a character) at
+    /// this moment (``streamTracker``), the recording is pending: the file
+    /// exists and ``recording`` is set, and it starts, snapshot first, at
+    /// the first point between sequences in the output that follows.
+    public func startRecording(to url: URL, title: String) throws(RecordingError) {
+        try checkCanRecord()
+        let writer = try RecordingFileWriter(url: url)
+        beginRecording(writer: writer, url: url, title: title)
+    }
+
+    /// ``startRecording(to:title:)`` into a writer the caller made (tests).
+    func startRecording(writer: RecordingFileWriter, url: URL, title: String) throws(RecordingError) {
+        try checkCanRecord()
+        beginRecording(writer: writer, url: url, title: title)
+    }
+
+    private func checkCanRecord() throws(RecordingError) {
+        guard activeRecording == nil else { throw .alreadyRecording }
+        guard state.isAttached, !isClosed else { throw .nothingToRecord }
+    }
+
+    private func beginRecording(writer: RecordingFileWriter, url: URL, title: String) {
+        let started = Date()
+        let recording = PaneRecording(url: url, writer: writer, timestamp: Int(started.timeIntervalSince1970), title: title)
+        activeRecording = recording
+        recordingWriter = writer
+        self.recording = RecordingInfo(url: url, startedAt: started)
+        if streamTracker.isBetweenSequences { startPendingRecording() }
+        recordingWatch = Task { [weak self, weak recording] in
+            for await reason in writer.failures {
+                guard let self, let recording else { return }
+                self.recordingFailed(recording, reason: reason)
+                return
+            }
+        }
+    }
+
+    /// The output is between sequences: a pending recording takes its
+    /// snapshot and starts.
+    private func startPendingRecording() {
+        guard let activeRecording, activeRecording.isPending else { return }
+        let grid = surface.gridSize
+        activeRecording.begin(columns: grid.columns, rows: grid.rows, snapshot: surface.screenSnapshot())
+        // The grid the program has, should it differ from the surface's.
+        recordAppliedSize()
+    }
+
+    /// Whether the recording waits for the output to come between
+    /// sequences.
+    public var isRecordingPending: Bool { activeRecording?.isPending ?? false }
+
+    /// Stops the running recording, if any; its file is closed once what
+    /// was recorded has been written, off the main actor.
+    public func stopRecording() {
+        endRecording()
+    }
+
+    /// Stops the running recording, if any, and waits for its file to be
+    /// closed, at most until `deadline` (quitting).
+    public func stopRecordingNow(until deadline: ContinuousClock.Instant = .now + .seconds(1)) {
+        guard let writer = activeRecording?.writer else { return }
+        endRecording()
+        writer.waitUntilDrained(until: deadline)
+    }
+
+    private func endRecording() {
+        guard let active = activeRecording else { return }
+        activeRecording = nil
+        recordingWatch?.cancel()
+        recordingWatch = nil
+        let grid = hasSurface ? surface.gridSize : GridSize(columns: active.columns, rows: active.rows)
+        active.finish(columns: grid.columns, rows: grid.rows)
+        recording = nil
+    }
+
+    /// The recording's file could not be written: it ends there, and the
+    /// delegate tells the user.
+    private func recordingFailed(_ failed: PaneRecording, reason: String) {
+        guard activeRecording === failed else { return }
+        activeRecording = nil
+        recordingWatch = nil
+        recording = nil
+        delegate?.sessionController(self, recordingDidFail: RecordingFailure(url: failed.url, reason: reason))
+    }
+
+    /// The grid size given to the program, for a running recording.
+    private func recordAppliedSize() {
+        guard let activeRecording, let appliedSize else { return }
+        activeRecording.resize(columns: Int(appliedSize.columns), rows: Int(appliedSize.rows))
     }
 
     // MARK: Binding
@@ -554,11 +694,12 @@ public final class SessionController {
         } else {
             appliedSize = size
         }
+        recordAppliedSize()
         binding.outputTask = Task { [weak self] in
             for await batch in handle.output {
                 guard let self, self.generation == generation else { return }
                 if let bytes = self.filter?.filter(batch), !bytes.isEmpty {
-                    self.surface.feed(bytes[...])
+                    self.feedSurface(bytes[...])
                 }
                 // While output keeps coming, `next()` resumes without ever
                 // suspending, so without this the loop would hold the main
@@ -679,8 +820,31 @@ public final class SessionController {
 
     /// Full terminal reset plus cleared scrollback.
     private func resetSurface() {
-        surface.feed(Array("\u{1b}c".utf8)[...])
+        feedSurface(Array("\u{1b}c".utf8)[...])
         surface.clearScrollback()
+    }
+
+    /// Everything the surface is shown goes through here (the output pump,
+    /// a reset, the filter's tail, ⌘K on an ended session), so a running
+    /// recording gets exactly what the pane shows.
+    private func feedSurface(_ bytes: ArraySlice<UInt8>) {
+        if let pending = activeRecording, pending.isPending,
+           let cut = streamTracker.feedToFirstGround(bytes) {
+            // The first point between sequences: the bytes up to it are
+            // not recorded, the snapshot is taken there, and the rest is.
+            let split = bytes.index(bytes.startIndex, offsetBy: cut)
+            surface.feed(bytes[..<split])
+            startPendingRecording()
+            let rest = bytes[split...]
+            guard !rest.isEmpty else { return }
+            streamTracker.feed(rest)
+            surface.feed(rest)
+            activeRecording?.output(rest)
+            return
+        }
+        if activeRecording?.isPending != true { streamTracker.feed(bytes) }
+        surface.feed(bytes)
+        activeRecording?.output(bytes)
     }
 
     private func end(exitCode: ProgramExit?) {
@@ -763,7 +927,7 @@ public final class SessionController {
         guard var current = filter else { return }
         filter = nil
         let tail = current.finish()
-        if !tail.isEmpty { surface.feed(tail[...]) }
+        if !tail.isEmpty { feedSurface(tail[...]) }
     }
 
     /// Forgets the current binding: events from it are ignored from now on.
@@ -791,6 +955,8 @@ public final class SessionController {
     private func setState(_ newState: SessionState) {
         guard state != newState else { return }
         state = newState
+        // The session is over: so is its recording (a respawn starts none).
+        if newState.isEnded { endRecording() }
         delegate?.sessionController(self, didChangeState: newState)
     }
 
@@ -821,6 +987,7 @@ extension SessionController: TerminalSurfaceDelegate {
         guard new.columns != appliedSize?.columns || new.rows != appliedSize?.rows else { return }
         handle.resize(new)
         appliedSize = new
+        recordAppliedSize()
         delegate?.sessionController(self, didApplySize: new)
     }
 

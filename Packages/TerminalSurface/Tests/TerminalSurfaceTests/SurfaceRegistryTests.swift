@@ -22,6 +22,7 @@ private final class StubSurface: TerminalSurface {
     func scrollToBottom() {}
     func find(_ query: String, direction: FindDirection) {}
     var selectedText: String? { nil }
+    func screenSnapshot() -> [UInt8] { [] }
 }
 
 @Suite("SurfaceRegistry")

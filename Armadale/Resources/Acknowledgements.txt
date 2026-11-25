@@ -9,6 +9,8 @@ SwiftTerm
 
 The SwiftTerm terminal renderer
 (https://github.com/migueldeicaza/SwiftTerm) is linked into Armadale.
+The transition table of its escape sequence parser is also adapted in
+Armadale's session code.
 MIT License:
 
 Copyright (c) 2019-2026 Miguel de Icaza (https://github.com/migueldeicaza)

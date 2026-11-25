@@ -70,6 +70,22 @@ struct StatusGlyph: View {
     static let attentionColor = Color.purple
 }
 
+/// A small steady red dot on a tab row (tab bar and sidebar) while any of
+/// the tab's panes is being recorded (DESIGN §8, "Recording a pane"). Not
+/// a status: it stands beside the glyph and takes no part in its
+/// precedence. Its accessibility label, "Recording", joins the row's.
+struct RecordingDot: View {
+    nonisolated static let size: CGFloat = 6
+
+    var body: some View {
+        Circle()
+            .fill(Color(nsColor: .systemRed))
+            .frame(width: Self.size, height: Self.size)
+            .help("Recording")
+            .accessibilityLabel("Recording")
+    }
+}
+
 /// The number of panes needing attention, as a small capsule (sidebar tab
 /// group and workspace rows). Nothing when zero.
 struct AttentionCount: View {

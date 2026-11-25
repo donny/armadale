@@ -101,6 +101,16 @@ What works today:
   **Window › Next Pane Needing Attention** (⌃⌘A) cycles through them. The
   Claude Code and Codex profiles are set up so both agents signal their
   pane; see [Notifications and agents](#notifications-and-agents).
+- **Recording a pane.** A running pane's menu has **Record Pane…**: pick
+  where to save, and from then on everything the pane shows (its output
+  only, never what you type) goes into an asciicast `.cast` file, the
+  format `asciinema play` reads, starting from what is on screen. While it
+  records, the pane's header shows a pulsing red dot and a stop button, and
+  its tab a red dot; **Stop Recording** is in the same menu. The recording
+  also ends with the session, when the pane closes, and when Armadale quits;
+  the file holds whole lines only, and a quit waits up to a second for it to
+  be written (a disk that stalls longer keeps what was written by then). See
+  docs/DESIGN.md sections 7 and 8.
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 

@@ -418,6 +418,7 @@ private struct TabRow: View {
             .lineLimit(1)
             .truncationMode(.middle)
             .foregroundStyle(isSelected || status == .attention ? .primary : .secondary)
+            if registry.isRecording(tab) { RecordingDot() }
             HostBadge(
                 hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions),
                 showsName: true)

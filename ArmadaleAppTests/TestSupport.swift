@@ -34,6 +34,7 @@ final class CountingSurface: TerminalSurface, TerminalSurfaceDelegate {
     func scrollToBottom() { inner.scrollToBottom() }
     func find(_ query: String, direction: FindDirection) { inner.find(query, direction: direction) }
     var selectedText: String? { inner.selectedText }
+    func screenSnapshot() -> [UInt8] { inner.screenSnapshot() }
 
     func surface(_ surface: any TerminalSurface, didInput bytes: [UInt8]) {
         inputs += bytes

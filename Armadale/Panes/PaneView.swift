@@ -111,6 +111,7 @@ final class PaneView: NSView {
         header.autoresizingMask = [.width, .minYMargin]
         header.focusPane = { [weak self] in self?.focusTerminal() }
         header.makeMenu = { [weak self] in self?.paneMenu() }
+        header.stopRecording = { [weak controller] in controller?.stopRecording() }
         addSubview(header)
         focusOverlay.frame = bounds
         focusOverlay.autoresizingMask = [.width, .height]
@@ -257,13 +258,19 @@ final class PaneView: NSView {
     func paneMenu() -> NSMenu {
         let theme = theme
         let save = theme.saveAsFavorite
+        let record = theme.record
+        let controller = controller
         return PaneMenu.make(
-            PaneMenu.Inputs(themeID: theme.current(), catalog: settings.themes, showsSaveAsFavorite: save != nil),
+            PaneMenu.Inputs(
+                themeID: theme.current(), catalog: settings.themes, showsSaveAsFavorite: save != nil,
+                recording: record == nil ? nil : .of(controller)),
             actions: PaneMenu.Actions(
                 splitRight: { theme.split(.horizontal) },
                 splitDown: { theme.split(.vertical) },
                 chooseTheme: { theme.choose($0) },
-                saveAsFavorite: { save?() }))
+                saveAsFavorite: { save?() },
+                record: { record?() },
+                stopRecording: { [weak controller] in controller?.stopRecording() }))
     }
 
     /// The card's corners, background and border for the current theme

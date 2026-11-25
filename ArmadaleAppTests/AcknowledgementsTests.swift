@@ -47,6 +47,15 @@ struct AcknowledgementsTests {
     /// Every copyright line, every license text (the fenced blocks, verbatim)
     /// and every colour-scheme credit of THIRD_PARTY_LICENSES.md, so the two
     /// cannot drift.
+    /// Both files say that SwiftTerm's parser table is adapted in the
+    /// session code (`TerminalStreamTracker`), not only linked.
+    @Test func bothSayTheParserTableIsAdapted() throws {
+        let licenses = try thirdPartyLicenses(), text = try bundled()
+        #expect(licenses.contains("transition table of its escape sequence parser"))
+        #expect(licenses.contains("ArmadaleSessions/TerminalStreamTracker.swift"))
+        #expect(text.contains("The transition table of its escape sequence parser is also adapted in\nArmadale's session code."))
+    }
+
     @Test func carriesEveryNoticeOfThirdPartyLicenses() throws {
         let text = try bundled()
         let licenses = try thirdPartyLicenses()

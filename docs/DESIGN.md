@@ -84,6 +84,10 @@ Each tab row carries a status glyph:
 | ⚠ unavailable | the persistent runtime could not be set up, or the session's host was removed |
 | starting (dotted circle) | not attached yet: starting or connecting, a new session whose pane has not been shown, or a restored one that is not attached while its location's first listing has not answered (or did not list it) |
 
+A tab row (in the sidebar and in the tab bar) also shows a small steady
+red dot while any of its panes is recorded (section 8, "Recording a
+pane"); it is not a state and takes no part in the precedence below.
+
 The glyph is shared by the sidebar's tab rows and the tab bar
 (`StatusGlyph`), computed by `SessionRegistry.glyphStatus(of:)` (the
 session's `status(of:)` with attention applied); a tab whose panes are all
@@ -1358,6 +1362,7 @@ without touching sessions or layout.
     func scrollToBottom()
     func find(_ query: String, direction: FindDirection)
     var selectedText: String? { get }
+    func screenSnapshot() -> [UInt8]                   // bytes that redraw the live screen on a fresh terminal
 }
 
 @MainActor protocol TerminalSurfaceDelegate: AnyObject {
@@ -1425,6 +1430,62 @@ without touching sessions or layout.
   keeps at least 2 columns and 1 row. Tested in `SwiftTermSurfaceTests`
   (outside a window; entering a window at the same size reports nothing, a
   wider frame one change).
+- `screenSnapshot()` returns bytes that, fed to a fresh terminal of the
+  same grid size, reproduce what the surface shows on its live screen: a
+  pane recording starts with it (section 7, "Recording a pane"), so a
+  program that redraws by moving the cursor relative to what is on screen
+  (Claude Code, Codex, any full-screen program) plays back right. The
+  view is scrolled to its live bottom first (a user who had scrolled back
+  sees the bottom again, as typing does). The bytes reset the pen, enter
+  the alternate screen (`?1049h`) when it is active, set reverse video
+  (DECSCNM, `?5h`) when it is on, turn wraparound off, draw every row (a
+  cursor position at the row's first non-blank cell, the full SGR of each
+  run, then its text; blank cells in the default pen are skipped with a
+  cursor move), and then set wraparound, the saved cursor (DECSC with the
+  saved position and pen, when they are not the defaults), the scroll
+  region (DECSTBM, when it is not the whole screen), origin mode, the
+  cursor position (relative to the region under origin mode), the pen and,
+  when hidden, the cursor's visibility (`?25l`). A cursor waiting to wrap
+  (past the last column after a character written there, as a row drawn
+  to the full width leaves it) is put there the same way: the last
+  column's character (a wide one's first cell, with its combining marks)
+  is written again with its SGR and wraparound on, so the program's next
+  character lands on the next row in a player too. Colours are 256-colour
+  indices (`38;5;n`, which SwiftTerm stores as it stores `30`–`37` and
+  `90`–`97`) and true colour; the attributes are bold, dim, italic,
+  underline with its style (`4:n`) and colour (`58`), blink, inverse,
+  invisible and crossed out. Wide characters, emoji and combining marks
+  are written as the cell holds them. Scrollback is not included.
+  *How SwiftTermSurface gets at it, through SwiftTerm 1.99.0's public API
+  only*: `TerminalView` keeps its `Terminal` internal, and the terminal
+  keeps cursor visibility, origin mode, wraparound and the pen's style
+  behind internal properties. The surface's view is a `TerminalView`
+  subclass (`SnapshotTerminalView`) that overrides the `open` method
+  `send(source:data:)`, through which the terminal hands every answer to
+  a query to its view: for one call it feeds DECRQM for modes 25, 6, 7
+  and 5 (`CSI ? n $ p`), keeps the answers from the program, and at the
+  first answer reads the screen with the `Terminal` it is handed
+  (`getLine`, `CharData`'s text, width and `Attribute`, `buffer.scrollTop`,
+  `scrollBottom`, `savedX`, `savedY` and `savedAttr`, `getCursorLocation`,
+  `isCurrentBufferAlternate`, `currentAttribute`, all public). SwiftTerm
+  parses and answers on the thread that feeds it, the main actor, so the
+  answers come back inside the call; the one asynchronous hop, to the
+  view's own delegate, is in the base `send` the override skips. The
+  queries are only ever fed between sequences: a recording waits for that
+  point (section 7). Tested by round trips in
+  `ScreenSnapshotTests` (`SwiftTermSurfaceTests`): a screen with colours,
+  attributes, wide characters, emoji, combining marks, erased cells with a
+  background, a pen not yet used and a hidden cursor away from home; the
+  alternate screen with a scroll region, origin mode and wraparound off;
+  a shell prompt over scrollback; a row drawn to the full width, a wide
+  character and a combining mark in the last column, each with the
+  cursor waiting to wrap and followed by more output; reverse video and a
+  saved cursor restored afterwards; a view scrolled back. Each is fed to
+  a second surface and compared cell by cell (text, width, attribute),
+  with the cursor, the alternate screen, the region, the pen, the saved
+  cursor and the modes, and no answer reaches the program, also after a
+  later turn of the main queue. What it does not capture is in section
+  13, "Recording a pane".
 
 ---
 
@@ -1833,6 +1894,139 @@ A session with `.remote(host)` location uses the same zmx model on the host.
 - ⌘K clears the surface's scrollback and sends ^L to the program, the
   conventional redraw key. A shell clears and redraws its own prompt, so
   its idea of the cursor stays correct. An ended pane is cleared locally.
+- **One feed path.** Everything a controller shows on its surface goes
+  through one private method (`SessionController.feedSurface`): the
+  output pump, the reset before an attach's replay and a respawn
+  (`resetSurface`, RIS), the output filter's tail (`finishFilter`), and
+  ⌘K on an ended session. That method also hands the bytes to a running
+  recording, so a recording holds exactly what the pane showed.
+
+### Recording a pane
+
+A pane can be recorded to a file (section 8, "Recording a pane", has the
+menu, the save sheet and what the pane shows). The format is asciicast
+v2, the asciinema `.cast` format that `asciinema play` and SwiftTerm's
+`termcast playback` read; Armadale writes it itself (`Asciicast`,
+`UTF8StreamDecoder`, `RecordingFileWriter`, `PaneRecording`,
+`TerminalStreamTracker` in `ArmadaleSessions`).
+
+- **The file.** The first line is the header, one JSON object with its
+  keys in this order: `{"version":2,"width":<columns>,"height":<rows>,
+  "timestamp":<Unix seconds, whole>,"title":<the pane's title>,"env":
+  {"TERM":"xterm-256color"}}`. Then one event per line, a JSON array:
+  `[<seconds>, "o", "<text>"]` for output and `[<seconds>, "r",
+  "<COLS>x<ROWS>"]` for a resize. Seconds are since the start, from a
+  monotonic clock (`ContinuousClock`), written with six decimals, and
+  never go backwards. Every line ends in a newline and holds no other:
+  every control character (C0, DEL and C1) and U+2028 and U+2029 (which
+  termcast's player splits lines on) are escaped in JSON, so are `"` and
+  `\`; the rest is written as UTF-8. Each line is written whole or not at
+  all (below), so the file is playable at every moment.
+- **Output only.** There is never an `"i"` (input) event or anything
+  taken from keystrokes: a typed password does not echo, and so never
+  reaches a file. Only what the surface is fed is recorded.
+- **Where the stream stands.** Every byte the surface is fed also goes
+  through a `TerminalStreamTracker`, recording or not: a copy of SwiftTerm
+  1.99.0's parser framing (its transition table, built the same way, and
+  the parse loop's runs of text and of string payload; the type's comment
+  lists what was copied), which says whether the stream is *between
+  sequences*: in the ground state with no UTF-8 character half written.
+  It costs about 2 µs per kilobyte of colourful output in an optimized
+  build (31 µs in a Debug build; `TerminalStreamTrackerTests` prints it).
+- **The start.** When Record is confirmed with the stream between
+  sequences, the recording starts at once. Otherwise it is *pending*:
+  the file is created (so a file that cannot be made is told at once),
+  the pane shows as recorded (`recording` is set,
+  `isRecordingPending` true), nothing is written, and it starts at the
+  first point between sequences in the output that follows: that batch
+  is fed to the surface up to that point without being recorded, the
+  snapshot is taken there, the header and the first frame are written,
+  and the rest of the batch is fed and recorded. There is no timeout. A
+  recording that ends while still pending writes its header alone, with
+  the grid size of that moment, and no snapshot. So the snapshot's
+  queries (section 5) never land inside a sequence the program left
+  unfinished, and the recording never begins with a sequence's tail or
+  half a character.
+- **The first event**, at time 0, is the surface's `screenSnapshot()`
+  (section 5), so a recording started in the middle of a session starts
+  from what the pane shows, not from a blank screen.
+- **What is recorded**: every batch the surface is fed (the single feed
+  path above), as text. Bytes are decoded as UTF-8 across batches: an
+  incomplete sequence at the end of a batch (at most three bytes) is held
+  for the next event, bytes that are not UTF-8 become U+FFFD, and what is
+  held is written when the recording ends. So a reset and the replay that
+  follows a reattach (the automatic one, the flood reattach, a reconnect,
+  a Retry) are in the recording: such a replay puts the session's
+  replayed screen and scrollback into the file, as the pane shows them.
+  The grid size given to the program (`appliedSize`: at every attach and
+  every resize that changes it) is an `"r"` event whenever it differs
+  from the last one recorded; the header's size is the surface's grid
+  when the recording starts.
+- **Writing.** The main actor hands `RecordingFileWriter` raw bytes and
+  their times; decoding, escaping and writing happen on a serial dispatch
+  queue of its own, off the main actor and in order. **Backlog cap**: more
+  than 32 MB handed over and not yet written (a disk or a network volume
+  that does not keep up) ends the recording as a failure. **Whole lines
+  only**: the writer keeps the file's length at the end of the last whole
+  line, and a write that fails or is cut short is truncated back to it.
+  The file is created (or emptied) with `open(O_CREAT | O_TRUNC |
+  O_CLOEXEC)`, mode 0644; when that fails, the start throws
+  (`RecordingError.cannotCreateFile`, with the system's reason) before
+  any recording state exists. A failure (a write error, a full disk, the
+  cap) closes the file, drops what follows and is reported once
+  (`failures`): the controller ends the recording and tells its delegate
+  (`recordingDidFail`), and the app says so (section 8).
+- **Lifetime** (`SessionController.startRecording(to:title:)`,
+  `stopRecording()`, `stopRecordingNow(until:)`, `recording`, observed;
+  `recordingWriter`, the writer of the running or last recording). One
+  recording per pane at a time: a start while one runs throws
+  `alreadyRecording`, and a start without a live terminal (the session
+  is not attached: `canStartRecording`) throws `nothingToRecord`. A
+  recording ends when the user stops it, when its session ends (the state
+  becomes ended, after the filter's tail is fed), when its pane is closed
+  (`close()`), when the session is respawned (`respawn()`, before the
+  reset: the fresh session is not recorded), when the session can no
+  longer be reached (its host removed: `detachAsUnavailable`), and when
+  Armadale quits. It goes on while its tab is in the background, while
+  its window is closed, in menu bar mode, and through disconnected,
+  reconnecting and reattaching. Ending a recording closes the file on the
+  writer's queue once what was handed over is written.
+- **The quit.** A quit never waits long: `SessionRegistry.detachAllNow`
+  (run by every quit that goes through, End Sessions and Quit's included)
+  ends every running recording and then waits for the files of all
+  recordings of the run that are not closed yet, those already ending
+  (a stop, a closed pane, an ended session, End Sessions and Quit) too:
+  the registry keeps their writers until they are closed
+  (`finishRecordingsForQuit`, `RecordingFileWriter.waitForWriters`).
+  `applicationWillTerminate` waits for them again. All these waits
+  together last at most **one second** from the first. A file whose
+  writer is done by then is complete; one that is not (a disk or volume
+  that stalls) keeps what was written, whole lines, unless the app exits
+  in the middle of a write. A running recording adds no question to
+  quitting or to closing a pane.
+- Tested in `AsciicastTests` (the header, events, escaping, U+2028 and
+  U+2029, a 2-, 3- and 4-byte character and a combining one split at
+  every pair of boundaries, invalid bytes, at most three bytes held, the
+  writer's order and its decoding across batches, a file that parses
+  after every event, a file that cannot be created, a failed write
+  reported once, a write cut short truncated to the last whole line, the
+  backlog cap, a bounded wait on a write that never returns),
+  `TerminalStreamTrackerTests` (every state, sequences of every kind and
+  characters split at every byte, SwiftTerm's quirks with CAN, SUB, ESC
+  and C1 bytes, whole batches against single bytes, the cost) and
+  `RecordingDifferentialTests` in `ArmadaleAppTests`, the guard for the
+  next SwiftTerm bump (54 kinds of token, each alone between text, and
+  ten seeded mixes, fed in random batches of 1 to 17 bytes; a recording
+  asked for at every byte offset and handled as the controller handles
+  it; the screen and the titles compared with a control fed the same
+  batches with no snapshot; the RIS quirk above named and expected), and
+  `SessionRecordingTests` (output after the snapshot, typed input never in
+  the file, a reset and a replay recorded, resize events, a recording
+  asked for inside a sequence starting after it, a pending recording
+  ended by a stop, the session's end, a close and a quit with its header
+  alone, the end with the session, a close, a respawn, a host's removal,
+  `detachNow()` and `stopRecordingNow()` with the file closed before they
+  return, refusals, a write failure).
 
 ### Concurrency rules
 
@@ -1969,7 +2163,8 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   status glyphs, drag reordering, and dragging a tab onto a sidebar tab group
   to move it. Tabs share the track's whole width equally (at least 110 pt)
   and scroll when they do not fit; each shows its status glyph, title
-  (custom, else session title, else profile name), a split/zoom hint, and
+  (custom, else session title, else profile name), a small steady red dot
+  while any of its panes is recorded ("Recording a pane" below), a split/zoom hint, and
   ⌘1…⌘8 badges on the first eight tabs and ⌘9 on the last tab when it is
   the ninth or later, which turn into a close button on
   hover. Click selects; dropping a tab on another takes its position (from
@@ -2171,13 +2366,21 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   field to each and a few lines to the builder. It holds **Split Right**
   and **Split Down** (the header's way to split, see "Pane cards" below),
   a separator, for a pane that has a session **Save as Favorite…** and
-  another separator (an empty pane's menu has neither), then **Theme**.
+  **Record Pane…** (which reads **Stop Recording** while the pane is
+  recorded; "Recording a pane" below) and another separator (an empty
+  pane's menu has none of them), then **Theme**.
   Save as Favorite… (`PaneMenu.Inputs.showsSaveAsFavorite`,
   `Actions.saveAsFavorite`, reached through
   `PaneThemeBinding.saveAsFavorite` and `SessionRegistry.saveAsFavorite(fromSession:)`)
   opens the New Favorite sheet of the window showing the pane
   (`WorkspaceActions.saveAsFavorite(fromSession:)`, "New sessions"
   below); it has no shortcut and is not in the application's Pane menu.
+  Record Pane… / Stop Recording (`PaneMenu.Inputs.recording`, a
+  `PaneMenu.RecordingItem`: `.record(isEnabled:)` or `.stop`;
+  `Actions.record`, `Actions.stopRecording`, reached through
+  `PaneThemeBinding.record` and `SessionRegistry.recordPane(session:)`)
+  has no shortcut either and is not in the application's Pane menu, so
+  the shortcut table does not change.
   The split items show the Pane menu's
   shortcuts (⌘D, ⇧⌘D, the same keys and modifiers; a test keeps the two
   equal; ⌘D with the menu open splits once) and split *the pane the menu
@@ -2259,9 +2462,11 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   custom title is the tab's, not the pane's) in the system font at 12 pt
   semibold at 70 % opacity, then the **working directory** (`~`-abbreviated,
   from the directory the registry records; nothing while unknown) in
-  12 pt regular at 55 %, both truncated in the middle; right, a **"…"
-  button** (`ellipsis` symbol, shown at 55 %, full opacity on hover) that
-  opens `paneMenu()` as a pull-down below itself. A **right-click anywhere
+  12 pt regular at 55 %, both truncated in the middle; right, while the
+  pane is recorded, a **red dot that pulses** and a **stop button**
+  ("Recording a pane" below), and a **"…" button** (`ellipsis` symbol,
+  shown at 55 %, full opacity on hover) that opens `paneMenu()` as a
+  pull-down below itself. A **right-click anywhere
   on the header** (or a Control-click, `menu(for:)`, standard AppKit; the
   header is never the program's) opens the same menu at the pointer; a
   click on the header focuses the pane as a click on the padding does; a
@@ -2317,7 +2522,7 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   `PaneHeaderHostingView` (an `NSHostingView`;
   `Panes/PaneHeaderView.swift`); its inputs are a
   small `PaneHeaderModel` struct (glyph status, title, directory,
-  attention, pane appearance) that the pane view keeps current from the
+  attention, pane appearance, whether it is recorded) that the pane view keeps current from the
   model the way the tab bar does. `mouseDown` focuses the pane then lets
   SwiftUI handle the click (the "…" button), `rightMouseDown` and
   `menu(for:)` (AppKit's Control-click) focus the pane and return its
@@ -2362,8 +2567,14 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   drawn by `PaneHeaderButton`); the title and the directory share what the
   row leaves them (`PaneCardStyle.headerTextSpace`: the header less 68 pt
   with a glyph, 10 leading, 12 glyph and 6, 6 on each side of the flexible
-  space, 24 for "…" and 4 trailing; less 50 pt without a glyph) by the
-  rule above. The pane's split travels with its theme in
+  space, 24 for "…" and 4 trailing; less 50 pt without a glyph; a
+  recording pane's controls take 40 pt more, `recordingControlsWidth` 34
+  and 6 after them) by the rule above. That is the arithmetic of the
+  header's row with everything shown: the view lays out its parts in an
+  `HStack` with those fixed widths and gaps and a flexible space (at
+  least 12 pt after the text), and the text gets what is left; which
+  parts show at a given width is `PaneCardStyle.headerParts` ("Recording
+  a pane" below), so nothing overlaps in a narrow pane. The pane's split travels with its theme in
   `PaneThemeBinding.split` (a `PaneView` by its session's current pane,
   an `EmptyPaneView` by its pane ID; detached: nothing), which ends in
   `WorkspaceActions.split(pane:axis:)` of the pane's window (the
@@ -2380,6 +2591,107 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   window's New Favorite sheet) and `PaneCardTests` (the "…" frame, the text space, the "…"
   menu's split items splitting their own pane after focusing it, through
   the window's actions, and an empty pane's).
+- **Recording a pane.** A pane that has a session can be recorded to an
+  asciicast v2 file (`.cast`; the format, what is recorded and when a
+  recording ends are section 7, "Recording a pane").
+  *The menu item.* The pane menu's **Record Pane…** is enabled when there
+  is a live terminal to record: the session is attached, a client feeding
+  the surface (`SessionController.canStartRecording`). In every other
+  state (starting, attaching, disconnected or reconnecting, ended,
+  unavailable) it is shown disabled. While the pane records, the item
+  reads **Stop Recording**, always enabled. An empty pane's menu has
+  neither. One recording per pane; several panes may record at once.
+  *The save sheet.* Record Pane… opens an `NSSavePanel` as a sheet on the
+  window showing the pane (`WorkspaceActions.recordPane(session:)`,
+  `WorkspaceActions+Recording.swift`), every time: there is no default
+  folder and no preference. Its suggested name is "<pane title>
+  <yyyy-MM-dd> at <HH.mm.ss>.cast" in the local time zone
+  (`RecordingFileName.suggested`): the title is the header's (the
+  session's title, else the profile's name), with `/` and `:` made `-`,
+  control characters and runs of whitespace made one space, leading dots
+  and surrounding spaces dropped, cut on a character boundary to 227
+  UTF-8 bytes (a file name holds 255; the date, time and extension take
+  28), "Pane" when nothing is left. The panel is given the type of the `.cast` extension
+  (`UTType(filenameExtension: "cast", conformingTo: .data)`, a dynamic
+  type; nothing is declared in Info.plist), other types are not allowed
+  and the extension is shown; its button reads Record. The recording
+  starts when the sheet is confirmed (Cancel records nothing; a recording
+  asked for inside a sequence waits for its end, section 7, and shows as
+  recording meanwhile). A file another pane is being recorded into is
+  refused ("Another pane is being recorded into “<name>”. Choose another
+  file."; `RecordingError.fileInUse`, compared after resolving `..` and
+  symbolic links), and so is a file whose earlier recording has ended but
+  whose writer has not closed it yet (the registry keeps every writer of
+  the run until it is closed). Opening it
+  does nothing while another sheet is up on the window or when there is
+  nothing to record. The sheet is taken down, recording nothing, when its
+  pane leaves the window (closed, or its tab moved to another workspace;
+  `WorkspaceActions.recordSheetIsWanted`, observed), when the window
+  closes, and before a quit (`AppDelegate.endSheetsForQuit`, "App
+  lifecycle" below), so ⌘Q, the Quit item and SIGTERM work with it up.
+  A file that cannot be created or is in use, or a recording that stops
+  because its file cannot be written (a write error, a full disk, the
+  backlog cap), is told in an alert sheet ("The recording could not
+  start." / "The recording stopped.", then the reason as a sentence of
+  its own; for a stop, that what was recorded until then is in the file).
+  The registry keeps these in order and shows one at a time
+  (`SessionRegistry.queueRecordingProblem`, `showNextRecordingProblem`):
+  on the window showing the pane when it is open, otherwise on the next
+  workspace window that opens or becomes key; each is also logged
+  (category `recording`). The alert ends before a quit and when its
+  window closes; a problem whose alert is taken down that way, not
+  answered, goes back to the head of the queue and is told on the next
+  window that becomes key. The save panel and the alert go up and down through
+  `WorkspaceActions.recordPanelPresenter` (sheets on the window), which
+  the tests replace so they put nothing on screen.
+  *The header.* While the pane records, its header shows, right of the
+  text and left of "…", a red dot (8 pt, in a 10 pt frame) that pulses
+  (its opacity swings between full and 25 % and back every 1.6 s,
+  `RecordingPulse`) and a stop button (20 × 20 pt, `stop.fill`,
+  `PaneCardStyle.stopButtonFrame`), both in the system red, not the
+  theme's foreground. The stop button's tooltip and accessibility label
+  are "Stop Recording", the dot's "Recording". The pulse is a Core
+  Animation opacity animation on the dot's layer (`PulsingDotView`, an
+  `NSViewRepresentable`), which the render server runs with no SwiftUI
+  update per frame; the view is kept when the header's root view is
+  replaced (a title or directory change), so the pulse goes on; it is
+  added again when the view comes back into a window, and the dot is
+  steady with Reduce Motion, following a change of that setting
+  (`NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`).
+  *A narrow header.* As the header narrows, things give way in this
+  order: the directory, the title (below 24 pt), the dot, the status
+  glyph; the stop button stays with "…" until even the two do not fit,
+  and then "…" alone shows (its menu has Stop Recording). Nothing ever
+  overlaps (`PaneCardStyle.headerParts(width:hasGlyph:isRecording:)`,
+  `headerWidth`, which the header reads from its width through a
+  `GeometryReader`; at 140 pt everything shows with the title
+  truncated, at 100 pt the glyph, the stop button and "…", at 80 pt the
+  stop button and "…", at 60 and 40 pt "…" alone). So at 60 pt and below
+  the header shows nothing of a recording (measured in review): the
+  tab's red dot is what says it then, and the "…" menu's Stop Recording
+  stops it.
+  `SessionRegistry.headerModel(for:)` reads the controller's `recording`,
+  so the header follows it.
+  *The tab.* A tab row in the tab bar and in the sidebar shows a small
+  steady red dot (`RecordingDot`, 6 pt, after the title) while any of the
+  tab's panes is recorded (`SessionRegistry.isRecording(_ tab:)`), also
+  with the tab in the background; "Recording" joins the row's
+  accessibility text. Tab group and workspace rows show nothing. It is
+  not a `SessionStatus` and takes no part in the glyph's precedence.
+  The words of the menu item and the controls are Record Pane…, Stop
+  Recording and Recording; the runtime is never named.
+  Tested in `PaneRecordingTests` (the item's title and state per case and
+  its absence in an empty pane and in the application's menus, the save
+  sheet opened from a terminal pane's menu and ended by a quit and by its
+  pane closing, the header following the recording through a title change
+  and its stop button, the give-way rule and the header drawn at 140, 100,
+  80, 60 and 40 pt, the dot's animation kept through a title change, the
+  tab's dot, problems told one at a time, a file in use refused, the
+  suggested name with an emoji title, five recordings asked for inside a
+  sequence or a character (the pane undisturbed, playback equal to it),
+  and two scripted sessions through a real controller and SwiftTerm
+  surface, recorded from the middle, whose files played on a fresh surface
+  give the pane's screen cell by cell).
 - Settings is an `NSWindowController` hosting SwiftUI tabs:
   **General** (notifications, "Ask before closing a pane with a running
   process", the picker "When quitting with running sessions", and
@@ -3018,9 +3330,11 @@ And for the dialog:
   nothing at all, without asking the delegate, while any window has a
   sheet attached (macOS 27), so the app's `NSApplication` subclass
   (`ArmadaleApplication`, the principal class) lets the delegate end every
-  window's New Session, Edit Favorite or New Favorite sheet first, and any
+  window's New Session, Edit Favorite or New Favorite sheet, its Record
+  Pane… save sheet and its alert about a recording first, and any
   sheet in Settings (`AppDelegate.endSheetsForQuit`, tested with a sheet of
-  each kind in three windows and one in a Settings window; the hook from
+  each kind in three windows and one in a Settings window, and with a save
+  sheet in `PaneRecordingTests`; the hook from
   `terminate` to it is not
   unit-tested); the panes stay empty, are saved so and show the chooser again
   at the next launch. No sheet comes back when the quit is cancelled (the
@@ -3991,11 +4305,12 @@ armadale/
 │   │                                UpdateCoordinator, UpdateQuitGate, UpdateSettings, UpdateText)
 │   │                                with AppDelegate+Updates, SparkleUpdater (the only file that
 │   │                                imports Sparkle; not in ArmadaleAppTests)
-│   ├── Windows/                     WorkspaceWindowController, WorkspaceActions, InlineRename,
+│   ├── Windows/                     WorkspaceWindowController, WorkspaceActions (+Recording: the
+│   │                                Record Pane… save sheet and its alert), InlineRename,
 │   │                                ContentViewController (+ PaneContainerView),
 │   │                                FullScreenSerializer, WindowGeometry (saved frames and screens)
 │   ├── Sidebar/                     SidebarView (SwiftUI)
-│   ├── Tabs/                        TabBarView, StatusGlyph, HostBadge (SwiftUI)
+│   ├── Tabs/                        TabBarView, StatusGlyph (+ RecordingDot), HostBadge (SwiftUI)
 │   ├── Panes/                       SplitTreeView, PaneView, SessionPlaceholderView,
 │   │                                EmptyPaneView + NewSessionPaneView + NewSessionChooser (the
 │   │                                chooser), NewSessionSheet + NewSessionForm (the dialog),
@@ -4009,6 +4324,8 @@ armadale/
 │   │                                SessionRegistry+LaunchAttach (restore at launch),
 │   │                                SessionRegistry+Remote (a backend and listing per host),
 │   │                                SessionRegistry+Delegate, GridSizeRecorder (last grid sizes),
+│   │                                SessionRegistry+Recording (recording a pane: the registry's part,
+│   │                                RecordingProblem, RecordingFileName),
 │   │                                SessionStatus / CloseRisk,
 │   │                                AttentionCenter (+ NotificationService, NotificationPolicy)
 │   ├── Settings/                    SettingsWindowController, Preferences, SwiftUI tabs
@@ -4034,10 +4351,14 @@ armadale/
 │   ├── ArmadaleSessions/            PTYProcess, CommandRunner, ZmxSessionDriver (+ Local/RemoteZmxBackend),
 │   │                                EphemeralBackend, SSHTransport, RemoteDeployer, ReconnectSchedule,
 │   │                                SessionController, LaunchResolver, HelperLocator, HelperInstaller,
-│   │                                OrphanReclaimer, RestorePolicy, LaunchAttachPlan (+ LaunchAttachQueue);
+│   │                                OrphanReclaimer, RestorePolicy, LaunchAttachPlan (+ LaunchAttachQueue),
+│   │                                Asciicast (+ UTF8StreamDecoder), RecordingFileWriter, PaneRecording,
+│   │                                TerminalStreamTracker (recording a pane: the format, the writer,
+│   │                                the events, where the output stream stands);
 │   │                                Sources/ctty-exec
 │   ├── TerminalSurface/             protocol, appearance types, SurfaceRegistry, GhosttyTheme parser
-│   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm)
+│   └── SwiftTermSurface/            SwiftTerm adapter (depends on SwiftTerm); ScreenSnapshot
+│                                    (SnapshotTerminalView, the screen snapshot of section 5)
 ├── Vendor/zmx/                      fetched binaries (git‑ignored)
 ├── Vendor/dmgbuild/                 dmgbuild virtual environment for releases (git‑ignored)
 ├── scripts/                         fetch-zmx.sh, zmx.lock, embed-zmx.sh, check-quit.sh,
@@ -4078,7 +4399,7 @@ armadale/
   quit decision, the running-session count, End Sessions against a
   recording backend, system quit events, the menu bar wording and the
   status menu's items; the New Session chooser and form; pane cards, the
-  pane menu and pane themes; the tab bar's style, track scrolling and
+  pane menu, pane themes and recording a pane; the tab bar's style, track scrolling and
   middle click; inline rename; the sidebar's focus and shown path; the
   placeholder's keyboard; the clean-exit rule; remote sessions in the
   registry; restore at launch through the registry (`LaunchAttachTests`
@@ -4531,6 +4852,59 @@ and each piece goes through the loop in `AGENTS.md` as a step did.
 
 ## 13. Risks and open points
 
+- **Recording a pane** (sections 5, 7 and 8). What the first frame
+  (`screenSnapshot()`) does not capture: the scrollback (a recording
+  starts with what is on screen); the primary screen while the alternate
+  one is active (a program that leaves the alternate screen during the
+  recording leaves the player on a blank primary screen, where the pane
+  shows what was there before; the same limit as a reattach's replay,
+  section 4); hyperlinks (OSC 8) and images; the soft-wrap marks of
+  wrapped lines (a later resize may reflow them differently in a player);
+  the active character set and the shift state (SwiftTerm keeps `charset`
+  private: a program that switched to line drawing with `ESC ( 0` before
+  the start draws letters in a player until it switches again); what
+  DECSC saved besides the position and the pen (its origin mode,
+  wraparound and character set are internal: the snapshot saves the
+  cursor with origin mode off and wraparound as it is now); tab stops,
+  insert mode, left and right margins, colours the program changed (OSC
+  4, 10, 11), the title, the cursor's style, and the modes that only
+  change input (keypad, cursor keys, mouse, bracketed paste);
+  `defaultInvertedColor` in a cell is written as the default colour.
+  Taking it scrolls a pane that was scrolled back to its live bottom.
+  A recording asked for while the program's output has stopped inside a
+  sequence or a character does not start until the output reaches the
+  end of it (section 7): measured on a pty with reads of at most 1024
+  bytes, 28 % to 57 % of the batch boundaries of colourful output fall
+  inside one, so about every second Record on a streaming agent waits,
+  usually for the next batch. Output that never comes back between
+  sequences (a program that stops halfway through, an endless DCS or
+  image) leaves the recording pending, shown as recording, with nothing
+  in the file but, when it ends, the header. The tracker copies SwiftTerm
+  1.99.0's framing; a SwiftTerm upgrade must re-check it (the type's
+  comment lists what was copied, `docs/HISTORY.md` the lines), and it
+  does not copy SwiftTerm's limits on OSC strings over 1 MB and APC
+  strings over 65 MB, nor one SwiftTerm quirk: after a RIS inside one
+  parse call SwiftTerm does not save its parser state at the end of that
+  call (`EscapeSequenceParser.swift`, `reset` about lines 824–830 and the
+  early return about lines 1434–1439), so a sequence left open at the end
+  of the same batch is dropped (`"ok\ec\e"` then `"[31mC"` prints
+  `[31mC`). With a recording pending across a RIS split over two reads,
+  the cut feeds the RIS on its own, the following sequence survives, and
+  the pane differs from what it would show without a recording, in the
+  right direction. `RecordingDifferentialTests` names the case and
+  expects it. Feeds the app makes to the surface itself (hiding
+  the cursor under a placeholder) are whole sequences made at a point
+  between sequences, never while a recording can start.
+  A reattach's replay (automatic, after a flood, a reconnect, a Retry)
+  lands in the recording, scrollback and all, as the pane shows it. A
+  recording has no size limit: it grows with the output for as long as it
+  runs; what bounds it is the writer's backlog (32 MB not yet written ends
+  it as a failure) and the disk (a full disk ends it, with whole lines
+  only). A quit waits at most one second for recordings' files; a disk
+  or volume that stalls longer keeps what was written. Players differ
+  from SwiftTerm in details (width tables, reflow), so a player may lay
+  out a wide or ambiguous character or a resize slightly differently from
+  the pane; the tests play back on SwiftTerm.
 - **Pane headers preference.** Pane cards (section 8) always show their
   header row; a "Show pane headers" preference that keeps the cards and
   gutters but drops the row is deferred. When it comes, the pane context

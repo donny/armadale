@@ -270,7 +270,7 @@ struct PaneMenuTests {
         let view = try #require(registry.paneView(for: session))
 
         let menu = view.paneMenu()
-        #expect(outline(menu) == ["Split Right", "Split Down", "—", "Save as Favorite…", "—", "Theme"])
+        #expect(outline(menu) == ["Split Right", "Split Down", "—", "Save as Favorite…", "Record Pane…", "—", "Theme"])
         try #require(menu.items.first { $0.identifier == PaneMenu.saveAsFavoriteItemIdentifier } as? ActionMenuItem)
             .handler()
         let form = try #require(controller.actions.newSessionForm)

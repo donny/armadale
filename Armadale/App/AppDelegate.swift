@@ -259,6 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationWillTerminate(_ notification: Notification) {
         persistenceTask?.cancel()
+        // Recordings' files, within the second the quit's first wait began.
+        registry.finishRecordingsForQuit()
         guard canSave else { return }
         // Sizes applied in the last half second, not yet in the model.
         registry.flushGridSizes()

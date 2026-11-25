@@ -3,8 +3,8 @@ import ArmadaleCore
 import ArmadaleSessions
 
 /// Where a pane's own theme (``Pane/themeID``) is read from and written to,
-/// how the pane is split from its header and its menu, and how its session
-/// is saved as a favorite: the model's pane record, reached from a
+/// how the pane is split from its header and its menu, how its session
+/// is saved as a favorite and how it is recorded: the model's pane record, reached from a
 /// ``PaneView`` through its session and from an ``EmptyPaneView`` through
 /// its pane ID (DESIGN §8, "Pane context menu", "Pane cards").
 ///
@@ -27,17 +27,22 @@ struct PaneThemeBinding: Sendable {
     /// The pane menu's Save as Favorite… for the pane's session, or `nil`
     /// for a pane without one (an empty pane's menu has no such item).
     let saveAsFavorite: (@MainActor @Sendable () -> Void)?
+    /// The pane menu's Record Pane… for the pane's session (its window's
+    /// save sheet), or `nil` for a pane that has no such item.
+    let record: (@MainActor @Sendable () -> Void)?
 
     init(
         current: @escaping @MainActor @Sendable () -> String?,
         choose: @escaping @MainActor @Sendable (String?) -> Void,
         split: @escaping @MainActor @Sendable (ArmadaleCore.Axis) -> Void = { _ in },
-        saveAsFavorite: (@MainActor @Sendable () -> Void)? = nil
+        saveAsFavorite: (@MainActor @Sendable () -> Void)? = nil,
+        record: (@MainActor @Sendable () -> Void)? = nil
     ) {
         self.current = current
         self.choose = choose
         self.split = split
         self.saveAsFavorite = saveAsFavorite
+        self.record = record
     }
 
     /// A pane outside any model (tests): always the Settings choice, and
@@ -58,11 +63,13 @@ struct PaneThemeBinding: Sendable {
     /// The pane showing `controller`'s session, whichever session that is
     /// now (a respawn replaces it; the pane stays), split by `splitter`
     /// (the model's own split when `nil`), its session saved as a favorite
-    /// by `saver` (without one, the pane's menu has no Save as Favorite…).
+    /// by `saver` (without one, the pane's menu has no Save as Favorite…)
+    /// and recorded by `recorder` (without one, no Record Pane…).
     @MainActor
     static func session(
         of controller: SessionController, in model: AppModel, splitter: Splitter? = nil,
-        saver: (@MainActor @Sendable (SessionID) -> Void)? = nil
+        saver: (@MainActor @Sendable (SessionID) -> Void)? = nil,
+        recorder: (@MainActor @Sendable (SessionID) -> Void)? = nil
     ) -> PaneThemeBinding {
         let splitter = splitter ?? { model.splitPane($0, axis: $1) }
         var save: (@MainActor @Sendable () -> Void)?
@@ -70,6 +77,13 @@ struct PaneThemeBinding: Sendable {
             save = { [weak controller] in
                 guard let controller else { return }
                 saver(controller.session.id)
+            }
+        }
+        var record: (@MainActor @Sendable () -> Void)?
+        if let recorder {
+            record = { [weak controller] in
+                guard let controller else { return }
+                recorder(controller.session.id)
             }
         }
         return PaneThemeBinding(
@@ -84,7 +98,8 @@ struct PaneThemeBinding: Sendable {
                 guard let controller, let place = model.place(of: controller.session.id) else { return }
                 splitter(place.pane, axis)
             },
-            saveAsFavorite: save)
+            saveAsFavorite: save,
+            record: record)
     }
 }
 
@@ -97,8 +112,8 @@ struct PaneThemeBinding: Sendable {
 ///
 /// It holds Split Right and Split Down (the pane it was opened for, not the
 /// focused one; each shows the Pane menu's shortcut), a separator, Save as
-/// Favorite… and another separator for a pane that has a session, then the
-/// Theme submenu.
+/// Favorite… and Record Pane… (Stop Recording while the pane records) and
+/// another separator for a pane that has a session, then the Theme submenu.
 ///
 /// ``make(_:actions:)`` is a pure function of its inputs, so the menu can be
 /// tested without a window. Items added later take their state from new
@@ -115,22 +130,44 @@ enum PaneMenu {
         var userThemes: [ThemeEntry]
         /// Whether Save as Favorite… is shown: the pane has a session.
         var showsSaveAsFavorite: Bool
+        /// The recording item, `nil` for none (an empty pane).
+        var recording: RecordingItem?
 
         /// The inputs for a pane whose theme is `themeID`, with `catalog`'s themes.
         @MainActor
-        init(themeID: String?, catalog: ThemeCatalog, showsSaveAsFavorite: Bool = false) {
+        init(
+            themeID: String?, catalog: ThemeCatalog, showsSaveAsFavorite: Bool = false, recording: RecordingItem? = nil
+        ) {
             self.init(
                 themeID: themeID, builtInThemes: ThemeCatalog.builtIns, userThemes: catalog.userThemes,
-                showsSaveAsFavorite: showsSaveAsFavorite)
+                showsSaveAsFavorite: showsSaveAsFavorite, recording: recording)
         }
 
         init(
-            themeID: String?, builtInThemes: [ThemeEntry], userThemes: [ThemeEntry], showsSaveAsFavorite: Bool = false
+            themeID: String?, builtInThemes: [ThemeEntry], userThemes: [ThemeEntry], showsSaveAsFavorite: Bool = false,
+            recording: RecordingItem? = nil
         ) {
             self.themeID = themeID
             self.builtInThemes = builtInThemes
             self.userThemes = userThemes
             self.showsSaveAsFavorite = showsSaveAsFavorite
+            self.recording = recording
+        }
+    }
+
+    /// The recording item of a pane that has a session (docs/DESIGN.md
+    /// section 8, "Recording a pane").
+    enum RecordingItem: Equatable {
+        /// Record Pane…, enabled when there is a live terminal to record
+        /// (``SessionController/canStartRecording``).
+        case record(isEnabled: Bool)
+        /// Stop Recording: the pane is recording.
+        case stop
+
+        /// The item for a pane whose controller is `controller`.
+        @MainActor
+        static func of(_ controller: SessionController) -> RecordingItem {
+            controller.isRecording ? .stop : .record(isEnabled: controller.canStartRecording)
         }
     }
 
@@ -145,6 +182,10 @@ enum PaneMenu {
         /// Save as Favorite…: the New Favorite sheet, filled in from the
         /// pane's session.
         var saveAsFavorite: @MainActor () -> Void = {}
+        /// Record Pane…: the window's save sheet, then the recording.
+        var record: @MainActor () -> Void = {}
+        /// Stop Recording.
+        var stopRecording: @MainActor () -> Void = {}
     }
 
     static let splitRightTitle = "Split Right"
@@ -158,6 +199,9 @@ enum PaneMenu {
     static let splitDownShortcut = (key: "d", modifiers: NSEvent.ModifierFlags([.command, .shift]))
     static let saveAsFavoriteTitle = "Save as Favorite…"
     static let saveAsFavoriteItemIdentifier = NSUserInterfaceItemIdentifier("armadale.pane.save-as-favorite")
+    static let recordTitle = "Record Pane…"
+    static let stopRecordingTitle = "Stop Recording"
+    static let recordItemIdentifier = NSUserInterfaceItemIdentifier("armadale.pane.record")
     static let themeTitle = "Theme"
     static let defaultThemeTitle = "Default"
     static let themeItemIdentifier = NSUserInterfaceItemIdentifier("armadale.pane.theme")
@@ -177,6 +221,20 @@ enum PaneMenu {
             let save = ActionMenuItem(title: saveAsFavoriteTitle, handler: actions.saveAsFavorite)
             save.identifier = saveAsFavoriteItemIdentifier
             menu.addItem(save)
+        }
+        if let recording = inputs.recording {
+            let item: ActionMenuItem
+            switch recording {
+            case .record(let isEnabled):
+                item = ActionMenuItem(title: recordTitle, handler: actions.record)
+                item.isEnabled = isEnabled
+            case .stop:
+                item = ActionMenuItem(title: stopRecordingTitle, handler: actions.stopRecording)
+            }
+            item.identifier = recordItemIdentifier
+            menu.addItem(item)
+        }
+        if inputs.showsSaveAsFavorite || inputs.recording != nil {
             menu.addItem(.separator())
         }
         menu.addItem(themeItem(inputs, actions: actions))

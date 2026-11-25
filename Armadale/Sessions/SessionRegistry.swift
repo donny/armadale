@@ -108,6 +108,16 @@ final class SessionRegistry {
     /// The actions of a workspace's open window (set by the app delegate),
     /// through which a pane's header and menu split it (``split(pane:axis:)``).
     @ObservationIgnored var actionsOfWorkspace: (WorkspaceID) -> WorkspaceActions? = { _ in nil }
+    /// The writers of the recordings started in this run whose files may
+    /// still be open: a quit waits for them (SessionRegistry+Recording.swift).
+    @ObservationIgnored var recordingWriters: [RecordingFileWriter] = []
+    /// How long a quit may wait for recordings, all together: set by the
+    /// first wait of a quit and kept for the later ones.
+    @ObservationIgnored var recordingQuitDeadline: ContinuousClock.Instant?
+    /// Problems with recordings still to be shown, in order, one at a time.
+    @ObservationIgnored var recordingProblems: [QueuedRecordingProblem] = []
+    /// One of them is up as a sheet.
+    @ObservationIgnored var isShowingRecordingProblem = false
     /// Sessions recorded by an earlier run of the app. They are attached to,
     /// never created: a session that is gone must show as ended, not be
     /// silently replaced by a fresh shell.

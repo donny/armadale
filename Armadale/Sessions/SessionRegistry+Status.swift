@@ -122,17 +122,21 @@ extension SessionRegistry {
     /// What the header of `sessionID`'s pane card shows (DESIGN §8, "Pane
     /// cards"): its glyph (◐ while it needs attention), the session's title
     /// else its profile's name, its working directory once its program has
-    /// reported it (else nothing: unknown), and its attention.
+    /// reported it (else nothing: unknown), its attention, and whether it
+    /// is being recorded.
     func headerModel(for sessionID: SessionID) -> PaneHeaderModel {
+        let isRecording = controllers[sessionID]?.isRecording ?? false
         guard let session = model.session(sessionID) else {
-            return PaneHeaderModel(status: glyphStatus(of: sessionID), title: "Shell", directory: nil)
+            return PaneHeaderModel(
+                status: glyphStatus(of: sessionID), title: "Shell", directory: nil, isRecording: isRecording)
         }
         return PaneHeaderModel(
             status: glyphStatus(of: sessionID),
             title: PaneHeaderModel.title(sessionTitle: session.title, profileName: model.profile(session.profileID)?.name),
             directory: reportedDirectories.contains(sessionID)
                 ? model.abbreviatedDirectory(session.workingDirectory, location: session.location) : nil,
-            needsAttention: attention?.needsAttention(sessionID) ?? false)
+            needsAttention: attention?.needsAttention(sessionID) ?? false,
+            isRecording: isRecording)
     }
 
     func displayName(of session: Session) -> String {

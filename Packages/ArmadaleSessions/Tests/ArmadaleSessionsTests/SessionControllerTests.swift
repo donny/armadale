@@ -9,7 +9,7 @@ import Testing
 // MARK: Fakes
 
 @MainActor
-private final class FakeSurface: TerminalSurface {
+final class FakeSurface: TerminalSurface {
     let view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
     weak var delegate: (any TerminalSurfaceDelegate)?
     var gridSize = GridSize(columns: 100, rows: 30, cellWidth: 7, cellHeight: 14)
@@ -28,9 +28,12 @@ private final class FakeSurface: TerminalSurface {
     func scrollToBottom() {}
     func find(_ query: String, direction: FindDirection) {}
     var selectedText: String? { nil }
+    /// What ``screenSnapshot()`` answers (a recording's first event).
+    var snapshot: [UInt8] = Array("SNAPSHOT".utf8)
+    func screenSnapshot() -> [UInt8] { snapshot }
 }
 
-private final class FakeHandle: ProcessHandle {
+final class FakeHandle: ProcessHandle {
     struct Record {
         var writes: [[UInt8]] = []
         var resizes: [PTYSize] = []
@@ -63,6 +66,7 @@ private final class FakeHandle: ProcessHandle {
     }
 
     func emit(_ text: String) { continuation.yield(Array(text.utf8)) }
+    func emitBytes(_ bytes: [UInt8]) { continuation.yield(bytes) }
     func finishOutput() { continuation.finish() }
     func exit(_ code: Int32?) { exitLatch.set(code) }
 
@@ -77,7 +81,7 @@ private final class FakeHandle: ProcessHandle {
     var isRunning: Bool { exitLatch.value == nil }
 }
 
-private actor FakeBackend: PersistenceBackend {
+actor FakeBackend: PersistenceBackend {
     private(set) var handles: [FakeHandle] = []
     private(set) var created: [(session: Session, size: PTYSize)] = []
     private(set) var killed: [SessionID] = []
@@ -164,7 +168,7 @@ private actor FakeBackend: PersistenceBackend {
 }
 
 @MainActor
-private final class RecordingDelegate: SessionControllerDelegate {
+final class RecordingDelegate: SessionControllerDelegate {
     var states: [SessionState] = []
     var titles: [String] = []
     var versions: [String] = []
@@ -190,6 +194,10 @@ private final class RecordingDelegate: SessionControllerDelegate {
         replacedSurfaces.append(ObjectIdentifier(old))
     }
     func sessionController(_ controller: SessionController, didApplySize size: PTYSize) { appliedSizes.append(size) }
+    var recordingFailures: [RecordingFailure] = []
+    func sessionController(_ controller: SessionController, recordingDidFail failure: RecordingFailure) {
+        recordingFailures.append(failure)
+    }
 }
 
 /// Holds back everything until the end of the stream.

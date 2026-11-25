@@ -52,7 +52,8 @@ extension SessionRegistry {
             theme: .session(
                 of: controller, in: model,
                 splitter: { [weak self] in self?.split(pane: $0, axis: $1) },
-                saver: { [weak self] in self?.saveAsFavorite(fromSession: $0) }))
+                saver: { [weak self] in self?.saveAsFavorite(fromSession: $0) },
+                recorder: { [weak self] in self?.recordPane(session: $0) }))
         pane.titleProvider = { [weak self, weak controller] in
             guard let self, let controller else { return "Shell" }
             return self.displayName(of: controller.session)

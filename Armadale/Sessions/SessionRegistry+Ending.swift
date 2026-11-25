@@ -82,9 +82,12 @@ extension SessionRegistry {
     /// Disconnects every client at once without ending any session; used
     /// when the app quits (synchronous, so quitting never waits). The grid
     /// sizes not yet recorded are written to the model first, so the save
-    /// at quit has them.
+    /// at quit has them, and every recording is ended and its file, like
+    /// those of recordings already ending, written and closed within one
+    /// second in all (``finishRecordingsForQuit()``).
     func detachAllNow() {
         gridSizes.flush()
+        finishRecordingsForQuit()
         for controller in controllers.values where controller.state.isAttached {
             controller.detachNow()
         }

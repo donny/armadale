@@ -31,6 +31,10 @@ extension SessionRegistry: SessionControllerDelegate {
         }
     }
 
+    func sessionController(_ controller: SessionController, recordingDidFail failure: RecordingFailure) {
+        recordingFailed(controller, failure: failure)
+    }
+
     func sessionController(_ controller: SessionController, didSetTitle title: String) {
         model.setTitle(title, for: controller.session.id)
     }

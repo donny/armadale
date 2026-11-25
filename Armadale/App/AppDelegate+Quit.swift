@@ -12,7 +12,8 @@ import UserNotifications
 extension AppDelegate {
     /// Before AppKit's `terminate(_:)` (``ArmadaleApplication``), which does
     /// nothing while a sheet is attached: every window's New Session, Edit
-    /// Favorite or New Favorite sheet is taken down without closing its pane
+    /// Favorite or New Favorite sheet, Record Pane… save sheet (nothing is
+    /// recorded) and alert about a recording is taken down without closing its pane
     /// (an empty pane keeps the chooser, saved empty, and shows it again at
     /// the next launch); a sheet in Settings (Profiles' Configure…) is ended
     /// too. A cancelled quit does not bring a sheet back: the pane's chooser
@@ -25,9 +26,13 @@ extension AppDelegate {
 
     /// ``prepareForQuit()``'s work, separate so it can be tested: ends the
     /// New Session, Edit Favorite or New Favorite sheet of every workspace
-    /// window, and any sheet on the Settings window.
+    /// window, its Record Pane… save sheet and its alert about a recording,
+    /// and any sheet on the Settings window.
     static func endSheetsForQuit(workspaceWindows: [WorkspaceWindowController], settingsWindow: NSWindow?) {
-        for controller in workspaceWindows { controller.actions.endNewSessionSheet() }
+        for controller in workspaceWindows {
+            controller.actions.endNewSessionSheet()
+            controller.actions.endRecordSheet()
+        }
         if let window = settingsWindow, let sheet = window.attachedSheet {
             window.endSheet(sheet)
         }

@@ -13,7 +13,7 @@ import TerminalSurface
 public final class SwiftTermSurface: TerminalSurface {
     public weak var delegate: (any TerminalSurfaceDelegate)?
 
-    private let terminalView: TerminalView
+    private let terminalView: SnapshotTerminalView
     private let bridge: DelegateBridge
     /// The appearance last applied.
     public private(set) var appearance: TerminalAppearance
@@ -34,7 +34,7 @@ public final class SwiftTermSurface: TerminalSurface {
 
     /// Creates a surface with `appearance` applied.
     public init(appearance: TerminalAppearance = .default) {
-        terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        terminalView = SnapshotTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         bridge = DelegateBridge()
         self.appearance = appearance
         bridge.owner = self
@@ -164,6 +164,53 @@ public final class SwiftTermSurface: TerminalSurface {
 
     public var selectedText: String? {
         terminalView.getSelection()
+    }
+
+    /// The live screen as bytes for a fresh terminal (``TerminalSurface/screenSnapshot()``).
+    /// The view scrolls to the bottom first, then the terminal is asked for
+    /// the modes it keeps internal (DECRQM for 25, 6, 7 and 5; the answers
+    /// never reach the program) and read, through SwiftTerm's public API,
+    /// while it answers (``SnapshotTerminalView``). SwiftTerm parses and
+    /// answers on the feeding thread, so the reading is always there; were
+    /// it not, nothing would be given (an empty snapshot).
+    public func screenSnapshot() -> [UInt8] {
+        scrollToBottom()
+        let box = ReadingBox<ScreenReading>()
+        let answers = terminalView.answers(to: SnapshotModes.queries) { terminal in
+            let reading = ScreenReading.read(terminal)
+            box.value.withLock { $0 = reading }
+        }
+        guard let reading = box.value.withLock({ $0 }) else { return [] }
+        return reading.bytes(modes: SnapshotModes(answers: answers))
+    }
+
+    /// Runs `body` with the terminal (through a DECRQM answer, as
+    /// ``screenSnapshot()`` does). Internal, for tests.
+    func withTerminal<Value: Sendable>(_ body: @escaping @Sendable (Terminal) -> Value) -> Value? {
+        let box = ReadingBox<Value>()
+        _ = terminalView.answers(to: Array("\u{1b}[?25$p".utf8)) { terminal in
+            let value = body(terminal)
+            box.value.withLock { $0 = value }
+        }
+        return box.value.withLock { $0 }
+    }
+
+    /// The modes ``screenSnapshot()`` asks for, answered now. Internal, for tests.
+    func currentModes() -> SnapshotModes {
+        SnapshotModes(answers: terminalView.answers(to: SnapshotModes.queries))
+    }
+
+    /// The text of the rows on view, from the view's public state, without
+    /// feeding the terminal anything (``screenState()`` asks it a query,
+    /// which would cut short a sequence the program left unfinished).
+    /// Internal, for tests.
+    func visibleText() -> [String] {
+        terminalView.terminalStateSnapshot().visibleRows.map(\.text)
+    }
+
+    /// Scrolls the view to the top of its scrollback. Internal, for tests.
+    func scrollToTop() {
+        terminalView.scroll(toPosition: 0)
     }
 
     // MARK: Delegate forwarding

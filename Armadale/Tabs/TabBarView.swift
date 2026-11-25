@@ -619,6 +619,7 @@ private struct TabItemView: View {
         let sessions = tab.layout.leaves().compactMap { tab.pane($0)?.sessionID }
         let status = registry.glyphStatus(of: sessions)
         let needsAttention = Self.needsAttention(tab, registry: registry)
+        let isRecording = registry.isRecording(tab)
         HStack(spacing: 6) {
             StatusGlyph(status: sessions.isEmpty ? nil : status)
             HostBadge(hosts: registry.hosts(of: sessions), persistenceNote: registry.persistenceNote(of: sessions))
@@ -632,6 +633,7 @@ private struct TabItemView: View {
                     .truncationMode(.middle)
                     .foregroundStyle(titleStyle)
             }
+            if isRecording { RecordingDot() }
             if tab.layout.isSplit {
                 Image(systemName: tab.zoomedPaneID == nil ? "rectangle.split.2x1" : "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 9))

@@ -25,6 +25,7 @@ final class StubRendererSurface: TerminalSurface {
     func scrollToBottom() {}
     func find(_ query: String, direction: FindDirection) {}
     var selectedText: String? { nil }
+    func screenSnapshot() -> [UInt8] { [] }
 }
 
 /// Settings reach panes that already exist: appearance at once, the

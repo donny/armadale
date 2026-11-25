@@ -2992,6 +2992,103 @@ with its item, Sparkle's question at the second launch in a Release
 build, and an update between two Developer ID signed builds, which
 only the next release can show.
 
+## November 24, 2026: recording a pane
+
+The owner asked for a way to record a pane from its context menu, with
+a pulsing red light while it records and a stop button; he took SwiftTerm
+to record through termcast. It does not in a way Armadale can use
+(Part 2, section 7: termcast is a separate tool that starts its own
+shell), so Armadale writes the same file format, asciicast v2, itself.
+The owner decided the save sheet each time, the header's dot and stop
+button, and the tab's dot; the coordinator decided the rest (Part 2,
+section 8). Built by the implementer, reviewed the same day, fixed after
+the review; not committed when this was written.
+
+- **What was built.** `TerminalSurface.screenSnapshot()` (section 5), in
+  `SwiftTermSurface` through a `TerminalView` subclass that reads the
+  terminal while it answers four DECRQM queries; in `ArmadaleSessions`
+  the format (`Asciicast`, `UTF8StreamDecoder`), the writer
+  (`RecordingFileWriter`: decoding, escaping and writing on its own
+  queue, a 32 MB backlog cap, whole lines only, a bounded wait), the
+  recording (`PaneRecording`, which can be pending), the tracker of where
+  the output stream stands (`TerminalStreamTracker`, a copy of SwiftTerm's
+  parser framing) and the controller's API (`startRecording(to:title:)`,
+  `stopRecording()`, `stopRecordingNow(until:)`, `recording`,
+  `isRecordingPending`, `canStartRecording`, `recordingWriter`,
+  `recordingDidFail`), with the four `surface.feed` sites made one
+  (`feedSurface`); in the app the pane menu's Record Pane… / Stop
+  Recording, the save sheet and the problem alert behind a presentation
+  seam (`WorkspaceActions+Recording.swift`), the header's Core Animation
+  dot, stop button and give-way rule, the tab's dot in the tab bar and the
+  sidebar, the registry's part (`SessionRegistry+Recording.swift`: a file
+  in use refused, problems told one at a time, the quit's one-second wait
+  for every writer of the run), and the save sheet ended in
+  `endSheetsForQuit` and when its window closes.
+- **The review** (the coordinator's fix list: one blocker, seven medium,
+  the rest low; Part 2, sections 5, 7 and 8). The blocker: Record
+  confirmed while the output had stopped inside a sequence cut that
+  sequence short in the pane and began the file with its tail, about
+  every second Record on a streaming agent. Now the recording waits for
+  the first point between sequences. The others: a quit's unbounded wait
+  on a writer, a quit leaving a file unfinished after an asynchronous
+  end, a host's removal not ending the recording, the `TimelineView`
+  pulse's cost, decoding on the main actor, U+2028 and U+2029 written
+  raw, half a line after a failed write, failures dropped, the pending
+  wrap and reverse video and the saved cursor missing from the snapshot,
+  a test that could not catch a late answer, overlaps in a very narrow
+  header, test-only API, the save-panel tests putting windows on screen,
+  two recordings into one file, a name over 255 bytes; each fixed and
+  tested.
+- **How it was checked.** The gate before the change: 946 tests, no
+  warning from Armadale's code. After the first build: 985; after the
+  review's fixes: 1005, no warning from Armadale's code (not even the
+  tool's "missing a dependency" line in that run). New since the first
+  build: `TerminalStreamTrackerTests` (6), more `AsciicastTests` (the
+  writer's raw bytes, U+2028, a write cut short, the cap, the bounded
+  wait), pending recordings and a host's removal in
+  `SessionRecordingTests`, the pending wrap, reverse video and the saved
+  cursor in `ScreenSnapshotTests`, and in `PaneRecordingTests` the
+  give-way rule, the header drawn at five widths, the dot's animation
+  through a title change, problems one at a time, a file in use, an emoji
+  name, and the reviewer's five splits end to end (the pane equal to an
+  undisturbed terminal, playback equal to the pane). The tracker costs
+  about 2.2 µs per kilobyte of colourful output optimized, 31 µs in
+  Debug. The SSH integration tests did not run.
+- **Live check: stopped at the first screenshot.** The owner had granted
+  Accessibility, event posting, Screen Recording and Automation that day
+  (all four read true). After waiting for the idle gate (the owner had
+  been away for 35 minutes), a test build copy with its own environment
+  was launched and one screenshot of its window was taken with
+  `screencapture -l`. macOS then put up an alert from
+  UserNotificationCenter for the Claude app ("requesting to bypass the
+  system private window picker", Allow / Open System Settings), which
+  took the front; the next frontmost check refused the first click, so
+  no input was sent, and the live part stopped there. The alert was left
+  unanswered for the owner (`HANDOFF.local.md`). The test build was ended
+  by SIGTERM to its pid, its state directory, defaults suite, app copy and
+  screenshot removed. `scripts/check-quit.sh` passed on the final build
+  (158, 71 and 138 ms). HANDOFF lists what was not seen.
+- **Found.** SwiftTerm's DECRQSS answer for the pen is wrong for basic
+  colours (a trailing separator that reads back as a reset) and leaves
+  out dim, italic, crossed out and the underline style, so the pen is
+  read from `Terminal.currentAttribute` (Part 2, section 5). In SwiftTerm
+  CAN does not end a CSI or an escape, and a UTF-8 continuation byte below
+  0xA0 at the start of a read ends an OSC string (Part 2, section 7). The
+  accessibility tree of a SwiftUI header in an unhosted test is empty, so
+  the header tests read the drawn picture. A test that reads the screen
+  through a query (`screenState()`) disturbs a sequence the program left
+  unfinished, so the split tests wait on the view's public text instead.
+  The first screenshot an agent takes can raise a system alert that
+  takes the front (above).
+- **Second review** (the same day; no live part, the alert still up).
+  The reviewer confirmed the 17 fixes and the gate, and found four low
+  things, fixed with a fifth item: the differential test against SwiftTerm
+  is in the tree; SwiftTerm's RIS quirk (Part 2, section 7) is written
+  down, not copied; a file whose earlier recording is still being written
+  is refused; a problem alert taken down unanswered is told again; the
+  licence files say SwiftTerm's parser table is adapted. Gate: 1009 tests,
+  no warning from Armadale's code.
+
 ---
 
 # Part 2: the history of each design section
@@ -3513,6 +3610,62 @@ answers `loaded` for it (Part 1, "Armadale 0.1.2, released").
 
 ## 5. Terminal rendering: `TerminalSurface`
 
+**November 24, 2026, review. The snapshot completed.** The reviewer
+found that a cursor waiting to wrap (past the last column after a
+character written there, as agent interfaces leave it after a row drawn
+to the full width) was put on the last column, so the program's next
+character landed there in a player instead of on the next row. The
+remedy, through public API: when the cursor's x equals the column count,
+the last column's character is written again with wraparound on.
+DECSCNM (mode 5) was added to the queries, and the saved cursor (DECSC:
+`buffer.savedX`, `savedY`, `savedAttr`, public) to what is captured; the
+active character set is private (`Terminal.charset`) and stays out, as do
+the origin mode, wraparound and character set DECSC saved. The text-only
+fallback for a terminal that does not answer was removed: it could not be
+reached (without SwiftTerm's render session the queries are dropped too).
+
+**November 24, 2026. `screenSnapshot()`.** Added for recording a pane
+(section 7): a recording started in the middle of a session must not
+start from a blank screen, because programs that redraw by moving the
+cursor relative to what is on screen (Claude Code, Codex, any full-screen
+program) would play back garbled. The coordinator's floor was text, cursor
+position and the alternate screen, with colours, attributes and the modes
+wanted where SwiftTerm 1.99.0's public API exposes them. Found in the
+pinned checkout: `TerminalView` keeps its `Terminal` internal
+(`MacTerminalView.swift`, `var terminal: Terminal!`), and its public
+state snapshot (`terminalStateSnapshot()`, `TerminalViewStateSnapshot`)
+has the rows' text, cell widths, cursor and cursor style but no
+attributes. `Terminal` itself has a public reading API (`getLine`,
+`CharData.attribute` with `fg`, `bg`, `style`, `underlineStyle`,
+`underlineColor`, `buffer.scrollTop`/`scrollBottom`,
+`isCurrentBufferAlternate`, `currentAttribute`), but keeps
+`cursorHidden`, `originMode` and `wraparound` internal (`Terminal.swift`,
+about lines 655–665) and `curAttr` private. Tracking cursor visibility
+through the view's `open` `showCursor(source:)`/`hideCursor(source:)` was
+rejected: a soft reset and `setup` set `cursorHidden` without calling them
+(about lines 1352 and 5746). The terminal hands itself to its view's
+`open` `send(source:data:)` whenever it answers a query, and DECRQM
+(`CSI ? n $ p`) answers for modes 25, 6 and 7 (about line 5520); so the
+surface's view is a `TerminalView` subclass that, for one call, feeds
+those three queries, keeps the answers from the program and reads the
+screen with the terminal it is handed. Output is parsed synchronously on
+the feeding thread (`feedSender.configure`, `AppleTerminalView.swift`
+about line 1417), so the answers arrive inside the call. The first tests
+checked that no answer reached the program right after the call, which
+could not have caught a late one; in review (the same day) they were made
+to wait for a later turn of the main queue, and the reviewer confirmed
+from the code that the terminal answers synchronously and that the one
+asynchronous hop is in the base `send` the override skips. DECRQSS for the pen was rejected: its `m` answer is
+`Attribute.toSgr()`, which leaves out dim, italic, crossed out and the
+underline style, and writes a basic colour as `3n;` with a trailing
+separator, which reads back as a reset (`CharData.swift` about line 135);
+`currentAttribute` is public and exact. Getting at the live screen when
+the user has scrolled back: `getLine` reads from `yDisp` and `yBase` is
+internal, so the view is scrolled to the bottom first. The round trips
+(`ScreenSnapshotTests`) passed at the first run, colours, attributes,
+underline styles and colours, wide characters, emoji with a variation
+selector, a flag and a combining mark included.
+
 **November 14, 2026. `setGridSize(columns:rows:)` and the lazy surface.**
 Added so a session can be attached at its saved size before its pane
 view exists: the surface's grid is set while its view is in no window.
@@ -3625,6 +3778,118 @@ from reading that control commands past ten would be refused.
 
 ## 7. Process plumbing (`ArmadaleSessions`)
 
+**November 24, 2026, second review. A differential test and a
+SwiftTerm quirk.** The reviewer ran a differential test against SwiftTerm
+(54 kinds of token, alone and in seeded mixes, random batches of 1 to 17
+bytes, a recording asked for at every byte offset and handled as the
+controller does, the screen and the titles compared with a control fed
+the same batches with no snapshot): of 3388 offsets 3381 were equal. The
+other 7 are SwiftTerm's: after a RIS inside one parse call it does not
+save its parser state at the end of that call (`EscapeSequenceParser.swift`,
+`reset` about lines 824–830 and the early return about lines 1434–1439),
+so a sequence left open at the end of the same batch is dropped
+(`"ok\ec\e"` then `"[31mC"` prints `[31mC`). With a recording pending
+across a RIS split over two reads, the cut feeds the RIS on its own and
+the following sequence survives: the pane with a recording differs from
+the pane without one, in the right direction. The tracker was left as it
+is (copying a bug would make the recording's pane wrong too); the test is
+in the tree (`RecordingDifferentialTests`), names the case and expects
+it, and is the guard for the next SwiftTerm bump. Fixed the same round:
+a new recording could reopen, emptying it, a file whose earlier writer was
+still finishing, so any writer not yet closed now holds its file; a
+problem alert taken down by its window closing was lost, so it goes back
+to the head of the queue; the licence files say the parser's table is
+adapted, not only linked.
+
+**November 24, 2026, review. Starting inside a sequence; the writer's
+bounds.** The reviewer found that Record confirmed while the program's
+output had stopped inside a sequence (a read ending in `ESC [ 3 8 ; 5 ; 1
+9`, the next starting `6 m R E D`) made the snapshot's DECRQM queries cut
+that sequence short in the live pane and made the recording begin with
+its tail: an SGR split showed `6mRED` as text, an OSC title split set the
+title to "my ti" and printed `tle`, a CUP split printed `0;5Hx`, and a
+4-byte character split was lost in the pane and played back as two
+U+FFFD. Measured by the reviewer on a pty (reads of at most 1024 bytes):
+28 % to 57 % of the batch boundaries of colourful output fall inside a
+sequence or a character, so this is about every second Record on a
+streaming agent. Decided by the coordinator: a pure tracker of where the
+stream stands, fed every byte the surface is fed, and a recording that
+waits for the first point between sequences. To agree with SwiftTerm on
+where a sequence ends, `TerminalStreamTracker` copies SwiftTerm 1.99.0's
+`EscapeSequenceParser.swift`: the transition table
+(`buildVt500TransitionTable`, about lines 326–457, built by the same
+additions in the same order, so CAN does not end a CSI or an escape
+there: their C0 executables were added after the "anywhere" rules), the
+0xA0 column for bytes above it and the `.error` action's handling of
+them (about lines 1222–1240: the CSI-ignore, DCS-ignore and
+DCS-passthrough states keep their state), the ground state's fast path
+that prints every byte from 0x20 on (about line 1175), the OSC and APC
+runs (`oscPut`, about lines 1352–1383, `consumeOscRun`, about lines
+1022–1062: inside a run a 0x9C ends an OSC unless
+`oscExpectsUTF8Continuation`, about lines 891–904, says it continues a
+character; the first byte of a run, at a batch's start too, goes through
+the table), the ESC that ends a string or a DCS passthrough starting an
+escape (`oscEnd`, about lines 1384–1418; `dcsUnhook`), and OSC 7501's
+`programStatusEscape` (`isProgramStatusOsc`, about line 521;
+`finishProgramStatusSt`, about line 1066). Not copied: the 1 MB OSC and
+65 MB APC limits. Measured: about 2.2 µs per kilobyte of colourful output
+in an optimized build after a fast path for runs of text, string payload
+and CSI parameters (3.4 µs without the CSI one), 31 µs in a Debug build;
+the reviewer had measured about 1 µs for a tracker of the same kind. The
+reviewer's five splits are end-to-end tests now.
+The other findings of that review, each fixed the same day: a quit could
+wait without bound on a writer (1 MB to a pipe nobody reads never
+returned), so the quit now waits at most one second in all and the
+writer ends a recording that falls 32 MB behind; a quit could leave a
+file unfinished after a stop, a closed pane, an ended session or End
+Sessions and Quit, because those finish asynchronously, so the registry
+keeps the writers until they are closed and every quit waits for them
+within the same second; a host's removal now ends the recording; the
+`TimelineView` pulse used 3.57 s of CPU in 3 s in the reviewer's test
+window, so it is a Core Animation animation now; decoding and escaping
+cost the main actor 0.88 ms per 64 KB of plain output and 3.4 ms of
+colourful output, so they moved to the writer's queue; U+2028 and U+2029
+were written raw and termcast's player (`TermcastPlayer.swift` line 9,
+`CharacterSet.newlines`) stopped on them, so they are escaped; a failed
+write left half a line (a 1337-byte partial line on a full 4 MB volume),
+so a failed or short write is truncated back to the last whole line.
+
+**November 24, 2026. Recording a pane; termcast not used.** The owner
+asked for a way to record a pane from its context menu, believing that
+SwiftTerm supports recording through termcast. In SwiftTerm 1.99.0 (the
+pinned version; the checkout under
+`~/Library/Developer/Xcode/DerivedData/Armadale-*/SourcePackages/checkouts/SwiftTerm`)
+termcast is only an executable target, `Sources/Termcast`
+(`AsciicastFormat.swift`, `TermcastRecorder.swift`, `TermcastPlayer.swift`,
+`main.swift`), shipped as the `termcast` executable product
+(`Package.swift`, `.executable(name: "termcast", targets: ["Termcast"])`).
+Its types (`AsciicastHeader`, `AsciicastEvent`, `TermcastRecorder`) are
+internal to that tool and are not in the `SwiftTerm` library product
+Armadale links. The recorder starts its own shell with `LocalProcess` and
+forwards the tool's own stdin to it (`TermcastRecorder.swift`, about lines
+92 and 281–340), so it cannot record a terminal that already exists, and
+Armadale owns the PTY anyway (section 5). It also records keystrokes as
+`"i"` events (`TermcastInputHandler.forward`, about lines 30–46), times
+its events with the wall clock (`Date().timeIntervalSince1970`), and
+drops a whole chunk of output when a multi-byte UTF-8 character is split
+across two reads (`String(bytes: slice, encoding: .utf8) ?? ""`, about
+line 394). So
+Armadale writes the same file format itself, asciicast v2, the `.cast`
+format that `termcast playback` and `asciinema play` read: no new
+dependency, and nothing from termcast is copied. Decided with the
+coordinator: output only, never an `"i"` event (a typed password does not
+echo and must not land in a file); UTF-8 decoded across batches with
+U+FFFD for invalid bytes; exactly what the surface is fed, through the
+controller's four `surface.feed` sites made one (`feedSurface`), so a
+reset and a reattach's replay are in the recording as the pane showed
+them; the first event a snapshot of the screen (section 5); writes off the
+main actor, in order, with no backlog bound (the pump only hands over what
+the surface has already rendered); and the quit flushing and closing the
+file synchronously, beside the clients' synchronous hang-up, because a
+quit never waits (section 8, "App lifecycle"). An end-to-end test plays
+the file of a scripted session recorded from its middle on a fresh
+SwiftTerm surface and compares the screen with the pane's, cell by cell.
+
 **November 14, 2026. No pixel-only resizes.** Measured with the real
 helper (a shell that traps WINCH and logs `stty size`, attached through
 `LocalZmxBackend`): an attach at exactly the window size the program has,
@@ -3681,6 +3946,54 @@ notifications from `SessionController` to the app's `AttentionCenter`.
 
 
 ## 8. Windows and views
+
+**November 24, 2026, review. Recording a pane, the window's part.** Fixed
+after the review: a write failure is always told, one at a time and in
+order, on the pane's window or, with that closed, on the next workspace
+window that opens or becomes key (before, it was only logged then, and a
+second one while the alert was up was dropped), and the reason reads as
+a sentence of its own; the header gives way in a fixed order as it
+narrows (directory, title, dot, glyph; the stop button stays with "…"
+until only "…" fits), because at 80 pt the stop button overlapped "…" and
+at 60 pt only red was drawn; the save panel and the alert go up through a
+seam the tests replace, because the save-panel tests had put two windows
+on screen for about a second each (the reviewer found existing tests
+showing about 25 windows the same way; that is an open item in
+HANDOFF); two recordings into one file are refused; the suggested name is
+cut by bytes, since 100 characters of emoji could pass the 255-byte
+limit; the pulse is a Core Animation animation (above, section 7).
+
+**November 24, 2026. Recording a pane (owner's and coordinator's
+decisions).** The owner asked for "a CTA to record the pane in the
+context menu", "a pulsing red to indicate that recording is in progress",
+and "a stop button". Decided by the owner the same day: the pane menu's
+item opens a save sheet each time and the recording starts when it is
+confirmed (no default folder, no preference); the recording pane's header
+shows a pulsing red dot and a stop button; a tab shows a small red dot, in
+the tab bar and in the sidebar's tab row, while any of its panes records
+(a pane keeps recording while its tab is in the background). Decided by
+the coordinator: the words Record Pane…, Stop Recording and Recording; the
+item beside Save as Favorite…, without a shortcut and not in the
+application's Pane menu; the save sheet taken down before a quit like the
+other sheets (AppKit's `terminate:` does nothing while a sheet is
+attached, section 8, "App lifecycle") and when its pane leaves the
+window; the header's controls in the system red with Reduce Motion
+honoured; the tab's dot not a status. The rule for the item's state,
+written down then: Record Pane… is enabled only while the session is
+attached, a client feeding the surface; there is no live terminal to
+record in any other state, so it is shown disabled there. The pulse was
+first drawn from the time alone (`TimelineView`) rather than a repeating
+animation started on appear, because the header's root view is replaced
+on every title or directory change, which can restart or stop an
+animation held in view state; the review replaced it with a Core
+Animation animation on an AppKit view the header keeps (its cost, above). No type is declared in Info.plist for
+`.cast`: a dynamic type made from the extension is what the save panel is
+given (the live check of the panel keeping the extension was not made;
+see Part 1). `scripts/check-quit.sh` was not given a save-sheet scenario:
+its scenarios need no input, and opening the sheet does (the pane menu).
+The quit with the sheet up is unit-tested through
+`AppDelegate.endSheetsForQuit`, first with a real `NSSavePanel`, since the
+review through the presentation seam.
 
 **November 14, 2026, live checks. Floods in sessions not on screen.** The
 reviewer saw a Debug build at about 100 % CPU for minutes with 20 attached
@@ -3857,6 +4170,10 @@ since October 30, 2026.
 
 ### Pane context menu
 
+**November 24, 2026: Record Pane… / Stop Recording.** Added beside Save as
+Favorite…, for a pane that has a session; one separator now follows the
+two. See "Recording a pane" at the top of this section.
+
 **Pane context menu (owner's decisions, October 30, 2026).** The context
 menu, its pure builder `PaneMenu.make(_:actions:)` and the per-pane theme
 were decided and built on October 30, 2026. A pane's theme is one
@@ -3904,6 +4221,15 @@ this). The lighter context menu of a light-themed pane in dark mode was
 accepted as cosmetic in the first version.
 
 ### Pane cards
+
+**November 24, 2026: the recording controls.** A recording pane's header
+shows a pulsing red dot and a stop button between the text and "…"; the
+text space rule counts their 34 pt and the spacing after them, so the
+title and directory truncate first. A test draws a 160 pt header (since
+the review at 140, 100, 80, 60 and 40 pt, with the give-way rule) and
+checks that red is drawn only where the controls are and no text there
+(the accessibility tree of a SwiftUI header is empty in an unhosted test,
+so the picture is read instead).
 
 **Pane cards (design agreed with the owner on October 31, 2026;
 implemented the same day).** The owner noted that recent terminal and

@@ -44,6 +44,12 @@ extension AppDelegate {
             } else {
                 self.attention.keyWorkspaceID = NSApp.keyWindow.flatMap { self.workspaceID(of: $0) }
             }
+            // A problem with a recording waiting for a window (DESIGN §8,
+            // "Recording a pane") is told on the one that became key.
+            if name == NSWindow.didBecomeKeyNotification, let window, let id = self.workspaceID(of: window),
+               let controller = self.windowControllers[id] {
+                self.registry.showNextRecordingProblem(preferring: controller.actions)
+            }
         }
         for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
                      NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {

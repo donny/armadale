@@ -8,7 +8,7 @@ is `docs/DESIGN.md`; why and when (the change log, and the history of
 each design section) is `docs/HISTORY.md`; build and run instructions
 are in `README.md`.
 
-## Status (November 17, 2026)
+## Status (November 24, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
@@ -48,7 +48,10 @@ its public half went into `project.yml`.
 it: build 30 from dc03cc5, tagged `v0.1.2`, on GitHub with the
 notarized DMG, on the changelog page as the latest release and in the
 update feed. It is the build installed on the owner's Mac.**
-The last gate run: 946 tests, no warning from Armadale's code.
+On November 24, 2026 recording a pane was built at the owner's request
+(the status list and "From finished changes" below): committed, not
+released, and not checked live yet.
+The last gate run: 1009 tests, no warning from Armadale's code.
 What each change was, how it was checked and what was found on the way
 is in `docs/HISTORY.md`.
 
@@ -73,10 +76,20 @@ under it, their commits:
   released on GitHub, on the changelog page and in the update feed
   (f1e0fca); its state fixture (`docs/HISTORY.md`, "Armadale 0.1.2,
   released"). No app code changed since the build.
+- November 24, 2026: recording a pane (Record Pane… / Stop Recording in
+  the pane menu, an asciicast v2 `.cast` file of the pane's output, a
+  pulsing red dot and a stop button in the header, a red dot on the tab;
+  `docs/HISTORY.md`, "recording a pane"). Built, reviewed twice and
+  fixed; the gate passed with 1009 tests; not checked live ("From
+  finished changes" below).
 
 ## Next
 
-Nothing is being built. 0.1.2 is released with everything the owner
+Recording a pane (the owner's request of November 24, 2026) is built,
+reviewed, fixed and committed, and waits for its live check (the first
+one stopped at a macOS screen-capture alert for the Claude app, left
+for the owner; the reviewer's own was not started while that alert was
+up). 0.1.2 is released with everything the owner
 gave the go-ahead for up to November 17, 2026 (`docs/HISTORY.md`,
 "Armadale 0.1.2, released"); "From finished changes" below has what
 was not checked live. From now on a change a user would notice adds
@@ -126,6 +139,14 @@ Known, accepted for now, and worth a round of their own. None is a
 regression; each came out of a review and was deferred as low.
 
 Session layer
+- A SwiftTerm quirk worth reporting upstream (the owner decides whether
+  to): after a RIS inside one parse call SwiftTerm 1.99.0 does not save
+  its parser state at the end of that call (`EscapeSequenceParser.swift`,
+  about lines 824–830 and 1434–1439), so a sequence left open at the end
+  of the same batch is dropped: `"ok\ec\e"` then `"[31mC"` prints `[31mC`
+  in any pane. A pending recording's cut makes the pane right in that
+  case (`docs/DESIGN.md` section 13; `RecordingDifferentialTests`
+  expects it).
 - Keystrokes typed during a flood-triggered reattach are dropped
   (`SessionController`, around the reattach path), so a ^C pressed at that
   moment is lost.
@@ -232,6 +253,14 @@ Session layer
   save attempt at all, not looked into).
 
 Hierarchy and UI
+- Some unit tests put windows on screen. `ArmadaleAppTests` is unhosted,
+  but tests that present a sheet or an alert on a test window (found in
+  review on November 24, 2026: `NewSessionChooserTests`,
+  `NotifyHelperTests`, about 25 windows in a gate run, each for about a
+  second) show it, so README's "no window appears" is not true. The
+  recording tests use a presentation seam
+  (`WorkspaceActions.recordPanelPresenter`) and show nothing; the others
+  could do the same.
 - One SIGWINCH reaches a full-screen program at every attach, a
   relaunch included, whatever the size: the persistence helper sends
   it to a program on the alternate screen, and it cannot be removed on
@@ -384,6 +413,30 @@ Shipping (step 9)
   (dcdeb50, 704a941); 0.1.2 has both.
 
 From finished changes: not checked live, and found and not fixed
+- Recording a pane (November 24, 2026; `docs/DESIGN.md` sections 5, 7
+  and 8, "Recording a pane"). **Not checked live**: at the first
+  screenshot of the test build's window macOS put up an alert for the
+  Claude app ("requesting to bypass the system private window picker",
+  Allow / Open System Settings) that took the front; the live check
+  stopped there, with no input sent, and the alert was left for the owner
+  (`HANDOFF.local.md`). `scripts/check-quit.sh` passed on the final
+  build. Not seen: Record Pane… disabled before attach and enabled
+  after, and its absence on an empty pane; the save sheet's suggested
+  name, `.cast` kept with no extension typed and with `.txt`, replacing a
+  file, a read-only folder; ⌘Q, the Quit item and SIGTERM with the sheet
+  up (unit-tested through `endSheetsForQuit` and a presentation seam; the
+  hook from `terminate` is not); the dot pulsing (Core Animation), still
+  pulsing after a title change, steady with Reduce Motion; the app's CPU
+  with a recording pane visible, minimized, hidden; the stop button and
+  the menu's Stop Recording; the tab's dot in the tab bar and the
+  sidebar, in the background, its accessibility text; a recording of
+  streaming coloured output and one at a shell prompt, parsed and played
+  back (no `asciinema` or `termcast` here); a quit and End Sessions and
+  Quit with a recording running; a host's removal; a full small volume;
+  the problem alert on a real window; VoiceOver. Covered by tests
+  instead: recording through the real persistence helper across a
+  reattach, five recordings started inside a sequence with the pane
+  undisturbed and playback equal to it, the quit's bounded wait.
 - The updater (November 16, 2026; `docs/DESIGN.md` section 8,
   "Updates"). Checked live the same night on ad hoc signed test builds
   with their own bundle identifier, a throwaway key and a feed on

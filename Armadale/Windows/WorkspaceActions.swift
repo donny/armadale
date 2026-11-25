@@ -127,6 +127,18 @@ final class WorkspaceActions {
     /// Ends the sheet when what it is about goes away.
     private var sheetWatch: Task<Void, Never>?
 
+    /// The Record Pane… save sheet that is up, if one is
+    /// (``recordPane(session:)``, WorkspaceActions+Recording.swift).
+    var recordSheet: RecordSheet?
+    /// The alert about a recording (it could not start, or stopped) that
+    /// is up as a sheet, if one is, and what to call when it goes (with
+    /// whether the next one may be shown).
+    var recordingAlert: (alert: NSAlert, onEnd: (Bool) -> Void)?
+    /// Shows the Record Pane… save panel as a sheet on a window and calls
+    /// back with its answer; takes it down. Replaced in tests, which show
+    /// nothing (as ``PaneHeaderHostingView/presentMenu`` is).
+    var recordPanelPresenter = RecordPanelPresenter.sheet
+
     /// The pane whose New Session sheet is up, if one is.
     var newSessionPane: PaneID? {
         if case .newSession(let pane)? = newSessionForm?.mode { pane } else { nil }

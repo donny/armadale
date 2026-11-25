@@ -6,7 +6,11 @@ The license texts are reproduced as their terms require.
 ## SwiftTerm
 
 The SwiftTerm renderer (https://github.com/migueldeicaza/SwiftTerm) is
-linked into Armadale. MIT License:
+linked into Armadale. The transition table of its escape sequence parser
+(`EscapeSequenceParser.swift`, SwiftTerm 1.99.0) is also adapted in
+Armadale's session code, in
+`Packages/ArmadaleSessions/Sources/ArmadaleSessions/TerminalStreamTracker.swift`.
+MIT License:
 
 ```
 Copyright (c) 2019-2026 Miguel de Icaza (https://github.com/migueldeicaza)

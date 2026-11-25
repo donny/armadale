@@ -519,6 +519,44 @@ final class SessionControllerZmxTests {
         #expect(sandbox.listedNames.isEmpty)
     }
 
+    /// A recording through a real session (docs/DESIGN.md section 7,
+    /// "Recording a pane"): what the shell prints, then a dead client's
+    /// reattach (a reset and the helper's replay, as the pane shows them),
+    /// then more output; the file is closed when the pane closes.
+    @Test func aRecordingHoldsTheReplayOfAReattach() async throws {
+        let surface = RecordingSurface()
+        let session = sandbox.session()
+        let controller = makeController(session, surface: surface)
+        await controller.start(.create)
+        #expect(await eventually { surface.text.contains(ZmxSandbox.prompt) })
+        let url = FileManager.default.temporaryDirectory.appending(path: "armadale-zmx-\(UUID().uuidString).cast")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try controller.startRecording(to: url, title: "zmx")
+        surface.delegate?.surface(surface, didInput: Array("echo recorded-$((6*7))\r".utf8))
+        #expect(await eventually { surface.text.contains("recorded-42") })
+        let pids = try clientPIDs(of: session)
+        for pid in pids { kill(pid, SIGKILL) }
+        #expect(try await eventually {
+            let now = try self.clientPIDs(of: session)
+            return now.count == 1 && now != pids
+        })
+        #expect(await eventually { controller.state == .attached && surface.textSinceReset.contains("recorded-42") })
+        #expect(controller.isRecording, "a reattach does not end it")
+        surface.delegate?.surface(surface, didInput: Array("echo after-$((2+3))\r".utf8))
+        #expect(await eventually { surface.text.contains("after-5\r\n") })
+        await controller.close()
+        let writer = try #require(controller.recordingWriter)
+        await writer.drained()
+        #expect(writer.isClosed)
+        let file = try CastFile(url)
+        let output = file.output
+        #expect(file.events.allSatisfy { $0.code == "o" || $0.code == "r" })
+        #expect(output.contains("recorded-42"))
+        let reset = try #require(output.range(of: "\u{1b}c"), "the reset before the replay")
+        #expect(output[reset.upperBound...].contains("recorded-42"), "the replay")
+        #expect(output[reset.upperBound...].contains("after-5"))
+    }
+
     /// One second of `yes` against a renderer that cannot keep up. zmx's
     /// client buffers without limit, so without help the pane would work
     /// through the backlog for a minute or more while the client grows; the

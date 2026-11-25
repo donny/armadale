@@ -37,6 +37,19 @@ public protocol TerminalSurface: AnyObject {
     func find(_ query: String, direction: FindDirection)
     /// The selected text, if any.
     var selectedText: String? { get }
+    /// Bytes that, fed to a fresh terminal of the same grid size, reproduce
+    /// what this one shows now on its live screen (scrolled to the bottom
+    /// first, should the user have scrolled back): the text with its
+    /// colours and attributes (wide characters, emoji and combining marks
+    /// included), whether the alternate screen is active, the cursor's
+    /// position and visibility and, where the renderer can tell, the
+    /// scroll region, origin and wraparound modes and the current pen.
+    /// Scrollback is not included. A recording of the pane starts with it,
+    /// so a program that redraws by moving the cursor relative to what is
+    /// on screen plays back right (DESIGN §5, §7). Anything the renderer
+    /// answers to its own status queries while taking it never reaches the
+    /// program.
+    func screenSnapshot() -> [UInt8]
 }
 
 /// The text cursor's visibility, set the way a program sets it: DECTCEM
