@@ -8,7 +8,7 @@ is `docs/DESIGN.md`; why and when (the change log, and the history of
 each design section) is `docs/HISTORY.md`; build and run instructions
 are in `README.md`.
 
-## Status (November 25, 2026)
+## Status (November 26, 2026)
 
 Steps 1–10 of the build order (`docs/DESIGN.md` §12) are implemented,
 reviewed and committed on `main`. Armadale 0.1.0 (tag `v0.1.0`, October
@@ -47,7 +47,7 @@ its public half went into `project.yml`.
 **The same day Armadale 0.1.2 was released, with everything above in
 it: build 30 from dc03cc5, tagged `v0.1.2`, on GitHub with the
 notarized DMG, on the changelog page as the latest release and in the
-update feed. It is the build installed on the owner's Mac.**
+update feed.**
 On November 24, 2026 recording a pane was built at the owner's request
 (the status list below): committed, checked live the same evening on a
 test build ("From finished changes" below has what is left), not
@@ -82,12 +82,14 @@ under it, their commits:
   released on GitHub, on the changelog page and in the update feed
   (f1e0fca); its state fixture (`docs/HISTORY.md`, "Armadale 0.1.2,
   released"). No app code changed since the build.
-- November 24, 2026: recording a pane, f127458 (Record Pane… / Stop Recording in
-  the pane menu, an asciicast v2 `.cast` file of the pane's output, a
-  pulsing red dot and a stop button in the header, a red dot on the tab;
-  `docs/HISTORY.md`, "recording a pane"). Built, reviewed twice, checked
-  live and fixed after each; the gate passes with 1019 tests ("From
-  finished changes" below has what was not seen live).
+- November 24, 2026: recording a pane, f127458 (Record Pane… / Stop
+  Recording in the pane menu and an asciicast v2 `.cast` file of the
+  pane's output; its marks, as built that day a pulsing red dot and a
+  stop button in the header and a red dot on the tab, were changed on
+  November 25, below; `docs/HISTORY.md`, "recording a pane"). Built,
+  reviewed twice, checked live and fixed after each; the gate passed
+  with 1019 tests then ("From finished changes" below has what was not
+  seen live).
 - November 24, 2026: a tab in the tab bar answers an accessibility
   press by selecting its tab, and has a Rename action, 72e38d8 (`docs/HISTORY.md`,
   "the tab bar's tabs answer an accessibility press"). Checked live by
@@ -108,6 +110,9 @@ under it, their commits:
   fewer red marks in it; not tagged, not on GitHub, not in the update
   feed (`docs/HISTORY.md`, "Armadale 0.1.3 (32), built and notarized,
   not published").
+- November 26, 2026: the documents read through and corrected where
+  they no longer said what is true; no code changed (`docs/HISTORY.md`,
+  "the documents, read through").
 
 ## Next
 
@@ -124,6 +129,16 @@ release" section (AGENTS.md, "The changelog page"). What comes next
 waits for the owner.
 
 Waiting for owner decisions:
+- **Releasing 0.1.3.** Recording a pane and the tab bar's accessibility
+  press are on `main` and under "Next release" on the changelog page.
+  When to release is the owner's; the build has to be made on the Mac
+  that holds the update key, and its build number has to be above 32
+  (the local builds of November 25, 2026 used 31 and 32).
+- **Two things only a person at the keyboard can check in recording a
+  pane** ("From finished changes" below): whether a "/" typed by hand
+  into the save sheet confirms it, and the dot with Reduce Motion on.
+- **Reporting SwiftTerm's quirk after a reset upstream** (open items,
+  Session layer).
 - **Three decisions the coordinator made on the changelog page**
   (November 16, 2026), each the owner's to overrule: the page shows
   what is on `main` and not yet released, under "Next release"; 0.1.0
@@ -149,8 +164,10 @@ Waiting for owner decisions:
 - **The updater: what is left** (released with 0.1.2;
   `docs/DESIGN.md` section 8, "Updates"). (1) An update between
   Developer ID signed builds can only be seen with the next release:
-  check the first update after 0.1.2 on a copy of 0.1.2 (the owner's
-  installed one is such a copy) before telling anyone. (2) The update
+  check the first update after 0.1.2 on a copy of 0.1.2 before telling
+  anyone (the released DMG is such a copy; an installed 0.1.3 built
+  with `--skip-update-signature` is not, and has a higher build number
+  than the feed's 0.1.2). (2) The update
   key's backup and its import on a second Mac are the owner's (README,
   "Releasing").
 - **An `SMAppService` prototype**, optional ("Decisions pending"
@@ -290,10 +307,10 @@ Hierarchy and UI
   but tests that present a sheet or an alert on a test window (found in
   review on November 24, 2026: `NewSessionChooserTests`,
   `NotifyHelperTests`, about 25 windows in a gate run, each for about a
-  second) show it, so README's "no window appears" is not true. The
-  recording tests use a presentation seam
-  (`WorkspaceActions.recordPanelPresenter`) and show nothing; the others
-  could do the same.
+  second) show it. README and DESIGN section 11 said no window appears;
+  they say what happens since November 26, 2026. The recording tests
+  use a presentation seam (`WorkspaceActions.recordPanelPresenter`) and
+  show nothing; the others could do the same.
 - One SIGWINCH reaches a full-screen program at every attach, a
   relaunch included, whatever the size: the persistence helper sends
   it to a program on the alternate screen, and it cannot be removed on
@@ -455,8 +472,11 @@ From finished changes: not checked live, and found and not fixed
   and 8, "Recording a pane"). Checked live the same evening on a test
   build with a bundle identifier of its own, by accessibility presses
   and window screenshots (`docs/HISTORY.md`, "recording a pane", has
-  everything that was seen). Not seen live: the dot steady with Reduce
-  Motion (the owner's setting was left alone); VoiceOver itself (the
+  everything that was seen), and again on November 25 after its marks
+  were cut to two ("fewer red marks while recording"). Not seen live:
+  the dots steady with Reduce Motion (the owner's setting was left
+  alone); the pulse starting again after an unhide or a change of the
+  window's occlusion (unit-tested); VoiceOver itself (the
   accessibility labels were read); a recording of a real agent session
   (none was signed in to: a flood of coloured output and `top` stood
   in); a host's removal ending a recording, and a recording through a

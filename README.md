@@ -18,7 +18,10 @@ running sessions; step 9 is Developer ID signing and
 `scripts/release.sh`, which builds a notarized, stapled DMG (see
 [Releasing](#releasing)); step 10 is the New Session chooser. Since
 0.1.2 Armadale updates itself ([Updates](#updates)); there is no crash
-reporting in v1.
+reporting in v1. `main` is ahead of the release: what it holds that is
+not released yet is under "Next release" on the
+[changelog page](https://armadale.dev/changelog.html)
+(`docs/changelog.html`).
 Where development stands, what is next and the open items are in
 [HANDOFF.md](HANDOFF.md); what is true of the design now is in
 [docs/DESIGN.md](docs/DESIGN.md), and why and when in
@@ -137,7 +140,8 @@ xcodebuild -project Armadale.xcodeproj -scheme Armadale \
 
 # Run every package's tests through the app scheme
 xcodebuild -project Armadale.xcodeproj -scheme Armadale \
-  -destination 'platform=macOS' -skipPackagePluginValidation test
+  -destination 'platform=macOS' -skipPackagePluginValidation \
+  -onlyUsePackageVersionsFromResolvedFile test
 
 # Or test a single package
 (cd Packages/ArmadaleCore && swift test)
@@ -147,9 +151,15 @@ xcodebuild -project Armadale.xcodeproj -scheme Armadale \
 real SwiftTerm surfaces, close-confirmation rule, window controller
 lifetime, preferences, themes, the shortcut table, settings applied to
 open panes, the renderer switch, the Settings window, attention and
-notifications with a fake notification service, and the `armadale-notify`
-helper on a pseudo-terminal). It is unhosted: the app's sources are compiled into the bundle,
-so the app never launches, no window appears and no process is started.
+notifications with a fake notification service, the `armadale-notify`
+helper on a pseudo-terminal, recording a pane, the updater's decisions
+and the feed, and the form of the changelog page). It is unhosted: the
+app's sources are compiled into the bundle, so the app itself never
+launches, and the user's state file and sessions are never touched. It
+is not invisible,
+though: tests that present a sheet or an alert on a test window put that
+window on screen for about a second, and the notify helper's tests start
+that helper (HANDOFF.md, open items).
 
 `ArmadaleSessions` tests spawn real processes on PTYs (zsh and bare
 binaries) through the `ctty-exec` helper, so they need no mocks for the I/O
@@ -159,7 +169,7 @@ path. Its zmx integration tests run the real, pinned zmx from
 the sessions it creates and removes the directory, and the suite's teardown
 kills anything left behind. If the binary is missing, the tests run
 `scripts/fetch-zmx.sh` once and otherwise fail with a message saying to run
-it. The whole package takes about 15 s.
+it. The whole package takes about a minute.
 
 Dependency versions are locked in
 `Armadale.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.

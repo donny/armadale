@@ -54,6 +54,13 @@ loop, and it has worked well:
    `Step N: …` on `main` with no Claude attribution (no `Co-Authored-By`
    trailer, no "Generated with" line), pushes, and notifies the owner.
 
+A change of a few lines (a fix a live check turned up, a flag on a
+script, an accessibility action) has been made by the coordinating
+session itself, on the owner's go-ahead for it: the gate, the documents
+and, where it shows on screen, a live check apply all the same, and its
+Part 1 entry in `docs/HISTORY.md` says who made it and that no separate
+reviewer read it.
+
 The owner wants to give the go-ahead before each step starts, and
 sometimes runs other UI-driving agents on this Mac. Ask before starting a
 step; pause immediately if asked. When work pauses, update `HANDOFF.md`:
@@ -180,7 +187,11 @@ under the app's `AXExtrasMenuBar` without the menu being open), and
 `NSRunningApplication(processIdentifier:)?.terminate()` sends one
 process the quit event that ⌘Q's question answers. The main menu's
 items answer a press too, also in menu bar mode and while an alert is
-up, but find a menu item by its exact title, never by a part of it:
+up, but not while the app is in the background with no key window
+(opened with `open -g`): the press reports success and nothing happens,
+because the item's action goes up a responder chain that starts
+nowhere; buttons inside the window do work there (November 24, 2026).
+Find a menu item by its exact title, never by a part of it:
 the Apple menu is in every app's menu bar, and a press meant for
 Armadale's Settings… landed on System Settings… and opened System
 Settings (November 16, 2026). Never type into an open or save panel: a
@@ -206,7 +217,20 @@ name -only pid "$(lsappinfo front)"` gives the frontmost app and its
 pid with no permission at all; with several test builds running the
 name is not enough (all are "Armadale"), so compare the pid too.
 Synthetic keystrokes reset `HIDIdleTime`, so the idle gate only means
-something before the first one.
+something before the first one. Check the grants before briefing an
+agent for live work (`AXIsProcessTrusted()`,
+`CGPreflightPostEventAccess()` and `CGPreflightScreenCaptureAccess()`
+prompt for nothing): on a Mac without them two rounds of agents went by
+with no live check (November 24, 2026). The first window screenshot can
+raise one more system alert, for the Claude app ("requesting to bypass
+the system private window picker"), which comes to the front and which
+only the owner answers: take one probe screenshot before the first
+input, and stop if any window owned by UserNotificationCenter is on
+screen. And "the Mac is free" has to include the Claude desktop app:
+the owner reading or typing in the session brings Claude to the front,
+and the frontmost check then ends the pass, so ask for a window in which
+that app is left alone too, and say that the pass starts after three
+idle minutes.
 
 **Isolation for test runs.** Launch with `ARMADALE_STATE_DIR=/tmp/armadale-<name>`
 (a short path: Unix socket paths are limited to 104 bytes) and
@@ -326,7 +350,8 @@ same section.
   that is signed and notarized but is no update anyone could be offered.
   Never store or print credentials; never create keychain profiles
   on the owner's behalf, and never run Sparkle's `generate_keys` on a Mac
-  that lacks the update key: it would make a different one. A release run deletes `build/release/`, takes
+  that lacks the update key: it would make a different one. A release
+  run deletes `build/release/`, takes
   several minutes and submits to Apple, so do not run it casually; the
   Debug gate never touches the keychain. Running the Release app for a
   check (`check-quit.sh` against it) is live UI testing.

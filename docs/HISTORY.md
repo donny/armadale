@@ -3341,6 +3341,42 @@ and not in the update feed.** Only the build number rose.
   Developer ID"; `stapler validate` worked. It was not launched:
   Armadale was not running and had no sessions.
 
+## November 26, 2026: the documents, read through
+
+On the owner's word ("take a look at the docs and various markdown
+files, and update them if needed"), by the coordinator: every tracked
+document was checked against the code and the work of the three days
+before. No code changed.
+
+- **README.** It says that `main` is ahead of the release and where
+  the unreleased work is listed; the test command carries
+  `-onlyUsePackageVersionsFromResolvedFile`, as the gate does; the
+  sessions package's tests take about a minute, not 15 s; and the app
+  tests are no longer said to show no window and start no process
+  (HANDOFF's open item has what they show).
+- **DESIGN.** Section 11's paragraph on the app tests says the same and
+  names the tests added since it was written (the updater, the feed,
+  the last quit, the changelog page); its layout names `LastQuit` with
+  `AppDelegate+LastQuit`, missing there since November 14, and
+  `WindowChrome`; section 8 says where a tab's "Recording" is for
+  assistive tools with the dot shown and not shown.
+- **AGENTS.** A main menu item pressed through accessibility does
+  nothing while the app is in the background with no key window (the
+  rule had said such a press is always answered); the grants are
+  checked before agents are briefed for live work; the first window
+  screenshot can raise a system alert that only the owner answers;
+  "the Mac is free" includes the Claude app; and what the coordinating
+  session has done itself for a change of a few lines.
+- **HANDOFF.** The status no longer says which build is installed on a
+  Mac (that is `HANDOFF.local.md`'s to say); what waits for the owner
+  gained releasing 0.1.3, the two checks only a person can make in
+  recording a pane, and the report to SwiftTerm; the updater's item no
+  longer counts on an installed 0.1.2.
+- **Read and left as they are:** CONTRIBUTING.md,
+  THIRD_PARTY_LICENSES.md and the acknowledgements,
+  `scripts/state-fixtures/README.md`, the site's front page and the
+  changelog page.
+
 ---
 
 # Part 2: the history of each design section

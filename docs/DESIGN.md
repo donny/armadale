@@ -2199,8 +2199,10 @@ WorkspaceWindowController (NSWindowController, one per open workspace;
   confirmation; double-click or the context menu's Rename Tab edits the
   title in place; the context menu also has Close Tab, Close Other Tabs.
   For accessibility a tab is one button, as a sidebar row is (section 1,
-  "Sidebar semantics"): its text is the status, the title, "Recording"
-  while a pane records and the shortcut; its default action selects the
+  "Sidebar semantics"): its text is the status, the title and the
+  shortcut, with "Recording" while a pane records (in the text when the
+  dot shows, as the tab's accessibility value when it does not:
+  "Recording a pane" below); its default action selects the
   tab, as a click does, and Rename is its other action
   (`TabItemView`'s `accessibilityAction`s). While its rename field is up
   its children stay separate, so the field can be reached.
@@ -4367,12 +4369,15 @@ armadale/
 │   │                                MainMenu, MenuBarMode (QuitDecision, UpdateQuitDecision,
 │   │                                MenuBarText, MenuBarStatusItem, AppActivation: quitting and
 │   │                                menu bar mode), InstanceLock (a second process on one state
-│   │                                directory), Updates (AppUpdater, UpdaterPolicy,
+│   │                                directory), LastQuit (the record a quit leaves and the check
+│   │                                at the next launch) with AppDelegate+LastQuit (sessions macOS
+│   │                                ended after a quit), Updates (AppUpdater, UpdaterPolicy,
 │   │                                UpdateCoordinator, UpdateQuitGate, UpdateSettings, UpdateText)
 │   │                                with AppDelegate+Updates, SparkleUpdater (the only file that
 │   │                                imports Sparkle; not in ArmadaleAppTests)
 │   ├── Windows/                     WorkspaceWindowController, WorkspaceActions (+Recording: the
-│   │                                Record Pane… save sheet and its alert), InlineRename,
+│   │                                Record Pane… save sheet and its alert; WindowChrome: whether
+│   │                                the window's sidebar is showing), InlineRename,
 │   │                                ContentViewController (+ PaneContainerView),
 │   │                                FullScreenSerializer, WindowGeometry (saved frames and screens)
 │   ├── Sidebar/                     SidebarView (SwiftUI)
@@ -4474,10 +4479,16 @@ armadale/
   SSH transport) and panes of sessions attached at their saved size
   (`SavedGridPaneTests`, `RelaunchResizeTests`); the instance lock, the launch's load and save safety, window
   geometry and the full-screen serializer; the acknowledgements file; and
-  the DMG's layout and background. It is unhosted: it compiles the app's sources (all
-  but `main.swift`) into the test bundle, so the app never launches, no
-  window is shown, no state file is touched, and an inert backend starts
-  no process.
+  the DMG's layout and background; the updater's decisions and the feed
+  (`UpdatesTests`, `AppcastTests`), the last quit's record
+  (`LastQuitTests`) and the form of the changelog page
+  (`ChangelogPageTests`). It is unhosted: it compiles the app's sources (all
+  but `main.swift`) into the test bundle, so the app itself never
+  launches, no state file of the user's is touched, and an inert backend
+  starts no session. It is not invisible: a test that presents a sheet
+  or an alert on a test window puts that window on screen for about a
+  second (the recording tests go through a presentation seam and show
+  nothing), and the notify helper's tests start that helper.
 - `ArmadaleSessions` has integration tests that spawn a real local zmx
   session, kill it, and assert the state machine. The remote backend is
   tested three ways: with a scripted `FakeTransport` (command lines,
